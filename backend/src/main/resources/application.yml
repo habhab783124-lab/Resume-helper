@@ -10,6 +10,23 @@ spring:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+  web:
+    resources:
+      # 前端静态文件的位置，按顺序查找。
+      #
+      # 最后两项是给「单进程演示」用的：把 frontend/dist 的内容拷到 jar 同级的 webapp/ 目录，
+      # 然后一条 `java -jar` 就能同时提供前端页面和后端接口。
+      # 这样演示机器上**不需要 Node、不需要 Maven、不需要联网**，只要有 JDK 17。
+      # 前后端还同源，连 vite 代理和 CORS 都不用配。
+      #
+      # 开发时保留 frontend/dist 这一项，方便本地直接跑打包版。
+      static-locations:
+        - classpath:/META-INF/resources/
+        - classpath:/resources/
+        - classpath:/static/
+        - classpath:/public/
+        - file:./webapp/
+        - file:./frontend/dist/
 
 app:
   job:
@@ -21,6 +38,17 @@ app:
     explain-top-n: 5
     # 前端的岗位页一次最多取多少条
     max-limit: 50
+    cors:
+      # 允许跨域的前端来源，支持通配符。
+      # 本地开发走 vite 代理时用不到它；前端部署到公网后**必须**把域名加进来，
+      # 否则浏览器预检会失败（HTTPS 页面也没法请求 HTTP 后端，那是混合内容拦截）。
+      #
+      # 例如部署到 Vercel 后追加：
+      #   - https://resume-helper-two.vercel.app
+      #   - https://*.vercel.app
+      allowed-origin-patterns:
+        - http://localhost:*
+        - http://127.0.0.1:*
     sources:
       # 内置演示岗位库：外部来源不可用时的兜底，保证岗位页永远有内容
       mock-enabled: true

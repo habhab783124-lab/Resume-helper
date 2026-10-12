@@ -7,6 +7,21 @@ dist/
 dist-ssr/
 *.local
 
+# 环境变量文件：可能含真实 API Key、数据库密码，**绝不能提交**
+# .env.example 是给人看的模板（只有占位符），要保留在仓库里，所以单独放行
+.env
+.env.*
+!.env.example
+
+# 密钥与证书：宁可多忽略，也别误提交
+*.pem
+*.key
+*.p12
+*.jks
+*.keystore
+id_rsa*
+*.ppk
+
 # ZIP packages
 *.zip
 
