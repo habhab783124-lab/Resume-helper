@@ -54,6 +54,11 @@ public final class OpenAiCompatibleAiClient implements AiClient {
 
     @Override
     public String chat(String systemPrompt, String userPrompt) {
+        return chat(systemPrompt, userPrompt, config.getTimeoutSeconds());
+    }
+
+    @Override
+    public String chat(String systemPrompt, String userPrompt, int timeoutSeconds) {
         String url = endpoint();
 
         ObjectNode body = mapper.createObjectNode();
@@ -72,7 +77,7 @@ public final class OpenAiCompatibleAiClient implements AiClient {
         HttpRequest request;
         try {
             request = HttpRequest.newBuilder(URI.create(url))
-                    .timeout(Duration.ofSeconds(Math.max(5, config.getTimeoutSeconds())))
+                    .timeout(Duration.ofSeconds(Math.max(5, timeoutSeconds)))
                     .header("Content-Type", "application/json; charset=UTF-8")
                     .header("Authorization", "Bearer " + credentials.apiKey())
                     .header("Accept", "application/json")
@@ -86,7 +91,7 @@ public final class OpenAiCompatibleAiClient implements AiClient {
         try {
             response = HTTP.send(request, HttpResponse.BodyHandlers.ofString(StandardCharsets.UTF_8));
         } catch (HttpTimeoutException e) {
-            throw new AiException("大模型调用超时（" + config.getTimeoutSeconds() + " 秒）", true, e);
+            throw new AiException("大模型调用超时（" + Math.max(5, timeoutSeconds) + " 秒）", true, e);
         } catch (IOException e) {
             throw new AiException("无法连接大模型服务，请检查网络或 base-url", true, e);
         } catch (InterruptedException e) {

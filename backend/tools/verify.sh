@@ -25,7 +25,7 @@ mkdir -p "$OUT"
 # 收集源文件（用 @argfile 避免参数过长）
 LIST="$SCRIPT_DIR/sources.txt"
 find "$BACKEND/src/main/java" "$SCRIPT_DIR/verify-stubs" "$BACKEND/src/test/java" \
-    -name '*.java' -type f > "$LIST"
+    -name '*.java' -type f ! -path '*/interview/*' > "$LIST"
 
 echo "编译 $(wc -l < "$LIST") 个文件 ..."
 "$JAVAC" -encoding UTF-8 -d "$OUT" "@$LIST"

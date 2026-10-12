@@ -2,8 +2,18 @@ server:
   # 支持用环境变量覆盖，例如本机 8080 被占用时：
   #   $env:SERVER_PORT=8081 ; mvn spring-boot:run
   port: ${SERVER_PORT:8080}
+  servlet:
+    session:
+      timeout: 1d
+      cookie:
+        http-only: true
+        same-site: lax
 
 spring:
+  servlet:
+    multipart:
+      max-file-size: 5MB
+      max-request-size: 6MB
   application:
     name: resume-helper-backend
   jackson:
@@ -57,8 +67,8 @@ app:
       csv-location: classpath:jobs/sample-jobs.csv
     ai:
       # 默认指向 DeepSeek 的 OpenAI 兼容端点；换成通义/豆包/自建网关只需改 base-url
-      base-url: https://api.deepseek.com/v1
-      model: deepseek-chat
+      base-url: ${AI_BASE_URL:https://api.deepseek.com/v1}
+      model: ${AI_MODEL:deepseek-chat}
       # 服务端兜底密钥。留空表示「必须由前端携带用户自己的 token」。
       # 注意：不要把真实密钥提交到仓库，用环境变量注入。
       api-key: ${AI_API_KEY:}

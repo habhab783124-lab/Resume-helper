@@ -33,6 +33,7 @@ $files = @()
 $files += (Get-ChildItem -Path (Join-Path $backend 'src\main\java') -Recurse -File -Filter *.java).FullName
 $files += (Get-ChildItem -Path (Join-Path $backend 'tools\verify-stubs') -Recurse -File -Filter *.java).FullName
 $files += (Get-ChildItem -Path (Join-Path $backend 'src\test\java') -Recurse -File -Filter *.java).FullName
+$files = @($files | Where-Object { $_ -notmatch '[\\/]interview[\\/]' })
 
 Write-Host "编译 $($files.Count) 个文件 ..."
 & $javac -encoding UTF-8 -d $out $files 2>&1 | Out-String -Width 400 | Write-Host

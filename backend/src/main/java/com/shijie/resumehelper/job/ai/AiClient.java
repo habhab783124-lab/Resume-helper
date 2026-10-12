@@ -25,6 +25,14 @@ public interface AiClient {
      */
     String chat(String systemPrompt, String userPrompt);
 
+    /**
+     * 指定超时（秒）的单轮补全，供连通性检查这类短请求使用。
+     * 默认退回无超时参数的版本；真正发请求的实现按需覆盖。
+     */
+    default String chat(String systemPrompt, String userPrompt, int timeoutSeconds) {
+        return chat(systemPrompt, userPrompt);
+    }
+
     /** 模型标识，用于在智能体执行轨迹里展示，不包含密钥。 */
     default String name() {
         return "ai";

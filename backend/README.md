@@ -1,7 +1,7 @@
 # 拾阶求职工作台 · Java 后端
 
 对应产品方案《AI求职与面试平台_20天课程项目方案.md》。当前已实现 **功能二：岗位来源与匹配（岗位检索智能体）**，
-其余模块（个人资料 / 材料解析 / 简历生成 / 模拟面试）由队友按同一套约定补齐。
+另已实现简历上传解析和文字模拟面试（不含 TTS／报告），见 [文字面试接口与接入](docs/文字面试接口与接入.md)。个人资料管理和简历生成仍待补齐。
 
 ---
 
@@ -60,7 +60,7 @@ powershell -ExecutionPolicy Bypass -File tools\verify.ps1
 mvn -q test-compile exec:java
 ```
 
-它会用 JDK 自带的 `javac` 编译全部 75 个源文件（Spring/Jackson 由 `tools/verify-stubs` 打桩替代），
+它会用 JDK 自带的 `javac` 编译岗位模块及其自检（Spring/Jackson 由 `tools/verify-stubs` 打桩替代；不含依赖 PDFBox/POI 的面试模块），
 然后跑 **102 项断言**：薪资解析、技能误命中防护、CSV 引号、粘贴 JD 抽取、智能体全链路、
 匹配打分与差距报告、存储与收藏，以及**服务层响应契约**（控制器真正走的那条路）。
 
