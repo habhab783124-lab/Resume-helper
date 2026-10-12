@@ -1,0 +1,43 @@
+server:
+  # 支持用环境变量覆盖，例如本机 8080 被占用时：
+  #   $env:SERVER_PORT=8081 ; mvn spring-boot:run
+  port: ${SERVER_PORT:8080}
+
+spring:
+  application:
+    name: resume-helper-backend
+  jackson:
+    default-property-inclusion: non_null
+    serialization:
+      write-dates-as-timestamps: false
+
+app:
+  job:
+    # 智能体最多检索几轮（换关键词扩检）。轮数越多越费 token。
+    max-rounds: 3
+    # 最终返回给前端的岗位数量
+    default-limit: 12
+    # 前 N 个岗位调用大模型生成「为什么匹配 / 差在哪里」，0 表示完全不调用大模型
+    explain-top-n: 5
+    # 前端的岗位页一次最多取多少条
+    max-limit: 50
+    sources:
+      # 内置演示岗位库：外部来源不可用时的兜底，保证岗位页永远有内容
+      mock-enabled: true
+      # 人工整理的 CSV 岗位库。classpath: 或绝对路径都支持。
+      csv-enabled: true
+      csv-location: classpath:jobs/sample-jobs.csv
+    ai:
+      # 默认指向 DeepSeek 的 OpenAI 兼容端点；换成通义/豆包/自建网关只需改 base-url
+      base-url: https://api.deepseek.com/v1
+      model: deepseek-chat
+      # 服务端兜底密钥。留空表示「必须由前端携带用户自己的 token」。
+      # 注意：不要把真实密钥提交到仓库，用环境变量注入。
+      api-key: ${AI_API_KEY:}
+      timeout-seconds: 60
+      max-tokens: 800
+      temperature: 0.2
+
+logging:
+  level:
+    com.shijie.resumehelper.job: INFO

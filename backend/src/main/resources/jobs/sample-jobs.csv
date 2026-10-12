@@ -1,0 +1,3 @@
+title,company,city,district,salary,education,experience,jobType,skills,description,sourceUrl
+Java 后端开发工程师,示例企业A,上海,浦东,15-22K,本科,应届 / 1 年以内,校招,Java|Spring Boot|MySQL,负责后端接口开发与维护。请把这一行替换成你人工整理的岗位。,
+后端研发工程师,示例企业B,杭州,余杭,16-24K,本科,应届 / 1 年以内,校招,Java|Redis|MySQL,"负责 SaaS 产品的后端研发，涉及租户隔离、权限与计费模块。这是带逗号的描述，用双引号包裹。",https://example.com/job/b
