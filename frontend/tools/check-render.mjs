@@ -98,9 +98,23 @@ async function main() {
   const consoleErrors = []
   ws.addEventListener('message', (event) => {
     const message = JSON.parse(event.data)
-    if (message.method === 'Runtime.exceptionThrown') {
-      consoleErrors.push(message.params?.exceptionDetails?.exception?.description || '未知异常')
+    if (message.method !== 'Runtime.exceptionThrown') return
+
+    const details = message.params?.exceptionDetails
+    const description = details?.exception?.description || details?.text || '未知异常'
+    const sourceUrl =
+      details?.url ||
+      details?.stackTrace?.callFrames?.[0]?.url ||
+      ''
+
+    // 忽略浏览器扩展抛的异常。
+    // 无头 Edge 会加载本机已安装的扩展（例如翻译插件），它们经常自己抛错。
+    // 那些错和我们前端代码毫无关系，但会让检查假失败——第一次跑就踩到了。
+    if (sourceUrl.startsWith('chrome-extension://') || sourceUrl.startsWith('moz-extension://')
+        || description.includes('chrome-extension://')) {
+      return
     }
+    consoleErrors.push(sourceUrl ? `${description}  (${sourceUrl})` : description)
   })
 
   console.log('=== 浏览器端到端渲染验证 ===')

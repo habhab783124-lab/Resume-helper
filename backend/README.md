@@ -83,6 +83,39 @@ powershell -ExecutionPolicy Bypass -File tools\smoke-api.ps1
 
 完整的四级验证流程（含排查表）见 [docs/团队协作与验证指南.md](docs/团队协作与验证指南.md)。
 
+### 单进程演示模式（演示不在开发机上时用这个）
+
+课程演示常常在**别人的电脑**上做，那台机器可能没有 Node、没有 Maven、不能联网装依赖。
+所以后端支持**顺便把前端静态文件一起提供**，做成"一个进程、一个端口"：
+
+```powershell
+# 1) 打包（只需在开发机做一次）
+cd backend
+mvn -B clean package -DskipTests
+cd ..\frontend
+npm run build
+
+# 2) 组装演示目录
+#    demo\app\resume-helper-backend-*.jar
+#    demo\app\webapp\           <- frontend\dist 的内容
+#    demo\jre\                  <- 可选，便携版 JRE 17
+
+# 3) 在演示机上运行（只需要 JDK 17）
+cd demo\app
+java -jar resume-helper-backend-0.1.0-SNAPSHOT.jar
+# 浏览器打开 http://localhost:8080/
+```
+
+原理：
+- `spring.web.resources.static-locations` 里加了 `file:./webapp/`（jar 同级目录）
+- `SpaForwardController` 把 `/jobs`、`/dashboard` 这些**前端路由**转发到 `index.html`
+  （磁盘上并不存在这些路径，不回退就会 404）
+- 因为**同源**，所以不需要 vite 代理，也不需要配 CORS
+
+`SpaForwardController` 只列了前端真实存在的路由，**刻意不用通配 `/**` 兜底**：
+通配会把 `/api` 也吞掉，写错接口路径时会返回一份 HTML 而不是 404，排查起来极其痛苦。
+
+
 ---
 
 ## 3. 前端对接

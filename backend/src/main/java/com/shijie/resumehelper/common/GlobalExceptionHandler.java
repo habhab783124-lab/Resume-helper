@@ -6,14 +6,22 @@ import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.http.converter.HttpMessageNotReadableException;
+import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
 
 /**
  * 全局异常处理：把异常翻译成前端能看懂的提示，同时避免把堆栈或密钥泄露出去。
+ *
+ * <p><b>踩过的坑</b>：兜底的 {@code @ExceptionHandler(Exception.class)} 很容易"太贪婪"——
+ * Spring 自己的框架异常（找不到资源、请求体不是 JSON、方法不支持）也会被它吃掉，
+ * 全部变成 500。调用方明明是"路径写错"或"JSON 传错"，却只看到"服务端开小差了"。
+ * 所以框架异常必须逐个显式处理，返回正确的状态码。
  */
 @RestControllerAdvice
 public class GlobalExceptionHandler {
@@ -59,6 +67,44 @@ public class GlobalExceptionHandler {
         log.warn("大模型调用失败（可重试={}）：{}", e.retryable(), e.getMessage());
         HttpStatus status = e.retryable() ? HttpStatus.BAD_GATEWAY : HttpStatus.BAD_REQUEST;
         return ResponseEntity.status(status).body(ApiResponse.fail(e.getMessage()));
+    }
+
+    /**
+     * 静态资源 / 路由不存在，应该返回 404。
+     *
+     * <p><b>为什么必须单独处理它</b>：Spring 6.1 起，找不到静态资源会抛
+     * {@link NoResourceFoundException}。如果只有下面那个 {@code Exception} 兜底，
+     * 它会被当成"服务端未处理异常"变成 <b>500</b>——
+     * 实测就是这样：{@code GET /api/写错的路径} 返回 500「服务端开小差了」，
+     * 排查时完全看不出是"路径写错了"。
+     *
+     * <p>这个坑在单进程演示模式下尤其容易踩：后端同时托管前端静态文件，
+     * 写错任何路径都会走到资源处理器。
+     */
+    @ExceptionHandler(NoResourceFoundException.class)
+    public ResponseEntity<ApiResponse<Void>> handleNoResource(NoResourceFoundException e) {
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ApiResponse.fail("接口或资源不存在：" + e.getMessage()));
+    }
+
+    /**
+     * 请求体不是合法 JSON，或字段类型对不上，应该返回 400。
+     *
+     * <p>同样是"被兜底吃掉会变成 500"的典型：本来一眼能看出是调用方传错了参数，
+     * 变成 500 之后就得翻日志才能定位。
+     */
+    @ExceptionHandler(HttpMessageNotReadableException.class)
+    public ResponseEntity<ApiResponse<Void>> handleUnreadable(HttpMessageNotReadableException e) {
+        log.warn("请求体解析失败：{}", e.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail("请求体不是合法 JSON，或字段类型不对。请检查 Content-Type 是否为 application/json，以及中文字符是否按 UTF-8 编码"));
+    }
+
+    /** HTTP 方法不支持（例如对只接受 GET 的接口发 POST），应该返回 405。 */
+    @ExceptionHandler(HttpRequestMethodNotSupportedException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMethodNotSupported(HttpRequestMethodNotSupportedException e) {
+        return ResponseEntity.status(HttpStatus.METHOD_NOT_ALLOWED)
+                .body(ApiResponse.fail("该接口不支持 " + e.getMethod() + " 方法"));
     }
 
     /** 兜底。日志里只留异常类型和消息，不回传给前端。 */
