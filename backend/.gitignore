@@ -1,0 +1,30 @@
+HELP.md
+target/
+!.mvn/wrapper/maven-wrapper.jar
+!**/src/main/**/target/
+!**/src/test/**/target/
+
+### IntelliJ IDEA ###
+.idea/
+*.iws
+*.iml
+*.ipr
+
+### Eclipse ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+
+### VS Code ###
+.vscode/
+
+### 本地校验产物（不经 Maven，仅用于无网络环境下的 javac 自检）###
+tools/.verify-out/
+tools/sources.txt
+
+### 本地配置：不要把真实 API Key 提交上来 ###
+src/main/resources/application-local.yml

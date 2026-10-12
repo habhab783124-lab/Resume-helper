@@ -1,0 +1,32 @@
+# 统一换行符，避免 Windows / Linux / macOS 混用时出现整文件 diff。
+# 只作用于 backend/ 目录，不影响 frontend/ 与 prototype-static/。
+
+* text=auto eol=lf
+
+*.java text eol=lf
+*.md   text eol=lf
+*.yml  text eol=lf
+*.sql  text eol=lf
+*.csv  text eol=lf
+*.xml  text eol=lf
+
+# PowerShell 脚本：必须是 LF + UTF-8 BOM。
+# 宿主是 Windows PowerShell 5.1，它会把无 BOM 的 UTF-8 按 ANSI 解码，
+# 中文注释会变成非法 token 导致解析失败（这个坑已经踩过一次）。
+# 注意：eol=lf 不会动 BOM，BOM 是文件内容的一部分，git 会原样保留。
+*.ps1  text eol=lf
+
+# Shell 脚本必须无 BOM，否则 shebang 失效（"No such file or directory"）
+*.sh   text eol=lf
+
+# 二进制，不要做任何转换
+*.png  binary
+*.jpg  binary
+*.jpeg binary
+*.gif  binary
+*.ico  binary
+*.pdf  binary
+*.docx binary
+*.xlsx binary
+*.jar  binary
+*.zip  binary
