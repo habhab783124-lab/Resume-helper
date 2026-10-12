@@ -1,262 +1,62 @@
 <template>
-  <div class="dashboard-container">
-    <!-- 顶部导航栏 -->
-    <header class="top-nav">
-      <div class="nav-left">
-        <el-icon class="nav-logo"><Platform /></el-icon>
-        <span class="nav-title">AI 求职与模拟面试工作台</span>
-        <el-tag type="success" size="small" effect="plain" class="status-tag">开发版 v0.1</el-tag>
-      </div>
-      <div class="nav-right">
-        <el-avatar size="small" :icon="User" />
-        <span class="username">{{ currentUser.username }}</span>
-        <el-button type="danger" link @click="handleLogout">退出登录</el-button>
-      </div>
-    </header>
-
-    <!-- 主体区域 -->
-    <main class="main-content">
-      <!-- 欢迎横幅 -->
-      <el-card shadow="never" class="welcome-card">
-        <div class="welcome-header">
-          <div>
-            <h2>欢迎回来，{{ currentUser.username }}！ 👋</h2>
-            <p>基于课程产品方案，您的求职全流程分为以下 4 个阶段，点击即可开启体验。</p>
+<section class="page active" id="page-dashboard" data-title="工作台">
+          <div class="page-intro dashboard-intro">
+            <div>
+              <div class="eyebrow"><span class="eyebrow-line"></span>MONDAY, OCTOBER 12</div>
+              <h1>早上好，林同学<span class="greeting-dot">。</span></h1>
+              <p>每一次认真准备，都会让下一步更清晰。</p>
+            </div>
+            <button class="button button-outline" data-page="materials"><svg><use href="#i-upload"/></svg>整理求职材料</button>
           </div>
-          <el-button type="primary" size="large">开始新求职</el-button>
-        </div>
-      </el-card>
 
-      <!-- 核心四大模块卡片 -->
-      <div class="module-grid">
-        <el-card shadow="hover" class="module-card">
-          <div class="card-icon blue"><Document /></div>
-          <h3>1. 材料管理与经历提取</h3>
-          <p>上传 PDF/DOCX 简历或项目复盘，AI 自动提取教育、技能与项目经历。</p>
-          <div class="card-footer">
-            <el-tag size="small">准备中</el-tag>
-            <el-link type="primary" :underline="false">进入材料库 →</el-link>
-          </div>
-        </el-card>
+          <section class="feature-card">
+            <div class="feature-copy">
+              <div class="feature-label"><span class="live-dot"></span>你的求职进度 <span class="feature-divider"></span><span>第 03 周</span></div>
+              <h2>把准备做好，<br>机会自然会<span>靠近。</span></h2>
+              <p>已完成基础资料整理，下一步完善简历并开始岗位匹配。</p>
+              <button class="button button-light" data-page="resume">继续完善简历<svg><use href="#i-arrow"/></svg></button>
+            </div>
+            <div class="feature-visual" aria-label="求职准备完成度 68%">
+              <div class="orbit orbit-a"></div><div class="orbit orbit-b"></div>
+              <div class="orbit-center"><span class="orbit-number">68<span>%</span></span><span class="orbit-caption">准备度</span></div>
+              <span class="orbit-node node-a"><svg><use href="#i-check"/></svg></span>
+              <span class="orbit-node node-b"><svg><use href="#i-file"/></svg></span>
+              <span class="orbit-node node-c"><svg><use href="#i-briefcase"/></svg></span>
+              <span class="visual-label visual-label-top">YOUR NEXT CHAPTER</span>
+              <span class="visual-label visual-label-bottom">准备 · 探索 · 前进</span>
+            </div>
+            <div class="feature-index">01 <span>—</span> 03</div>
+          </section>
 
-        <el-card shadow="hover" class="module-card">
-          <div class="card-icon green"><EditPen /></div>
-          <h3>2. 简历工作台</h3>
-          <p>选择 2~3 套精美模板，根据目标岗位由大模型定向生成并给出修改建议。</p>
-          <div class="card-footer">
-            <el-tag size="small">准备中</el-tag>
-            <el-link type="primary" :underline="false">管理简历 →</el-link>
+          <div class="metric-grid">
+            <article class="metric-card"><div class="metric-top"><span>简历完整度</span><span class="metric-icon"><svg><use href="#i-file"/></svg></span></div><div class="metric-value">82<span>%</span><span class="metric-trend">↑ 12%</span></div><div class="metric-foot"><span class="tiny-progress"><i style="width:82%"></i></span><span>较上周</span></div></article>
+            <article class="metric-card"><div class="metric-top"><span>本周匹配岗位</span><span class="metric-icon"><svg><use href="#i-briefcase"/></svg></span></div><div class="metric-value">08<span class="metric-unit">个</span><span class="metric-trend">+ 3</span></div><div class="metric-foot"><span>上海 · 后端开发</span><span class="metric-arrow">↗</span></div></article>
+            <article class="metric-card"><div class="metric-top"><span>面试练习时长</span><span class="metric-icon"><svg><use href="#i-mic"/></svg></span></div><div class="metric-value">42<span class="metric-unit">分钟</span></div><div class="metric-foot"><span>本周已完成 2 次练习</span><span class="metric-arrow">↗</span></div></article>
+            <article class="metric-card metric-card-quote"><span class="quote-mark">“</span><p>让经历被看见，<br>从讲清楚一件事开始。</p><span class="quote-byline">拾阶 · 求职札记 04</span></article>
           </div>
-        </el-card>
 
-        <el-card shadow="hover" class="module-card">
-          <div class="card-icon purple"><Search /></div>
-          <h3>3. 岗位匹配与差距分析</h3>
-          <p>浏览公开招聘岗位或手动粘贴 JD，系统计算匹配评分并生成技能差距报告。</p>
-          <div class="card-footer">
-            <el-tag size="small">准备中</el-tag>
-            <el-link type="primary" :underline="false">查看岗位 →</el-link>
+          <div class="dashboard-columns">
+            <section class="panel journey-panel">
+              <div class="panel-heading"><div><div class="eyebrow">YOUR JOURNEY</div><h3>求职旅程</h3></div><button class="text-button" data-page="profile">查看资料 <svg><use href="#i-arrow"/></svg></button></div>
+              <div class="journey-list">
+                <div class="journey-step is-done"><span class="journey-marker"><svg><use href="#i-check"/></svg></span><div class="journey-info"><strong>建立个人档案</strong><span>教育经历、技能与求职意向已整理</span></div><span class="step-state">已完成</span></div>
+                <div class="journey-step is-done"><span class="journey-marker"><svg><use href="#i-check"/></svg></span><div class="journey-info"><strong>整理项目材料</strong><span>2 份材料已归档</span></div><span class="step-state">已完成</span></div>
+                <div class="journey-step is-current"><span class="journey-marker">03</span><div class="journey-info"><strong>打磨目标简历</strong><span>强化项目成果与技术关键词</span></div><button class="step-action" data-page="resume">继续 <svg><use href="#i-arrow"/></svg></button></div>
+                <div class="journey-step is-upcoming"><span class="journey-marker">04</span><div class="journey-info"><strong>探索合适岗位</strong><span>根据目标方向查看精选机会</span></div><span class="step-state">待开始</span></div>
+              </div>
+            </section>
+            <section class="panel focus-panel">
+              <div class="panel-heading"><div><div class="eyebrow">TODAY'S FOCUS</div><h3>今天的重点</h3></div><span class="focus-date">10.12 <span>周一</span></span></div>
+              <div class="focus-card focus-card-main"><span class="focus-number">01</span><div><span class="focus-tag">建议 · 15 分钟</span><strong>补充一个项目成果</strong><p>试着用数据描述你在项目中的贡献。</p></div><button class="round-arrow" data-page="resume" aria-label="前往简历"><svg><use href="#i-arrow"/></svg></button></div>
+              <div class="focus-card"><span class="focus-number">02</span><div><span class="focus-tag">岗位 · 8 个新匹配</span><strong>看看本周的岗位推荐</strong></div><button class="round-arrow" data-page="jobs" aria-label="查看岗位"><svg><use href="#i-arrow"/></svg></button></div>
+              <div class="focus-footer"><span class="focus-check"><svg><use href="#i-check"/></svg></span>完成一项准备，离目标更近一点</div>
+            </section>
           </div>
-        </el-card>
 
-        <el-card shadow="hover" class="module-card">
-          <div class="card-icon orange"><Microphone /></div>
-          <h3>4. AI 模拟面试</h3>
-          <p>基于选定岗位进行真实多轮面试：AI 语音提问、麦克风录音作答与逐题反馈。</p>
-          <div class="card-footer">
-            <el-tag type="warning" size="small">核心模块</el-tag>
-            <el-link type="primary" :underline="false">发起面试 →</el-link>
-          </div>
-        </el-card>
-      </div>
-
-      <!-- 项目状态与进度说明 -->
-      <el-card shadow="never" class="info-card">
-        <template #header>
-          <div class="card-title">
-            <span>🚀 课设开发下一步指引</span>
-          </div>
-        </template>
-        <el-steps :active="1" finish-status="success" simple>
-          <el-step title="搭建前端与登录界面" description="已就绪" />
-          <el-step title="启动 Java 后端与 MySQL" description="下一步" />
-          <el-step title="简历上传与 AI 提取" />
-          <el-step title="岗位匹配与语音面试" />
-        </el-steps>
-      </el-card>
-    </main>
-  </div>
+          <section class="panel recommended-panel">
+            <div class="panel-heading"><div><div class="eyebrow">CURATED FOR YOU</div><h3>与你经历相近的岗位</h3></div><button class="text-button" data-page="jobs">查看全部岗位 <svg><use href="#i-arrow"/></svg></button></div>
+            <div class="recommended-jobs" id="dashboard-job-list"></div>
+          </section>
+          <footer class="page-footer"><span>拾阶 · CAREER STUDIO</span><span>为认真准备的人，整理下一步。</span><span>产品预览 2026</span></footer>
+        </section>
 </template>
-
-<script setup>
-import { ref, onMounted } from 'vue'
-import { useRouter } from 'vue-router'
-import { ElMessage } from 'element-plus'
-import { Platform, User, Document, EditPen, Search, Microphone } from '@element-plus/icons-vue'
-
-const router = useRouter()
-const currentUser = ref({ username: '用户' })
-
-onMounted(() => {
-  const saved = localStorage.getItem('user')
-  if (saved) {
-    try {
-      currentUser.value = JSON.parse(saved)
-    } catch (e) {}
-  }
-})
-
-const handleLogout = () => {
-  localStorage.removeItem('user')
-  ElMessage.info('已退出登录')
-  router.push('/login')
-}
-</script>
-
-<style scoped>
-.dashboard-container {
-  min-height: 100vh;
-  background-color: #f8fafc;
-}
-
-.top-nav {
-  height: 60px;
-  background-color: #ffffff;
-  border-bottom: 1px solid #e2e8f0;
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding: 0 24px;
-  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.05);
-}
-
-.nav-left {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.nav-logo {
-  font-size: 24px;
-  color: #2563eb;
-}
-
-.nav-title {
-  font-size: 16px;
-  font-weight: 600;
-  color: #0f172a;
-}
-
-.status-tag {
-  margin-left: 8px;
-}
-
-.nav-right {
-  display: flex;
-  align-items: center;
-  gap: 12px;
-}
-
-.username {
-  font-size: 14px;
-  color: #334155;
-  font-weight: 500;
-}
-
-.main-content {
-  max-width: 1200px;
-  margin: 24px auto;
-  padding: 0 20px;
-  display: flex;
-  flex-direction: column;
-  gap: 20px;
-}
-
-.welcome-card {
-  border-radius: 12px;
-  background: linear-gradient(135deg, #ffffff 0%, #eff6ff 100%);
-  border: 1px solid #dbeafe;
-}
-
-.welcome-header {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-}
-
-.welcome-header h2 {
-  font-size: 20px;
-  color: #1e3a8a;
-  margin-bottom: 6px;
-}
-
-.welcome-header p {
-  font-size: 14px;
-  color: #64748b;
-}
-
-.module-grid {
-  display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-  gap: 20px;
-}
-
-.module-card {
-  border-radius: 12px;
-  border: 1px solid #e2e8f0;
-  transition: transform 0.2s, box-shadow 0.2s;
-  cursor: pointer;
-}
-
-.module-card:hover {
-  transform: translateY(-4px);
-  box-shadow: 0 10px 20px rgba(0, 0, 0, 0.08);
-}
-
-.card-icon {
-  width: 44px;
-  height: 44px;
-  border-radius: 10px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  font-size: 22px;
-  margin-bottom: 14px;
-}
-
-.card-icon.blue { background-color: #dbeafe; color: #2563eb; }
-.card-icon.green { background-color: #dcfce7; color: #16a34a; }
-.card-icon.purple { background-color: #f3e8ff; color: #9333ea; }
-.card-icon.orange { background-color: #ffedd5; color: #ea580c; }
-
-.module-card h3 {
-  font-size: 16px;
-  color: #1e293b;
-  margin-bottom: 8px;
-}
-
-.module-card p {
-  font-size: 13px;
-  color: #64748b;
-  line-height: 1.5;
-  min-height: 40px;
-  margin-bottom: 16px;
-}
-
-.card-footer {
-  display: flex;
-  justify-content: space-between;
-  align-items: center;
-  padding-top: 12px;
-  border-top: 1px solid #f1f5f9;
-}
-
-.info-card {
-  border-radius: 12px;
-}
-
-.card-title {
-  font-weight: 600;
-  color: #1e293b;
-}
-</style>
