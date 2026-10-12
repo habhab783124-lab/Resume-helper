@@ -1,4 +1,4 @@
-import { createRouter, createWebHashHistory } from 'vue-router'
+import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '../layouts/AppShell.vue'
 import Dashboard from '../views/Dashboard.vue'
 import Interview from '../views/Interview.vue'
@@ -29,8 +29,7 @@ const routes = [
 ]
 
 const router = createRouter({
-  // Hash routing works on GitHub Pages without a server-side SPA rewrite.
-  history: createWebHashHistory(import.meta.env.BASE_URL),
+  history: createWebHistory(),
   routes
 })
 
