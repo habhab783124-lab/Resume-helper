@@ -54,6 +54,27 @@ npm run dev
 「连不上后端服务。请确认后端已启动……」并把空列表的说明换成「岗位没能加载出来」。
 这是刻意设计的——比起报错页，静态骨架至少还能看出产品的样子。
 
+## 验证「真的打通了」
+
+改完前后端代码后，想知道渲染有没有坏，可以跑一遍浏览器端到端检查：
+
+```powershell
+# 1) 起一个带调试端口的 headless Edge
+& "C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe" `
+    --headless=new --disable-gpu --no-first-run `
+    --remote-debugging-port=9222 --user-data-dir="$env:TEMP\edge-check" about:blank
+
+# 2) 另开一个终端（前端和后端都要在跑）
+node tools/check-render.mjs
+```
+
+它会真实渲染 `/jobs` 和 `/dashboard`，断言卡片数量、标题、匹配度、公司首字、配色类、
+技能标签、匹配理由、薪资、数据源状态条，并检查有没有未捕获的 JS 异常。
+
+**为什么值得跑**：`npm run build` 只证明代码能编译，curl 只证明网络通和 JSON 对，
+**只有浏览器渲染才能证明 Vue 真的把数据变成了卡片**。这个脚本不依赖任何 npm 包
+（Node 22+ 自带 WebSocket，CDP 就是 WebSocket + JSON）。
+
 ## 目录约定
 
 ```
