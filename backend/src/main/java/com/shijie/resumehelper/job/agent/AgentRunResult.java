@@ -1,7 +1,7 @@
 package com.shijie.resumehelper.job.agent;
 
 import com.shijie.resumehelper.job.domain.JobMatchResult;
-import com.shijie.resumehelper.job.domain.UserProfileSnapshot;
+import com.shijie.resumehelper.common.profile.UserProfileSnapshot;
 import com.shijie.resumehelper.job.source.JobSourceRegistry;
 
 import java.util.List;

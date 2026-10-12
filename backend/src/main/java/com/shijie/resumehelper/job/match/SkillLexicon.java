@@ -1,7 +1,7 @@
 package com.shijie.resumehelper.job.match;
 
 import com.shijie.resumehelper.job.domain.Job;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.util.ArrayList;
 import java.util.Collection;

@@ -1,6 +1,6 @@
 package com.shijie.resumehelper.common;
 
-import com.shijie.resumehelper.job.ai.AiClient;
+import com.shijie.resumehelper.common.ai.AiClient;
 import com.shijie.resumehelper.job.source.JobSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -11,6 +11,8 @@ import org.springframework.web.HttpRequestMethodNotSupportedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
+import org.springframework.web.multipart.MaxUploadSizeExceededException;
+import org.springframework.web.multipart.support.MissingServletRequestPartException;
 import org.springframework.web.servlet.resource.NoResourceFoundException;
 
 import java.util.stream.Collectors;
@@ -37,10 +39,32 @@ public class GlobalExceptionHandler {
         return ResponseEntity.badRequest().body(ApiResponse.fail("请求参数有误：" + message));
     }
 
-    /** 业务参数不合法，例如岗位描述为空。 */
+    /** 业务参数不合法，例如岗位描述为空、材料格式不支持。 */
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> handleIllegalArgument(IllegalArgumentException e) {
         return ResponseEntity.badRequest().body(ApiResponse.fail(e.getMessage()));
+    }
+
+    /**
+     * 上传的文件超过了 multipart 大小限制，应该返回 400 而不是 500。
+     *
+     * <p>这个异常在<b>进入控制器之前</b>就被 Spring 抛出来了（请求体太大，
+     * 连 MultipartFile 都没构造完），所以业务层的校验根本轮不到执行。
+     * 不显式处理的话用户只会看到「服务端开小差了」，完全不知道是文件太大。
+     */
+    @ExceptionHandler(MaxUploadSizeExceededException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMaxUpload(MaxUploadSizeExceededException e) {
+        log.warn("上传文件超过大小限制：{}", e.getMessage());
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail("文件太大了。单份材料请控制在 10 MB 以内（简历一般只有几百 KB），"
+                        + "也可以改用「粘贴文本」。"));
+    }
+
+    /** 表单里没有 file 字段。前端表单写错时给一句能定位问题的话。 */
+    @ExceptionHandler(MissingServletRequestPartException.class)
+    public ResponseEntity<ApiResponse<Void>> handleMissingPart(MissingServletRequestPartException e) {
+        return ResponseEntity.badRequest()
+                .body(ApiResponse.fail("没有收到上传的文件（缺少表单字段 " + e.getRequestPartName() + "）。"));
     }
 
     /** 岗位来源不可用。 */
@@ -60,7 +84,7 @@ public class GlobalExceptionHandler {
      * 而不是笼统的「服务端开小差了」。
      *
      * <p>注意：异常消息里只包含状态码和模型侧的错误描述，
-     * 不含 API Key（{@link com.shijie.resumehelper.job.ai.AiCredentials#maskedKey()} 是唯一允许打日志的形式）。
+     * 不含 API Key（{@link com.shijie.resumehelper.common.ai.AiCredentials#maskedKey()} 是唯一允许打日志的形式）。
      */
     @ExceptionHandler(AiClient.AiException.class)
     public ResponseEntity<ApiResponse<Void>> handleAi(AiClient.AiException e) {

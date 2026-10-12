@@ -33,6 +33,24 @@
             <artifactId>spring-boot-starter-validation</artifactId>
         </dependency>
 
+        <!--
+          功能一（材料整理）需要从上传的文件里抽文本。
+          两个库都很成熟，也都是纯 Java、无本地依赖：
+          - poi-ooxml：读 .docx 的段落与表格（旧版 .doc 是二进制格式，需要额外的
+            poi-scratchpad；我们选择提示用户另存为 .docx，而不是为此多引一个依赖）
+          - pdfbox：读文本型 PDF；扫描件（没有文本层）由我们自己检测并提示
+        -->
+        <dependency>
+            <groupId>org.apache.poi</groupId>
+            <artifactId>poi-ooxml</artifactId>
+            <version>5.2.5</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.2</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-test</artifactId>

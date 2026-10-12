@@ -1,6 +1,6 @@
 package com.shijie.resumehelper.job.domain;
 
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.time.Instant;
 import java.util.ArrayList;

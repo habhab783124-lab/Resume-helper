@@ -10,6 +10,14 @@ spring:
     default-property-inclusion: non_null
     serialization:
       write-dates-as-timestamps: false
+  servlet:
+    multipart:
+      # 材料上传。产品方案 3.A 说「单个文件不超过 10MB」。
+      #
+      # ⚠️ Spring Boot 默认只允许 1MB，不改这里上传稍大一点的简历就会直接 500。
+      # 这是材料模块最容易踩的坑之一。
+      max-file-size: 10MB
+      max-request-size: 12MB
   web:
     resources:
       # 前端静态文件的位置，按顺序查找。
@@ -29,6 +37,52 @@ spring:
         - file:./frontend/dist/
 
 app:
+  # ---------------------------------------------------------------------------
+  # 大模型配置
+  #
+  # 放在顶层而不是某个模块下，因为它是**被多个模块共用的基础设施**：
+  #   - 岗位模块：生成「为什么匹配 / 差在哪里」的解释
+  #   - 材料模块：把简历文本抽成结构化的教育/技能/项目
+  # 如果塞进 app.job，材料模块就得反过来依赖岗位模块，依赖方向就错了。
+  # ---------------------------------------------------------------------------
+  ai:
+    # 默认指向 DeepSeek 的 OpenAI 兼容端点；换成通义/豆包/自建网关只需改 base-url
+    base-url: ${AI_BASE_URL:https://api.deepseek.com/v1}
+    model: ${AI_MODEL:deepseek-chat}
+    # 服务端兜底密钥。留空表示「必须由前端携带用户自己的 token」。
+    # 注意：不要把真实密钥提交到仓库，用环境变量注入。
+    #
+    # ⚠️ 如果要把后端暴露到公网，**不要**配这个（否则任何人都能刷光你的额度）。
+    api-key: ${AI_API_KEY:}
+    timeout-seconds: 60
+    max-tokens: 800
+    temperature: 0.2
+
+  # ---------------------------------------------------------------------------
+  # 功能一：材料整理
+  # ---------------------------------------------------------------------------
+  material:
+    # 上传的原文件与抽取出的文本存放目录。
+    # 相对路径相对于 JVM 工作目录，所以单进程演示时会落在 jar 同级的 data/ 下。
+    storage-dir: ${MATERIAL_STORAGE_DIR:./data/materials}
+    # 业务层再挡一道（Spring 那边由 spring.servlet.multipart 限制）
+    max-file-size-mb: 10
+    # 允许的扩展名。旧版 .doc 不在列表里：它是二进制格式，需要额外的 poi-scratchpad，
+    # 我们选择明确提示用户「另存为 .docx」，而不是为此多引一个依赖。
+    allowed-extensions:
+      - pdf
+      - docx
+      - txt
+      - md
+    # 扫描件判定：PDF 有页面但抽出的文本短于这个长度，就认为没有文本层（是扫描件/图片）。
+    # 判定后不会报错，而是提示用户改用「粘贴文本」。
+    scanned-text-threshold: 50
+    # 抽取出的原文存不存盘。存下来便于「原文对照」和排查抽取质量问题。
+    keep-extracted-text: true
+
+  # ---------------------------------------------------------------------------
+  # 功能二：岗位来源与匹配
+  # ---------------------------------------------------------------------------
   job:
     # 智能体最多检索几轮（换关键词扩检）。轮数越多越费 token。
     max-rounds: 3
@@ -55,17 +109,9 @@ app:
       # 人工整理的 CSV 岗位库。classpath: 或绝对路径都支持。
       csv-enabled: true
       csv-location: classpath:jobs/sample-jobs.csv
-    ai:
-      # 默认指向 DeepSeek 的 OpenAI 兼容端点；换成通义/豆包/自建网关只需改 base-url
-      base-url: https://api.deepseek.com/v1
-      model: deepseek-chat
-      # 服务端兜底密钥。留空表示「必须由前端携带用户自己的 token」。
-      # 注意：不要把真实密钥提交到仓库，用环境变量注入。
-      api-key: ${AI_API_KEY:}
-      timeout-seconds: 60
-      max-tokens: 800
-      temperature: 0.2
 
 logging:
   level:
-    com.shijie.resumehelper.job: INFO
+    com.shijie.resumehelper: INFO
+    # 抽取质量排查时把这一行打开，可以看到发给大模型的完整提示词
+    # com.shijie.resumehelper.material.extract: DEBUG

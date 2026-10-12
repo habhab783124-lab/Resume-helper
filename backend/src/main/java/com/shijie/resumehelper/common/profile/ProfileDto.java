@@ -1,6 +1,6 @@
-package com.shijie.resumehelper.job.api.dto;
+package com.shijie.resumehelper.common.profile;
 
-import com.shijie.resumehelper.job.domain.UserProfileSnapshot;
+import com.shijie.resumehelper.common.profile.UserProfileSnapshot;
 
 import java.util.List;
 

@@ -1,6 +1,6 @@
-package com.shijie.resumehelper.job.ai;
+package com.shijie.resumehelper.common.ai;
 
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 /**
  * 一次请求使用的大模型凭据。

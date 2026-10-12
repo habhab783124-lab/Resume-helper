@@ -1,6 +1,6 @@
 package com.shijie.resumehelper.job.agent;
 
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.util.LinkedHashMap;
 import java.util.Map;
