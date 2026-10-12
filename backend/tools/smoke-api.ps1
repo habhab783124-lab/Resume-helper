@@ -6,7 +6,7 @@
         （离线自检 JobAgentOfflineDemo 覆盖不到这一层，因为它不起 Web 服务。）
 
   前置：后端已启动，且能看到这一行日志：
-        Tomcat started on port 8081
+        Tomcat started on port 8080
 
   用法：
       powershell -ExecutionPolicy Bypass -File tools\smoke-api.ps1
@@ -146,8 +146,11 @@ $probe = Invoke-ApiRaw -Method Get -Path '/api/jobs/sources'
 if ($probe.Error -or $probe.Status -ne 200) {
     Write-Host ""
     Write-Host "连不上后端（$($probe.Error)；HTTP $($probe.Status)）" -ForegroundColor Red
-    Write-Host "请先在 backend 目录执行  mvn spring-boot:run -Dspring-boot.run.profiles=local  ，" -ForegroundColor Yellow
-    Write-Host "等看到 'Tomcat started on port 8081' 再跑本脚本。" -ForegroundColor Yellow
+    # 端口不写死：后端默认 8080，本机被占用时可以换端口，脚本跟着 -BaseUrl 走
+    $port = ([uri]$BaseUrl).Port
+    Write-Host "请先在 backend 目录启动后端：  mvn spring-boot:run" -ForegroundColor Yellow
+    Write-Host "如果要换端口（例如 8080 被占用）：  `$env:SERVER_PORT = 8081 ; mvn spring-boot:run" -ForegroundColor Yellow
+    Write-Host "等看到 'Tomcat started on port $port' 再跑本脚本。" -ForegroundColor Yellow
     exit 1
 }
 

@@ -2,6 +2,9 @@ package com.shijie.resumehelper.job.config;
 
 import org.springframework.boot.context.properties.ConfigurationProperties;
 
+import java.util.ArrayList;
+import java.util.List;
+
 /**
  * 岗位模块配置，对应 application.yml 的 {@code app.job.*}。
  */
@@ -19,6 +22,7 @@ public class JobModuleProperties {
 
     private final Sources sources = new Sources();
     private final Ai ai = new Ai();
+    private final Cors cors = new Cors();
 
     public int getMaxRounds() {
         return maxRounds;
@@ -156,6 +160,37 @@ public class JobModuleProperties {
 
         public void setTemperature(double temperature) {
             this.temperature = temperature;
+        }
+    }
+
+    public Cors getCors() {
+        return cors;
+    }
+
+    /**
+     * 跨域白名单。
+     *
+     * <p>为什么需要它：本地开发时前端是 {@code localhost:5173}，后端是 {@code localhost:8080}，
+     * 走 vite 代理就没有跨域问题；但**前端一旦部署到 Vercel 之类的公网域名**，
+     * 浏览器就会用这个域名发起请求，必须把它加进白名单，否则预检直接失败。
+     *
+     * <p>用 {@code allowedOriginPatterns} 而不是 {@code allowedOrigins}：
+     * 前者支持通配符（例如 {@code https://*.vercel.app}），
+     * 而且能与 {@code allowCredentials(true)} 共存。
+     */
+    public static class Cors {
+        private List<String> allowedOriginPatterns = new ArrayList<>(List.of(
+                "http://localhost:*",
+                "http://127.0.0.1:*"));
+
+        public List<String> getAllowedOriginPatterns() {
+            return allowedOriginPatterns;
+        }
+
+        public void setAllowedOriginPatterns(List<String> allowedOriginPatterns) {
+            this.allowedOriginPatterns = allowedOriginPatterns == null
+                    ? new ArrayList<>()
+                    : new ArrayList<>(allowedOriginPatterns);
         }
     }
 }

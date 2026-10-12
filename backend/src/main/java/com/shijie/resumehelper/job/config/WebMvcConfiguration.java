@@ -15,26 +15,33 @@ import java.util.List;
 @Configuration
 public class WebMvcConfiguration implements WebMvcConfigurer {
 
+    private final JobModuleProperties properties;
+
+    public WebMvcConfiguration(JobModuleProperties properties) {
+        this.properties = properties;
+    }
+
     /**
      * 跨域配置。
      *
-     * <p>前端是 Vite 开发服务器（{@code http://localhost:5173} / {@code http://127.0.0.1:5173}），
-     * 后端是 {@code http://localhost:8081}，端口不同必然跨域。
+     * <p>本地开发时前端是 vite（{@code localhost:5173}），后端是 {@code localhost:8080}，
+     * 如果前端配了代理就不会跨域；没配代理也能靠这里放行。
      *
-     * <p>两种解法，任选其一：
-     * <ol>
-     *   <li>用这里的 CORS 配置（默认已开启）；</li>
-     *   <li>前端 {@code vite.config.js} 里加代理，把 {@code /api} 转发到后端，见 backend/README.md。</li>
-     * </ol>
+     * <p><b>前端部署到公网后必须改配置</b>：Vercel 之类的域名不在默认白名单里，
+     * 浏览器会拦掉请求。把域名加到 {@code application.yml} 的
+     * {@code app.job.cors.allowed-origin-patterns} 即可，不需要改代码。
      *
      * <p>允许的请求头包含用户自带 token 用到的三个自定义头，否则浏览器预检会失败。
      */
     @Override
     public void addCorsMappings(CorsRegistry registry) {
+        List<String> patterns = properties.getCors().getAllowedOriginPatterns();
+        if (patterns.isEmpty()) {
+            // 配置被清空时退回只放行本机，避免为了图方便写成 "*" 又把凭据一起放开
+            patterns = List.of("http://localhost:*", "http://127.0.0.1:*");
+        }
         registry.addMapping("/api/**")
-                .allowedOriginPatterns(
-                        "http://localhost:*",
-                        "http://127.0.0.1:*")
+                .allowedOriginPatterns(patterns.toArray(String[]::new))
                 .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .exposedHeaders("X-AI-Model")

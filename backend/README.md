@@ -27,13 +27,17 @@ MySQL 表结构已经写好，见 `src/main/resources/db/schema.sql`。
 
 环境要求：**JDK 17** + Maven。
 
-> ⚠️ **先确认 8080 没被占用。** 实测你这台机器上 `0.0.0.0:8080` 已有进程在监听，
-> 直接启动会报 `Port 8080 was already in use`。用环境变量换端口即可：
+> ⚠️ **如果 8080 被占用**，直接启动会报 `Port 8080 was already in use`。
+> 用环境变量换端口即可（**不需要改代码**）：
 >
 > ```powershell
 > $env:SERVER_PORT = 8081
 > mvn spring-boot:run
 > ```
+>
+> 常见的占用者：装了 NI（National Instruments）软件时，它的 `NIApplicationWebServer`
+> 服务会占着 8080。**不要杀掉它**——它是自动启动的服务，杀了会回来，而且可能被其他软件依赖。
+> 换端口就行，前端的代理目标也要跟着改（见 3.1 节的 `VITE_PROXY_TARGET`）。
 
 ```bash
 cd backend
@@ -83,28 +87,46 @@ powershell -ExecutionPolicy Bypass -File tools\smoke-api.ps1
 
 ## 3. 前端对接
 
-### 3.1 解决跨域
+### 3.1 跨域与代理（已配好）
 
-前端是 Vite（5173），后端是 8080，二选一：
-
-**方案 A（推荐）：加代理。** 改 `frontend/vite.config.js`：
+前端已在 `frontend/vite.config.js` 里配好代理，**前端代码统一写相对路径 `/api/xxx`**，
+由 Vite 转发到后端。开发时没有跨域问题，生产构建里 `/api` 也不会被当成前端路由。
 
 ```js
-export default defineConfig({
-  plugins: [vue()],
-  server: {
-    port: 5173,
-    host: '0.0.0.0',
-    proxy: {
-      '/api': { target: 'http://localhost:8080', changeOrigin: true }
-    }
-  }
-})
+// frontend/vite.config.js
+const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:8080'
+// ...
+proxy: { '/api': { target: proxyTarget, changeOrigin: true } }
 ```
 
-这样前端代码里直接写 `/api/jobs` 即可，生产环境也不用改。
+**后端不在 8080 时不用改代码**，用环境变量指定即可：
 
-**方案 B：后端已经开好 CORS**（`WebMvcConfiguration`），允许 `localhost` / `127.0.0.1` 任意端口。
+```powershell
+$env:VITE_PROXY_TARGET = 'http://localhost:8081'   # 后端跑在 8081
+npm run dev
+```
+
+#### 部署到 Vercel 后代理不生效（重要）
+
+Vercel 上的代理不会转发到你本机，而且它是 **HTTPS**，浏览器不允许 HTTPS 页面请求
+`http://` 接口（混合内容拦截）。所以公网演示必须：
+
+1. **前端**配 `VITE_API_BASE_URL=https://你的后端域名`（见 `frontend/.env.example`）；
+2. **后端**把前端域名加进 CORS 白名单——改配置即可，不用改代码：
+
+```yaml
+app:
+  job:
+    cors:
+      allowed-origin-patterns:
+        - http://localhost:*
+        - https://resume-helper-two.vercel.app
+        # 或者用通配符一次放行所有 Vercel 预览域名：
+        # - https://*.vercel.app
+```
+
+公网后端也必须是 HTTPS。如果暂时没有公网后端，就本地演示：
+前端 `npm run dev` + 后端本机跑，走代理，最省事也最不容易翻车。
 
 ### 3.2 接口清单
 
