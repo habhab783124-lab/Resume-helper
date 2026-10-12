@@ -8,13 +8,15 @@ import Materials from '../views/Materials.vue'
 import Profile from '../views/Profile.vue'
 import Report from '../views/Report.vue'
 import Resume from '../views/Resume.vue'
+import { getDemoSession } from '../utils/demoAuth'
 
 const routes = [
   { path: '/', redirect: '/login' },
-  { path: '/login', name: 'Login', component: Login },
+  { path: '/login', name: 'Login', component: Login, meta: { guestOnly: true } },
   {
     path: '/',
     component: AppShell,
+    meta: { requiresAuth: true },
     children: [
       { path: 'dashboard', name: 'Dashboard', component: Dashboard, meta: { title: '工作台' } },
       { path: 'profile', name: 'Profile', component: Profile, meta: { title: '个人资料' } },
@@ -31,6 +33,20 @@ const routes = [
 const router = createRouter({
   history: createWebHistory(),
   routes
+})
+
+router.beforeEach((to) => {
+  const isAuthenticated = Boolean(getDemoSession())
+
+  if (to.meta.requiresAuth && !isAuthenticated) {
+    return { name: 'Login', query: { redirect: to.fullPath } }
+  }
+
+  if (to.meta.guestOnly && isAuthenticated) {
+    return { name: 'Dashboard' }
+  }
+
+  return true
 })
 
 export default router

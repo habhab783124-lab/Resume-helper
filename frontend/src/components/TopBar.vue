@@ -10,25 +10,39 @@
       </label>
       <button class="icon-button notification-button" type="button" aria-label="通知"><svg><use href="#i-bell" /></svg><i></i></button>
       <RouterLink to="/profile" class="user-chip"><span class="avatar">林</span><span class="user-chip-name">林同学</span><svg><use href="#i-chevron" /></svg></RouterLink>
-      <RouterLink to="/login" class="topbar-logout">退出</RouterLink>
+      <button class="topbar-logout" type="button" @click="logout">退出</button>
     </div>
   </header>
 </template>
 
 <script setup>
+import { useRouter } from 'vue-router'
+import { clearDemoSession } from '../utils/demoAuth'
+
+const router = useRouter()
+
 defineProps({
   title: { type: String, default: '工作台' }
 })
+
+function logout() {
+  clearDemoSession()
+  router.replace('/login')
+}
 </script>
 
 <style scoped>
 .topbar-logout {
+  padding: 6px 0;
+  border: 0;
+  background: transparent;
   color: #8a958c;
   font-size: 10px;
+  cursor: pointer;
   transition: color .18s;
 }
 .topbar-logout:hover { color: #315c48; }
 @media (max-width: 900px) {
-  .topbar-logout { display: none; }
+  .topbar-logout { display: inline-flex; }
 }
 </style>
