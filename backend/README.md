@@ -4,8 +4,10 @@
 
 - **功能一：材料整理** —— 上传 PDF / DOCX / 粘贴文本 → 抽取正文 → 大模型结构化抽取 → 用户确认成求职画像
 - **功能二：岗位来源与匹配** —— 岗位检索智能体、六维可解释匹配、差距报告
+- **功能三：模拟面试** —— 简历驱动的文字面试（不含 TTS 与面试报告），
+  见 [文字面试接口与接入](docs/文字面试接口与接入.md)、[语音面试接口与接入](docs/语音面试接口与接入.md)
 
-其余模块（简历生成 / 模拟面试）由队友按同一套约定补齐。
+个人资料管理与简历生成仍待补齐。
 
 ---
 
@@ -69,7 +71,7 @@ powershell -ExecutionPolicy Bypass -File tools\verify.ps1
 mvn -q test-compile exec:java
 ```
 
-它会用 JDK 自带的 `javac` 编译全部 75 个源文件（Spring/Jackson 由 `tools/verify-stubs` 打桩替代），
+它会用 JDK 自带的 `javac` 编译岗位模块及其自检（Spring/Jackson 由 `tools/verify-stubs` 打桩替代；不含依赖 PDFBox/POI 的面试模块），
 然后跑 **102 项断言**：薪资解析、技能误命中防护、CSV 引号、粘贴 JD 抽取、智能体全链路、
 匹配打分与差距报告、存储与收藏，以及**服务层响应契约**（控制器真正走的那条路）。
 

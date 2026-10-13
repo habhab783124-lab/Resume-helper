@@ -22,6 +22,9 @@ public final class PdfTextExtractor implements DocumentTextExtractor {
 
     private final int scannedThreshold;
 
+    /** 页数上限。简历不该有这么长，超了基本是传错文件。 */
+    private static final int MAX_PAGES = 30;
+
     /**
      * @param scannedThreshold 可见字符数低于这个值就判定为扫描件。
      *                         阈值不能是 0：有些扫描件会带几个字符的页眉/页码。
@@ -47,6 +50,21 @@ public final class PdfTextExtractor implements DocumentTextExtractor {
         }
         try (PDDocument document = Loader.loadPDF(bytes)) {
             int pages = document.getNumberOfPages();
+
+            // 页数上限：传错文件（比如整本手册）时早点拒绝，不用白读一遍再交给大模型
+            if (pages > MAX_PAGES) {
+                throw new MaterialParseException(fileName,
+                        "这份 PDF 有 " + pages + " 页，超过了 " + MAX_PAGES + " 页的限制。"
+                                + "简历通常不超过 3 页，请确认是不是传错文件了。");
+            }
+
+            // 作者权限：有些 PDF 明确禁止提取文本。这时读出来是空的，
+            // 不检查就会被误判成「扫描件」，给出错误的建议。
+            if (!document.getCurrentAccessPermission().canExtractContent()) {
+                throw new MaterialParseException(fileName,
+                        "这份 PDF 的作者设置了「禁止提取文本」的权限，读不了内容。"
+                                + "可以改用「粘贴文本」把简历贴进来。");
+            }
 
             PDFTextStripper stripper = new PDFTextStripper();
             stripper.setSortByPosition(true);

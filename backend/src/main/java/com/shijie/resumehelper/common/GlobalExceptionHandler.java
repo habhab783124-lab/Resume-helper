@@ -55,7 +55,8 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(MaxUploadSizeExceededException.class)
     public ResponseEntity<ApiResponse<Void>> handleMaxUpload(MaxUploadSizeExceededException e) {
         log.warn("上传文件超过大小限制：{}", e.getMessage());
-        return ResponseEntity.badRequest()
+        // 413 Payload Too Large 才是这个语义的标准状态码
+        return ResponseEntity.status(HttpStatus.PAYLOAD_TOO_LARGE)
                 .body(ApiResponse.fail("文件太大了。单份材料请控制在 10 MB 以内（简历一般只有几百 KB），"
                         + "也可以改用「粘贴文本」。"));
     }

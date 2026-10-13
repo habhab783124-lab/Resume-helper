@@ -1,4 +1,4 @@
-# 拾阶求职工作台 · 岗位模块离线自检（Windows / PowerShell）
+﻿# 拾阶求职工作台 · 岗位模块离线自检（Windows / PowerShell）
 #
 # 用途：在没有 Maven、装不上依赖、甚至没有外网的机器上，
 #       直接用 JDK 自带的 javac 编译岗位模块的全部代码并跑端到端自检。
@@ -39,7 +39,12 @@ $mainSources = Get-ChildItem -Path (Join-Path $backend 'src\main\java') -Recurse
     Where-Object { $_.FullName -notmatch '\\material\\' }
 $files += $mainSources.FullName
 $files += (Get-ChildItem -Path (Join-Path $backend 'tools\verify-stubs') -Recurse -File -Filter *.java).FullName
-$files += (Get-ChildItem -Path (Join-Path $backend 'src\test\java') -Recurse -File -Filter *.java).FullName
+# src/test 里只取**不依赖 JUnit** 的离线自检（JobAgentOfflineDemo）。
+# 其余测试都基于 JUnit 5，需要 Maven 拉依赖；离线 javac 环境里没有 JUnit，
+# 硬编进来只会一堆 "package org.junit.jupiter.api does not exist"。
+# 那些测试由 `mvn test` 负责（当前 39 项）。
+$files += (Get-ChildItem -Path (Join-Path $backend 'src\test\java') -Recurse -File -Filter 'JobAgentOfflineDemo.java').FullName
+$files = @($files | Where-Object { $_ -notmatch '[\\/]interview[\\/]' })
 
 Write-Host "编译 $($files.Count) 个文件 ..."
 & $javac -encoding UTF-8 -d $out $files 2>&1 | Out-String -Width 400 | Write-Host

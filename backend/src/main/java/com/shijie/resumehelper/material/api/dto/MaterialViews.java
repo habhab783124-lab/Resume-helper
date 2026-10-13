@@ -87,8 +87,17 @@ public final class MaterialViews {
         }
     }
 
-    /** 材料详情：元数据 + 抽取结果（没有抽取结果时为 null）。 */
-    public record MaterialDetailView(MaterialView material, ExtractionView extraction) {
+    /**
+     * 材料详情：元数据 + 抽取结果 + 抽出的原文。
+     *
+     * <p>{@code text} 也在这里返回一份：面试模块需要「materialId + 简历正文」两样东西
+     * 才能开始面试，放在同一个响应里它就不用发两次请求。
+     * <b>列表接口不带 text</b>，避免把一堆简历正文一次性搬出来。
+     *
+     * <p>{@code GET /api/materials/{id}/text} 仍然保留：原文对照面板要的是
+     * {@code text/plain}，直接渲染最省事。
+     */
+    public record MaterialDetailView(MaterialView material, ExtractionView extraction, String text) {
     }
 
     /** 列表用的批量转换。 */

@@ -11,6 +11,8 @@ import org.apache.poi.xwpf.usermodel.XWPFTableRow;
 
 import java.io.ByteArrayInputStream;
 import java.io.IOException;
+import java.util.zip.ZipEntry;
+import java.util.zip.ZipInputStream;
 
 /**
  * 从 .docx 里抽文本，用 Apache POI。
@@ -28,6 +30,12 @@ import java.io.IOException;
  */
 public final class DocxTextExtractor implements DocumentTextExtractor {
 
+    /** 压缩包里最多允许的条目数。正常 docx 几十个，超过基本可以判定异常。 */
+    private static final int MAX_ZIP_ENTRIES = 200;
+
+    /** 解压后最多允许多少字节。正常简历的 docx 解压后也就几百 KB。 */
+    private static final long MAX_UNCOMPRESSED_BYTES = 10L * 1024 * 1024;
+
     @Override
     public boolean supports(String extension) {
         return "docx".equalsIgnoreCase(extension);
@@ -43,6 +51,7 @@ public final class DocxTextExtractor implements DocumentTextExtractor {
         if (bytes == null || bytes.length == 0) {
             throw new MaterialParseException(fileName, "文件是空的，请重新上传。");
         }
+        checkZipBomb(bytes, fileName);
         try (XWPFDocument document = new XWPFDocument(new ByteArrayInputStream(bytes))) {
             StringBuilder sb = new StringBuilder();
 
@@ -74,8 +83,7 @@ public final class DocxTextExtractor implements DocumentTextExtractor {
         }
     }
 
-    private void appendParagraph(StringBuilder sb, XWPFParagraph paragraph) {
-        String line = paragraph.getText();
+    private void appendParagraph(StringBuilder sb, XWPFParagraph paragraph) {        String line = paragraph.getText();
         if (line != null && !line.isBlank()) {
             sb.append(line).append('\n');
         }
@@ -103,6 +111,43 @@ public final class DocxTextExtractor implements DocumentTextExtractor {
             if (line.length() > 0) {
                 sb.append(line).append('\n');
             }
+        }
+    }
+
+    /**
+     * 防「压缩炸弹」。
+     *
+     * <p>.docx 本质是一个 zip：把几 KB 的压缩包解开可能是几 GB。
+     * 攻击者（或者只是手滑传了个奇怪文件）可以用这种方式把服务的内存吃光——
+     * POI 在解析时会把解压后的内容读进内存，所以**必须在交给 POI 之前**先自己数一遍。
+     *
+     * <p>这段逻辑来自队友在面试模块里写的版本，统一材料模块时特意保留了下来。
+     */
+    private void checkZipBomb(byte[] bytes, String fileName) {
+        int entries = 0;
+        long total = 0;
+        byte[] chunk = new byte[8192];
+        try (ZipInputStream zip = new ZipInputStream(new ByteArrayInputStream(bytes))) {
+            ZipEntry entry;
+            while ((entry = zip.getNextEntry()) != null) {
+                if (++entries > MAX_ZIP_ENTRIES) {
+                    throw new MaterialParseException(fileName,
+                            "这个 Word 文档内部结构过于复杂，读不了。可以用「粘贴文本」把内容贴进来。");
+                }
+                int read;
+                while ((read = zip.read(chunk)) != -1) {
+                    total += read;
+                    if (total > MAX_UNCOMPRESSED_BYTES) {
+                        throw new MaterialParseException(fileName,
+                                "这个 Word 文档解压后的内容过大，读不了。请精简后重新上传，或改用「粘贴文本」。");
+                    }
+                }
+            }
+        } catch (IOException e) {
+            // 连 zip 都读不出来，说明不是有效的 docx；交给下面 POI 那一步给出更准确的提示
+            return;
+        } catch (MaterialParseException e) {
+            throw e;
         }
     }
 }

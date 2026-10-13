@@ -42,7 +42,9 @@ public class AiClientResolver {
         if (apiKey.isEmpty()) {
             return AiCredentials.none();
         }
-        String baseUrl = firstNonBlank(request == null ? "" : request.getHeader(HEADER_BASE_URL), config.getBaseUrl());
+        // A caller may choose a destination only for their own key, never for a server secret.
+        String baseUrl = headerKey.isEmpty() ? config.getBaseUrl()
+                : firstNonBlank(request.getHeader(HEADER_BASE_URL), config.getBaseUrl());
         String model = firstNonBlank(request == null ? "" : request.getHeader(HEADER_MODEL), config.getModel());
         return new AiCredentials(apiKey, baseUrl, model);
     }

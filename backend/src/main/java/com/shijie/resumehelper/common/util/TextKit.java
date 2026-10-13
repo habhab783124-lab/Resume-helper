@@ -71,6 +71,8 @@ public final class TextKit {
         }
         String text = raw.replace("\r\n", "\n")
                 .replace('\r', '\n')
+                .replace("\u0000", "")    // 二进制残留：有些 PDF/DOCX 抽出来会夹这个
+                .replace("\uFEFF", "")    // BOM：混进正文会让第一个字段识别不出来
                 .replace('\u00A0', ' ')   // 不间断空格
                 .replace('\u3000', ' ');  // 全角空格
         StringBuilder sb = new StringBuilder(text.length());

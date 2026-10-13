@@ -85,7 +85,7 @@ public class MaterialService {
             Material failed = new Material(id, userId, input.fileName(), extension, input.contentType(),
                     input.bytes().length, Material.Status.FAILED, 0, 0, e.getMessage(), Instant.now());
             store.saveOriginal(failed, input.bytes());
-            return new MaterialDetailView(MaterialView.from(failed, 0), null);
+            return new MaterialDetailView(MaterialView.from(failed, 0), null, "");
         }
 
         if (extraction.suspectedScanned()) {
@@ -93,7 +93,7 @@ public class MaterialService {
                     input.bytes().length, Material.Status.SCANNED, extraction.pageCount(), 0,
                     extraction.message(), Instant.now());
             store.saveOriginal(scanned, input.bytes());
-            return new MaterialDetailView(MaterialView.from(scanned, 0), null);
+            return new MaterialDetailView(MaterialView.from(scanned, 0), null, "");
         }
 
         Material material = new Material(id, userId, input.fileName(), extension, input.contentType(),
@@ -132,7 +132,8 @@ public class MaterialService {
                 material.id(), material.status(), profile.itemCount(), profile.warnings().size());
         return new MaterialDetailView(
                 MaterialView.from(material, profile.itemCount()),
-                ExtractionView.of(material, profile));
+                ExtractionView.of(material, profile),
+                text);
     }
 
     /**
@@ -161,9 +162,11 @@ public class MaterialService {
     public Optional<MaterialDetailView> find(String userId, String materialId) {
         return store.find(userId, materialId).map(material -> {
             ExtractedProfile profile = store.readExtraction(userId, materialId).orElse(null);
+            String text = store.readText(userId, materialId).orElse("");
             return new MaterialDetailView(
                     MaterialView.from(material, profile == null ? 0 : profile.itemCount()),
-                    ExtractionView.of(material, profile));
+                    ExtractionView.of(material, profile),
+                    text);
         });
     }
 

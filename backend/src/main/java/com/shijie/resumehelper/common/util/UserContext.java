@@ -31,4 +31,19 @@ public final class UserContext {
     public static String resolve(String headerValue) {
         return TextKit.isBlank(headerValue) ? DEFAULT_USER : headerValue.trim();
     }
+
+    /**
+     * 从请求里解析用户 id。
+     *
+     * <h2>为什么所有模块都要走这一个方法</h2>
+     * 材料模块和面试模块原来各自认身份：材料模块读请求头，面试模块用
+     * {@code request.getSession().getId()}。统一之前，面试模块按 session id
+     * 去查材料模块按请求头存的简历，<b>永远查不到</b>——而且不会报错，
+     * 只会显示"简历不存在"，非常难排查。
+     *
+     * <p>身份来源只留这一个入口，就不会再出现两个模块对不上号的情况。
+     */
+    public static String resolve(jakarta.servlet.http.HttpServletRequest request) {
+        return request == null ? DEFAULT_USER : resolve(request.getHeader(HEADER));
+    }
 }
