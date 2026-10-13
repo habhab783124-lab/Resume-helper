@@ -32,6 +32,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch 
     start: (body, ai) => request('/interviews', { method: 'POST', body, ai }),
     getSession: id => request(sessionPath(id)),
     answer: (id, body, ai) => request(`${sessionPath(id)}/turns`, { method: 'POST', body, ai }),
-    finish: id => request(`${sessionPath(id)}/finish`, { method: 'POST' })
+    finish: id => request(`${sessionPath(id)}/finish`, { method: 'POST' }),
+    report: (id, ai = {}) => request(`${sessionPath(id)}/report`, { ai })
   }
 }

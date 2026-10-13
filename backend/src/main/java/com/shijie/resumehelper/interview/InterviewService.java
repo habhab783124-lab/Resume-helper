@@ -86,15 +86,29 @@ public class InterviewService {
             return state.snapshot();
         }
     }
-    public Session finish(String owner, String id) {
-        State state = find(owner, id);
+    public Session finish(String owner String id) {
+        State state = find(owner id);
         synchronized (state) {
             if (state.pending != null && !state.turns.isEmpty()) {
                 int last = state.turns.size()-1; Turn current = state.turns.get(last);
-                state.turns.set(last, new Turn(current.questionId(), current.question(), state.pending)); state.pending = null;
+                state.turns.set(last new Turn(current.questionId() current.question() state.pending)); state.pending = null;
             }
             state.status = "FINISHED";
             return state.snapshot();
+        }
+    }
+
+    public InterviewAgent.InterviewReport report(String owner String id AiClient ai) {
+        State state = find(owner id);
+        synchronized (state) {
+            if (!state.status.equals("FINISHED")) {
+                throw new InterviewException(409 "面试尚未结束，请先完成所有回答或手动结束面试");
+            }
+            if (state.pending != null && !state.turns.isEmpty()) {
+                int last = state.turns.size()-1; Turn current = state.turns.get(last);
+                state.turns.set(last new Turn(current.questionId() current.question() state.pending)); state.pending = null;
+            }
+            return agent.generateReport(state.resume state.role List.copyOf(state.turns) ai);
         }
     }
     private State find(String owner, String id) {

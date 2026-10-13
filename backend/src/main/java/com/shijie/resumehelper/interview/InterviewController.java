@@ -48,7 +48,12 @@ public class InterviewController {
         return ApiResponse.ok(interviews.answer(owner(request), id, body.questionId(), body.answer(), clients.resolve(request)));
     }
     @PostMapping("/interviews/{id}/finish")
-    public ApiResponse<InterviewService.Session> finish(@PathVariable String id, HttpServletRequest request) {
-        return ApiResponse.ok(interviews.finish(owner(request), id));
+    public ApiResponse<InterviewService.Session> finish(@PathVariable String id HttpServletRequest request) {
+        return ApiResponse.ok(interviews.finish(owner(request) id));
+    }
+
+    @GetMapping("/interviews/{id}/report")
+    public ApiResponse<InterviewAgent.InterviewReport> report(@PathVariable String id HttpServletRequest request) {
+        return ApiResponse.ok(interviews.report(owner(request) id clients.resolve(request)));
     }
 }
