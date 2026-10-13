@@ -37,7 +37,6 @@ public class InterviewService {
             sessions.values().removeIf(s -> s.expires.isBefore(Instant.now()));
             if (sessions.size() >= 2000 || sessions.values().stream().filter(s -> s.owner.equals(owner)).count() >= 20)
                 throw new InterviewException(429, "暂存面试数量已达上限，请稍后再试");
-            // Reserve capacity before the model call, and remove it if generation fails.
             sessions.put(state.id, state);
         }
         synchronized (state) {
@@ -78,7 +77,6 @@ public class InterviewService {
             } else {
                 List<Turn> history = new ArrayList<>(state.turns); history.set(last, answered);
                 String question = agent.nextQuestion(state.resume, state.role, history, state.count, ai);
-                // Commit only after a valid model response; errors retain pending answer for retry.
                 state.turns.set(last, answered);
                 state.turns.add(new Turn(UUID.randomUUID().toString(), question, null));
                 state.pending = null;
@@ -86,29 +84,29 @@ public class InterviewService {
             return state.snapshot();
         }
     }
-    public Session finish(String owner String id) {
-        State state = find(owner id);
+    public Session finish(String owner, String id) {
+        State state = find(owner, id);
         synchronized (state) {
             if (state.pending != null && !state.turns.isEmpty()) {
                 int last = state.turns.size()-1; Turn current = state.turns.get(last);
-                state.turns.set(last new Turn(current.questionId() current.question() state.pending)); state.pending = null;
+                state.turns.set(last, new Turn(current.questionId(), current.question(), state.pending)); state.pending = null;
             }
             state.status = "FINISHED";
             return state.snapshot();
         }
     }
 
-    public InterviewAgent.InterviewReport report(String owner String id AiClient ai) {
-        State state = find(owner id);
+    public InterviewAgent.InterviewReport report(String owner, String id, AiClient ai) {
+        State state = find(owner, id);
         synchronized (state) {
             if (!state.status.equals("FINISHED")) {
-                throw new InterviewException(409 "面试尚未结束，请先完成所有回答或手动结束面试");
+                throw new InterviewException(409, "面试尚未结束，请先完成所有回答或手动结束面试");
             }
             if (state.pending != null && !state.turns.isEmpty()) {
                 int last = state.turns.size()-1; Turn current = state.turns.get(last);
-                state.turns.set(last new Turn(current.questionId() current.question() state.pending)); state.pending = null;
+                state.turns.set(last, new Turn(current.questionId(), current.question(), state.pending)); state.pending = null;
             }
-            return agent.generateReport(state.resume state.role List.copyOf(state.turns) ai);
+            return agent.generateReport(state.resume, state.role, List.copyOf(state.turns), ai);
         }
     }
     private State find(String owner, String id) {
