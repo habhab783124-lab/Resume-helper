@@ -16,8 +16,13 @@ function mount(apiStub) {
   const ref = initial => ({ value: initial })
   const computed = getter => ({ get value() { return getter() } })
   const mounted = []
-  return new Function('ref', 'computed', 'onMounted', 'createInterviewApi', setupBody)(
-    ref, computed, callback => mounted.push(callback), () => apiStub)
+  const pushes = []
+  const view = new Function(
+    'ref', 'computed', 'onMounted', 'createInterviewApi', 'useRouter', setupBody)(
+    ref, computed, callback => mounted.push(callback), () => apiStub,
+    () => ({ push: route => pushes.push(route) }))
+  view.pushes = pushes
+  return view
 }
 
 const session = (turns, currentQuestion, pendingAnswer = null) => ({
