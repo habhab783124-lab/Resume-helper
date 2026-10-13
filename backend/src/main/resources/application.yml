@@ -72,6 +72,14 @@ app:
       # 服务端兜底密钥。留空表示「必须由前端携带用户自己的 token」。
       # 注意：不要把真实密钥提交到仓库，用环境变量注入。
       api-key: ${AI_API_KEY:}
+      # 允许前端用「自己的密钥 + 自定义 Base URL」访问的 HTTPS origin 清单。
+      # 只写协议+主机（可带端口），不带路径。用户密钥会由后端发出，目的地址若不限制
+      # 就是 SSRF 入口；要接自建网关就把自己可信的 HTTPS 网关登记进来。
+      # 服务端自身的 base-url 不受此限制，本地测试服务器照常可用。
+      allowed-browser-origins:
+        - https://api.deepseek.com
+        - https://dashscope.aliyuncs.com
+        - https://ark.cn-beijing.volces.com
       timeout-seconds: 60
       max-tokens: 800
       temperature: 0.2

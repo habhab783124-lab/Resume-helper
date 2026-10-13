@@ -110,6 +110,20 @@ public class JobModuleProperties {
          * 请求头里的用户 token 优先，没有再回落到这里的服务端密钥。
          */
         private String apiKey = "";
+        /**
+         * 允许浏览器自定义模型地址使用的 HTTPS origin 列表。
+         *
+         * <p>只填 origin（协议 + 主机 [+ 端口]），不带路径。用户带自己的密钥时，
+         * 请求里给的 Base URL 必须命中其中之一，否则拒绝。
+         *
+         * <p>不加这一层的话，任何非空用户密钥加一个自定义地址都能驱动后端去请求
+         * 环回或内网地址，等于给了 SSRF 入口。部署者要接自建网关就把自己的
+         * 可信 HTTPS 网关登记进来；服务端自身配置不受此限制。
+         */
+        private List<String> allowedBrowserOrigins = new ArrayList<>(List.of(
+                "https://api.deepseek.com",
+                "https://dashscope.aliyuncs.com",
+                "https://ark.cn-beijing.volces.com"));
         private int timeoutSeconds = 60;
         private int maxTokens = 800;
         private double temperature = 0.2;
@@ -136,6 +150,16 @@ public class JobModuleProperties {
 
         public void setApiKey(String apiKey) {
             this.apiKey = apiKey;
+        }
+
+        public List<String> getAllowedBrowserOrigins() {
+            return allowedBrowserOrigins;
+        }
+
+        public void setAllowedBrowserOrigins(List<String> allowedBrowserOrigins) {
+            this.allowedBrowserOrigins = allowedBrowserOrigins == null
+                    ? new ArrayList<>()
+                    : new ArrayList<>(allowedBrowserOrigins);
         }
 
         public int getTimeoutSeconds() {

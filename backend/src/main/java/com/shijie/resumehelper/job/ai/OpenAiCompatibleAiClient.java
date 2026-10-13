@@ -29,10 +29,15 @@ import java.time.Duration;
  */
 public final class OpenAiCompatibleAiClient implements AiClient {
 
-    /** 连接超时固定 15 秒；读取超时按配置。HttpClient 是线程安全的，可以全局复用。 */
+    /**
+     * 连接超时固定 15 秒；读取超时按配置。HttpClient 是线程安全的，可以全局复用。
+     *
+     * <p>不跟随重定向：用户自带的密钥会随请求发出，一旦目标地址被重定向，
+     * 密钥就会流向我们没有校验过的地址。要重定向就直说，由配置或白名单处理。
+     */
     private static final HttpClient HTTP = HttpClient.newBuilder()
             .connectTimeout(Duration.ofSeconds(15))
-            .followRedirects(HttpClient.Redirect.NORMAL)
+            .followRedirects(HttpClient.Redirect.NEVER)
             .build();
 
     private final AiCredentials credentials;
@@ -116,10 +121,8 @@ public final class OpenAiCompatibleAiClient implements AiClient {
             }
             JsonNode message = choices.get(0).path("message");
             String content = message.path("content").asText("");
-            if (content.isBlank()) {
-                // 部分推理模型会把正文放在 reasoning_content
-                content = message.path("reasoning_content").asText("");
-            }
+            // 只认 content。部分推理模型把思考写在 reasoning_content 里而 content 为空；
+            // 回退到它会让我们把思考过程当成正式正文，甚至直接朗读出来。
             if (content.isBlank()) {
                 throw new AiException("大模型没有返回可用文本", true);
             }
