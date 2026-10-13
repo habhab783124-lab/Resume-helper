@@ -1,7 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
 
+const router = useRouter()
 const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || '' })
 const storageKey = 'career-studio-interview-id'
 const material = ref(null)
@@ -103,7 +105,13 @@ function submitAnswer() {
     }
   })
 }
-function finish() { return run('正在结束面试…', async () => applySession(await api.finish(session.value.sessionId))) }
+function finish() {
+  return run('正在结束面试并生成报告…', async () => {
+    const finished = await api.finish(session.value.sessionId)
+    applySession(finished)
+    router.push({ name: 'Report', query: { sessionId: finished.sessionId } })
+  })
+}
 function checkAi() {
   return run('正在测试连接…', async () => {
     aiCheck.value = ''

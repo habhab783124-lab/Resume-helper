@@ -1,3 +1,14 @@
 title,company,city,district,salary,education,experience,jobType,skills,description,sourceUrl
-Java 后端开发工程师,示例企业A,上海,浦东,15-22K,本科,应届 / 1 年以内,校招,Java|Spring Boot|MySQL,负责后端接口开发与维护。请把这一行替换成你人工整理的岗位。,
-后端研发工程师,示例企业B,杭州,余杭,16-24K,本科,应届 / 1 年以内,校招,Java|Redis|MySQL,"负责 SaaS 产品的后端研发，涉及租户隔离、权限与计费模块。这是带逗号的描述，用双引号包裹。",https://example.com/job/b
+Java 后端开发工程师,示例企业A,上海,浦东,15-22K,本科,应届 / 1 年以内,校招,"Java|Spring Boot|MySQL|Redis",负责后端接口开发与维护。根据业务需求进行技术方案设计，参与核心模块开发，编写单元测试，与前端协作完成产品功能落地。,
+后端研发工程师,示例企业B,杭州,余杭,16-24K,本科,应届 / 1 年以内,校招,"Java|Redis|MySQL|Kafka",负责 SaaS 产品的后端研发，涉及租户隔离、权限与计费模块的实现与优化。参与技术选型，推动系统性能提升。,https://example.com/job/b
+前端开发工程师,示例企业C,上海,徐汇,14-20K,本科,应届 / 1 年以内,校招,"Vue|TypeScript|JavaScript|CSS",负责公司 Web 产品前端开发，参与组件库建设，优化页面性能，与产品设计师协作完成交互细节。,https://example.com/job/c
+React 前端工程师,示例企业D,北京,朝阳,18-28K,本科,1-3 年经验,社招,"React|TypeScript|Node.js|Webpack",负责中后台管理系统开发，使用 React + Redux 技术栈，搭建前端工程化体系，推动团队技术升级。,https://example.com/job/d
+Python 算法工程师,示例企业E,北京,海淀,20-35K,硕士,应届 / 1 年以内,校招,"Python|PyTorch|TensorFlow|NLP",负责自然语言处理相关算法研发，包括文本分类、信息抽取等任务，参与模型训练与在线服务部署。,https://example.com/job/e
+数据分析师,示例企业F,深圳,南山,13-18K,本科,应届 / 1 年以内,校招,"Python|SQL|Excel|Tableau",负责业务数据清洗与分析，撰写数据分析报告，为产品决策提供数据支持，搭建数据监控看板。,https://example.com/job/f
+产品经理（互联网方向）,示例企业G,上海,静安,16-24K,本科,1-3 年经验,社招,"需求分析|PRD|用户研究|数据分析",负责 B 端 SaaS 产品的规划与迭代，收集用户需求，撰写产品文档，协调研发、设计、测试团队推进项目落地。,https://example.com/job/g
+测试工程师,示例企业H,杭州,西湖,12-18K,本科,应届 / 1 年以内,校招,"Selenium|Java|接口测试|自动化",负责 Web 产品功能测试、接口测试，搭建自动化测试框架，参与性能测试与稳定性保障。,https://example.com/job/h
+运维工程师,示例企业I,北京,海淀,15-22K,本科,1-3 年经验,社招,"Linux|Docker|Kubernetes|Shell",负责公司基础设施运维，包括 CI/CD 流水线搭建、容器化部署、监控告警体系建设。,https://example.com/job/i
+Go 后端工程师,示例企业J,深圳,福田,18-28K,本科,1-3 年经验,社招,"Go|Redis|MySQL|gRPC",负责高并发微服务架构开发，使用 Go 语言实现核心业务逻辑，优化接口性能，保障系统稳定性。,https://example.com/job/j
+UI/UX 设计师,示例企业K,上海,黄浦,14-20K,本科,应届 / 1 年以内,校招,"Figma|Sketch|交互设计|视觉设计",负责移动端 App 和 Web 产品的界面设计与交互设计，输出高保真原型，与产品和研发协作推动设计落地。,https://example.com/job/k
+移动端开发工程师（iOS）,示例企业L,北京,朝阳,18-26K,本科,1-3 年经验,社招,"Swift|Objective-C|UIKit|SwiftUI",负责 iOS App 功能开发与性能优化，参与客户端架构设计，编写高质量代码，保障 App 流畅稳定。,https://example.com/job/l
+机器学习工程师,示例企业M,上海,浦东,25-40K,硕士,1-3 年经验,社招,"Python|PyTorch|Docker|Kubernetes",负责推荐系统模型研发，包括召回、排序模型设计与优化，参与模型服务化与持续迭代。,https://example.com/job/m

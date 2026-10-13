@@ -51,4 +51,9 @@ public class InterviewController {
     public ApiResponse<InterviewService.Session> finish(@PathVariable String id, HttpServletRequest request) {
         return ApiResponse.ok(interviews.finish(owner(request), id));
     }
+
+    @GetMapping("/interviews/{id}/report")
+    public ApiResponse<InterviewAgent.InterviewReport> report(@PathVariable String id, HttpServletRequest request) {
+        return ApiResponse.ok(interviews.report(owner(request), id, clients.resolve(request)));
+    }
 }
