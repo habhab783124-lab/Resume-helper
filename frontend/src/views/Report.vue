@@ -198,6 +198,7 @@ onMounted(loadReport)
     </footer>
   </template>
 </section>
+</template>
 
 <style scoped>
 .loading-wrap, .error-wrap {
