@@ -1,6 +1,6 @@
 export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch } = {}) {
   const root = `${baseUrl.replace(/\/$/, '')}/api`
-  async function request(path, { method = 'GET', body, ai = {} } = {}) {
+  async function request(path, { method = 'GET', body, ai = {}, signal } = {}) {
     const headers = {}
     if (ai.apiKey?.trim()) headers['X-AI-Api-Key'] = ai.apiKey.trim()
     if (ai.model?.trim()) headers['X-AI-Model'] = ai.model.trim()
@@ -10,7 +10,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch 
       headers['Content-Type'] = 'application/json'
       body = JSON.stringify(body)
     }
-    const reply = await fetchImpl(`${root}${path}`, { method, headers, body, credentials: 'include' })
+    const reply = await fetchImpl(`${root}${path}`, { method, headers, body, credentials: 'include', signal })
     let envelope
     try { envelope = await reply.json() } catch {
       throw Object.assign(new Error(`服务返回了无效响应（HTTP ${reply.status}）`), { status: reply.status })
@@ -54,6 +54,37 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch 
     getSession: id => request(sessionPath(id)),
     answer: (id, body, ai) => request(`${sessionPath(id)}/turns`, { method: 'POST', body, ai }),
     finish: id => request(`${sessionPath(id)}/finish`, { method: 'POST' }),
-    report: (id, ai = {}) => request(`${sessionPath(id)}/report`, { ai })
+    report: (id, ai = {}) => request(`${sessionPath(id)}/report`, { ai }),
+    getSpeechCapabilities: () => request('/interview-speech/capabilities'),
+    transcribe: (id, { questionId, requestId, file }, signal) => {
+      const body = new FormData()
+      body.append('questionId', questionId)
+      body.append('requestId', requestId)
+      body.append('file', file, file.name || 'answer.webm')
+      return request(`${sessionPath(id)}/transcriptions`, { method: 'POST', body, signal })
+    },
+    // 三个语音接口里只有这个是成功返回二进制、失败才返回 JSON，所以不复用 request。
+    async questionSpeech(id, questionId, signal) {
+      const reply = await fetchImpl(`${root}${sessionPath(id)}/questions/${encodeURIComponent(questionId)}/speech`, {
+        method: 'POST',
+        headers: {},
+        credentials: 'include',
+        signal,
+      })
+      if (!reply.ok) {
+        let message
+        try { message = (await reply.json()).message } catch { message = null }
+        throw Object.assign(
+          new Error(message || `题目语音生成失败（HTTP ${reply.status}）`),
+          { status: reply.status },
+        )
+      }
+      const type = (reply.headers.get('Content-Type') || '').toLowerCase()
+      const blob = await reply.blob()
+      if (!type.startsWith('audio/') || blob.size === 0) {
+        throw new Error('题目语音返回了无法播放的内容，请重试。')
+      }
+      return blob
+    }
   }
 }

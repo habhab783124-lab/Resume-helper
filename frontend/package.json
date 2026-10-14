@@ -7,7 +7,7 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/api/*.test.js"
+    "test": "node --test src/api/*.test.js src/interview/*.test.js"
   },
   "dependencies": {
     "vue": "^3.5.12",
