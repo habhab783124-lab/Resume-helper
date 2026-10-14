@@ -30,21 +30,26 @@ if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 $files = @()
-# 排除 material 包：它依赖 Apache POI / Apache PDFBox 解析文档，
-# 而这两个库没有打桩（给它们打桩要几十个类，得不偿失）。
-# 材料模块的正确性由真实构建验证：
-#   mvn -B test          单元/集成测试
-#   tools/material-check.ps1   用真实简历样本跑一遍抽取，人工核对结果
+# 这个自检只覆盖**岗位模块**（功能二）——它的核心逻辑是零框架依赖的纯 Java，
+# 所以能用 javac + 打桩在无网络环境下跑完 102 项断言。
+#
+# 其余模块都要真实依赖，一律排除：
+#   material  —— 依赖 Apache POI / Apache PDFBox 解析文档，没有打桩（打桩要几十个类，得不偿失）
+#   interview —— 依赖 Spring MVC 的控制器与语音适配器
+#   resume    —— 依赖 Spring（配置绑定）并且要读 material 的画像
+# 它们的正确性由真实构建验证：
+#   mvn -B test                  102 项单元/集成测试
+#   tools/material-check.ps1     用真实简历样本跑一遍抽取，人工核对结果
 $mainSources = Get-ChildItem -Path (Join-Path $backend 'src\main\java') -Recurse -File -Filter *.java |
-    Where-Object { $_.FullName -notmatch '\\material\\' }
+    Where-Object { $_.FullName -notmatch '\\(material|interview|resume)\\' }
 $files += $mainSources.FullName
 $files += (Get-ChildItem -Path (Join-Path $backend 'tools\verify-stubs') -Recurse -File -Filter *.java).FullName
 # src/test 里只取**不依赖 JUnit** 的离线自检（JobAgentOfflineDemo）。
 # 其余测试都基于 JUnit 5，需要 Maven 拉依赖；离线 javac 环境里没有 JUnit，
 # 硬编进来只会一堆 "package org.junit.jupiter.api does not exist"。
-# 那些测试由 `mvn test` 负责（当前 39 项）。
+# 那些测试由 `mvn test` 负责。
 $files += (Get-ChildItem -Path (Join-Path $backend 'src\test\java') -Recurse -File -Filter 'JobAgentOfflineDemo.java').FullName
-$files = @($files | Where-Object { $_ -notmatch '[\\/]interview[\\/]' })
+$files = @($files | Where-Object { $_ -notmatch '\\(interview|resume)\\' })
 
 Write-Host "编译 $($files.Count) 个文件 ..."
 & $javac -encoding UTF-8 -d $out $files 2>&1 | Out-String -Width 400 | Write-Host
