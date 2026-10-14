@@ -26,6 +26,13 @@ public class ProfileDto {
     private Integer yearsOfExperience;
     /** 学历，例如「本科」。 */
     private String education;
+    /**
+     * 教育经历，每条一行（学校 / 专业 / 时间）。
+     *
+     * <p>追加字段：岗位模块不用它，但个人资料页要按「教育经历」展示，
+     * 只有 {@code education}（学历层次）填不出来。面试模块的简历驱动出题也可能用得上。
+     */
+    private List<String> educations;
     /** 技能列表，例如 ["Java", "Spring Boot", "MySQL"]。 */
     private List<String> skills;
     /** 目标行业。 */
@@ -44,6 +51,7 @@ public class ProfileDto {
                 .targetCities(targetCities)
                 .yearsOfExperience(yearsOfExperience)
                 .education(education)
+                .educations(educations)
                 .skills(skills)
                 .industries(industries)
                 .expectedSalary(expectedSalary)
@@ -90,6 +98,14 @@ public class ProfileDto {
 
     public void setEducation(String education) {
         this.education = education;
+    }
+
+    public List<String> getEducations() {
+        return educations;
+    }
+
+    public void setEducations(List<String> educations) {
+        this.educations = educations;
     }
 
     public List<String> getSkills() {

@@ -434,6 +434,19 @@ function experienceLines() {
   }).filter(Boolean)
 }
 
+/**
+ * 教育经历同样拼成一行。
+ *
+ * 为什么要单独一个字段：画像里的 {@code education} 只有学历层次（"本科"），
+ * 那是岗位匹配的打分维度；而个人资料页要按「教育经历」展示，
+ * 需要学校 / 专业 / 时间，所以后端追加了 {@code educations}。
+ */
+function educationLines() {
+  return (draft.value?.educations || []).map((item) => {
+    return [item.school, item.degree, item.major, item.period].filter(Boolean).join(' · ')
+  }).filter(Boolean)
+}
+
 async function confirmProfile() {
   if (!draft.value) return
   const base = getProfile()
@@ -446,6 +459,7 @@ async function confirmProfile() {
       : (base.targetCities || []),
     yearsOfExperience: Number(draft.value.yearsOfExperience) || 0,
     education: draft.value.highestEducation || base.education || '',
+    educations: educationLines().length ? educationLines() : (base.educations || []),
     skills: (skillsText.value ? skillsText.value.split(/[,，、\s]+/).filter(Boolean) : draft.value.skills),
     industries: base.industries || [],
     expectedSalary: expectedSalary.value || base.expectedSalary || '',

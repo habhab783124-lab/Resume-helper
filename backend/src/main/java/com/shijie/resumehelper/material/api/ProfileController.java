@@ -64,8 +64,8 @@ public class ProfileController {
         // 否则客户端可以伪造别人的身份去覆盖资料
         UserProfileSnapshot profile = new UserProfileSnapshot(
                 resolved, body.targetTitle(), body.targetCities(), body.yearsOfExperience(),
-                body.education(), body.skills(), body.industries(), body.expectedSalary(),
-                body.summary(), body.experiences());
+                body.education(), body.educations(), body.skills(), body.industries(),
+                body.expectedSalary(), body.summary(), body.experiences());
         service.saveProfile(resolved, profile);
         return ApiResponse.ok(profile, "求职画像已保存");
     }
@@ -85,7 +85,10 @@ public class ProfileController {
     }
 
     private UserProfileSnapshot emptyProfile(String userId) {
-        return new UserProfileSnapshot(userId, "", java.util.List.of(), 0, "", java.util.List.of(),
-                java.util.List.of(), "", "", java.util.List.of());
+        // 用 Builder 而不是全参构造：字段一多，位置参数排错时根本看不出来
+        return UserProfileSnapshot.builder()
+                .userId(userId)
+                .yearsOfExperience(0)
+                .build();
     }
 }
