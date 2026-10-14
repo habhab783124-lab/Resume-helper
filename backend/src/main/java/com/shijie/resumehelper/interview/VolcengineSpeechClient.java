@@ -56,6 +56,12 @@ public class VolcengineSpeechClient implements SpeechClient {
     private static final int SUCCESS_CODE = 20000000;
     /** 实测：1 字节非法音频返回该码，说明格式校验在鉴权与授权之后生效。 */
     private static final int AUDIO_NOT_DECODABLE = 45000151;
+    /** 资源未授权 / 额度用尽：用户重试不会变好，得联系部署者。 */
+    private static final int RESOURCE_NOT_GRANTED = 45000030;
+    private static final int QUOTA_EXCEEDED = 45000292;
+    private static final String NOT_CONFIGURED = "语音服务未配置，文字面试仍可继续使用";
+    private static final String UNAVAILABLE = "语音服务暂时不可用，请重试";
+    private static final String PERMANENT_FAILURE = "语音服务不可用，请联系部署者检查资源授权或额度";
     private static final int MAX_ASR_RESPONSE_BYTES = 1024 * 1024;
     private static final int MAX_SYNTH_BYTES = 5 * 1024 * 1024;
     private static final String SYNTH_CONTENT_TYPE = "audio/mpeg";
@@ -89,6 +95,7 @@ public class VolcengineSpeechClient implements SpeechClient {
         if (wav == null || wav.length == 0) {
             throw new InterviewException(400, "录音内容为空");
         }
+        requireConfigured(requestId);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + ASR_PATH))
@@ -126,21 +133,16 @@ public class VolcengineSpeechClient implements SpeechClient {
                 log.warn("ASR 响应超过 {} 字节上限 requestId={}", MAX_ASR_RESPONSE_BYTES, requestId);
                 throw new InterviewException(502, "语音服务返回异常，请重试");
             }
-            // HTTP 200 不代表识别成功，业务状态在响应头里。
-            String statusCode = response.headers().firstValue("X-Api-Status-Code").orElse("");
-            if (statusCode.isBlank()) {
-                log.warn("ASR 未返回业务状态码 requestId={}", requestId);
-                throw new InterviewException(502, "语音服务返回异常，请重试");
-            }
             JsonNode root = readTree(payload, requestId);
-            if (!String.valueOf(SUCCESS_CODE).equals(statusCode)) {
-                log.warn("ASR 业务失败 code={} requestId={} logid={}", businessCode(root), requestId,
+            // HTTP 200 不代表识别成功。业务状态优先取响应头；
+            // 实测有些错误（TTS 的 403）不带这个头，那种情况退回响应体的 header 字段，
+            // 不要因为缺头就丢掉已经拿到的诊断信息。
+            String headerCode = response.headers().firstValue("X-Api-Status-Code").orElse("");
+            int code = statusCodeFromResponse(headerCode, root);
+            if (code != SUCCESS_CODE) {
+                log.warn("ASR 业务失败 code={} 头={} requestId={} logid={}", code, headerCode, requestId,
                         response.headers().firstValue("X-Tt-Logid").orElse(""));
-                // 权限与配置类问题（45000030 资源未授权等）无法靠用户重试解决，但也不该让前端看到上游原文。
-                if (businessCode(root) == AUDIO_NOT_DECODABLE) {
-                    throw new InterviewException(415, "无法识别这段录音，请重新录音");
-                }
-                throw new InterviewException(502, "语音服务暂时不可用，请重试");
+                throw asrBusinessFailure(code);
             }
             String text = root.path("result").path("text").asText("").trim();
             long durationMs = root.path("audio_info").path("duration").asLong(0);
@@ -159,6 +161,7 @@ public class VolcengineSpeechClient implements SpeechClient {
         if (text == null || text.isBlank()) {
             throw new InterviewException(400, "没有可朗读的文字");
         }
+        requireConfigured(requestId);
 
         HttpRequest request = HttpRequest.newBuilder()
                 .uri(URI.create(baseUrl + TTS_PATH))
@@ -170,6 +173,9 @@ public class VolcengineSpeechClient implements SpeechClient {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(toJson(ttsBody(text))))
                 .build();
 
+        // HttpRequest.timeout 只覆盖到拿到响应头为止。deadline 必须从发起请求就算起，
+        // 否则响应头慢一次，合法音频流就会被读流阶段误判成超时。
+        long startedAtNanos = System.nanoTime();
         HttpResponse<InputStream> response;
         try {
             response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -193,7 +199,7 @@ public class VolcengineSpeechClient implements SpeechClient {
         if (stream == null) {
             throw new InterviewException(502, "题目语音生成失败，请稍后重试");
         }
-        return readTts(stream, requestId);
+        return readTts(stream, requestId, remainingTtsBudget(startedAtNanos));
     }
 
     // ------------------------------------------------------------------
@@ -202,10 +208,10 @@ public class VolcengineSpeechClient implements SpeechClient {
 
     /**
      * {@code HttpRequest.timeout} + {@code BodyHandlers.ofInputStream} 只限制拿到响应头的时长，
-     * 之后的流读取是无界的。消费阶段单独起一个线程并施加同样的 deadline，
+     * 之后的流读取是无界的。消费阶段单独起一个线程并施加整次调用的剩余预算，
      * 超时就关闭流并放弃这个半成品。
      */
-    private SpeechAudio readTts(InputStream stream, String requestId) {
+    private SpeechAudio readTts(InputStream stream, String requestId, Duration deadline) {
         ExecutorService reader = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "tts-stream-reader");
             thread.setDaemon(true);
@@ -214,7 +220,7 @@ public class VolcengineSpeechClient implements SpeechClient {
         Future<SpeechAudio> task = null;
         try {
             task = reader.submit(() -> consumeTts(stream));
-            return task.get(properties.getTtsTimeoutSeconds(), TimeUnit.SECONDS);
+            return task.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
         } catch (TimeoutException e) {
             log.warn("TTS 音频流消费超时 requestId={}", requestId);
             if (task != null) {
@@ -245,24 +251,23 @@ public class VolcengineSpeechClient implements SpeechClient {
             while (parts.hasNextValue()) {
                 JsonNode part = parts.nextValue();
                 int code = businessCode(part);
+                String data = part.path("data").asText("");
                 if (code == SUCCESS_CODE) {
                     complete = true;
                     break;
                 }
+                // 不带音频的片段（sentence 元数据、或连 code 都没有的片段）直接跳过：
+                // 它没有携带音频，不该让整个题目合成失败。
+                if (data.isEmpty()) {
+                    continue;
+                }
+                // 带音频却给不出业务状态码（code=-1）就拒绝——
+                // 无法判断成功与否，宁可不合成也不能交出可疑音频。
                 if (code != 0) {
                     log.warn("TTS 业务失败 code={}", code);
-                    throw new InterviewException(502, "题目语音生成失败，请稍后重试");
+                    throw ttsBusinessFailure(code);
                 }
-                String data = part.path("data").asText("");
-                if (data.isEmpty()) {
-                    continue;   // sentence 等元数据片段不带音频
-                }
-                byte[] bytes;
-                try {
-                    bytes = Base64.getDecoder().decode(data);
-                } catch (IllegalArgumentException e) {
-                    throw new InterviewException(502, "语音服务返回无效音频");
-                }
+                byte[] bytes = decodeAudioData(data);
                 if ((long) audio.size() + bytes.length > MAX_SYNTH_BYTES) {
                     throw new InterviewException(502, "题目音频超过大小限制");
                 }
@@ -286,7 +291,59 @@ public class VolcengineSpeechClient implements SpeechClient {
         if (status == 401 || status == 403) {
             return new InterviewException(502, "语音服务未授权或密钥无效，请检查配置");
         }
-        return new InterviewException(502, "语音服务暂时不可用，请重试");
+        return new InterviewException(502, UNAVAILABLE);
+    }
+
+    /**
+     * key 留空即语音能力关闭。不能拿空凭据发真实请求——那样用户会一直收到
+     * 一个改不了的 502，而问题其实要靠部署者配环境变量。
+     */
+    private void requireConfigured(String requestId) {
+        if (properties.getApiKey() == null || properties.getApiKey().isBlank()) {
+            log.warn("{}：未配置语音服务密钥，本次调用未发出", requestId);
+            throw new InterviewException(503, NOT_CONFIGURED);
+        }
+    }
+
+    private Duration remainingTtsBudget(long startedAtNanos) {
+        long total = Duration.ofSeconds(properties.getTtsTimeoutSeconds()).toNanos();
+        long elapsed = System.nanoTime() - startedAtNanos;
+        return Duration.ofNanos(Math.max(total - elapsed, 0));
+    }
+
+    private static InterviewException asrBusinessFailure(int code) {
+        return switch (code) {
+            case AUDIO_NOT_DECODABLE -> new InterviewException(415, "无法识别这段录音，请重新录音");
+            case RESOURCE_NOT_GRANTED, QUOTA_EXCEEDED -> new InterviewException(502, PERMANENT_FAILURE);
+            default -> new InterviewException(502, UNAVAILABLE);
+        };
+    }
+
+    private static InterviewException ttsBusinessFailure(int code) {
+        if (code == RESOURCE_NOT_GRANTED || code == QUOTA_EXCEEDED) {
+            return new InterviewException(502, "题目语音合成暂不可用，请联系部署者检查资源授权或额度");
+        }
+        return new InterviewException(502, "题目语音生成失败，请稍后重试");
+    }
+
+    /** 业务状态优先取响应头；实测有些错误不带这个头，退回响应体的 header 字段。 */
+    private static int statusCodeFromResponse(String headerCode, JsonNode body) {
+        if (headerCode == null || headerCode.isBlank()) {
+            return businessCode(body);
+        }
+        try {
+            return Integer.parseInt(headerCode.trim());
+        } catch (NumberFormatException e) {
+            return businessCode(body);
+        }
+    }
+
+    private static byte[] decodeAudioData(String data) {
+        try {
+            return Base64.getDecoder().decode(data);
+        } catch (IllegalArgumentException e) {
+            throw new InterviewException(502, "语音服务返回无效音频");
+        }
     }
 
     private ObjectNode asrBody(byte[] wav) {

@@ -71,7 +71,7 @@ public class AudioNormalizer {
             long maxMs = (long) properties.getMaxDurationSeconds() * 1000;
 
             // 容器里读得到时长就先拦，省得白转一次长音频。
-            // 读不到也不能拦：MediaRecorder 的 WebM 流式封装就没有 Duration 元素，
+            // 读不到时长不能拦：MediaRecorder 的 WebM 流式封装就没有 Duration 元素，
             // 那种情况靠下面对转码产物（定长 PCM）的测量兜底。
             long declaredMs = declaredDurationMs(inputFile, dir.resolve("ffprobe.out"),
                     dir.resolve("ffprobe.err"));
@@ -81,17 +81,20 @@ public class AudioNormalizer {
 
             transcode(inputFile, outputFile, dir.resolve("ffmpeg.err"));
 
-            long outputSize = Files.size(outputFile);
-            if (outputSize == 0 || outputSize > MAX_AUDIO_OUTPUT_BYTES) {
-                throw new InterviewException(415, UNREADABLE);
-            }
             byte[] wav = Files.readAllBytes(outputFile);
             if (!isWav(wav)) {
                 throw new InterviewException(415, UNREADABLE);
             }
+            // 时长判断必须先于大小上限：产物是 16k 单声道 PCM16，每多 1 秒 32 KB，
+            // 超长的录音很容易先撞上大小上限。那种情况用户需要的是"缩短录音"，
+            // 而不是"格式不对请重录"。
             long durationMs = wavDurationMs(wav);
             if (durationMs > maxMs) {
                 throw new InterviewException(422, tooLong(maxMs));
+            }
+            if (wav.length > MAX_AUDIO_OUTPUT_BYTES) {
+                log.warn("规范化音频 {} 字节超过 {} 上限", wav.length, MAX_AUDIO_OUTPUT_BYTES);
+                throw new InterviewException(415, UNREADABLE);
             }
             return new NormalizedAudio(wav, durationMs);
         } catch (IOException e) {
@@ -110,7 +113,15 @@ public class AudioNormalizer {
     // FFprobe
     // ------------------------------------------------------------------
 
-    /** 只有容器里读不到时长时返回 -1；格式不可解码或没有音轨直接抛 415。 */
+    /**
+     * 返回容器里声明的时长；读不到时返回 -1，交给转码后的定长 PCM 测量兜底。
+     * 只有两种情况在这里直接失败：ffprobe 根本没跑起来（503，见 {@link #runTool}），
+     * 或文件里确实没有音轨（415）。
+     *
+     * <p>ffprobe 报不出结构不当作格式错误：ffmpeg 的容错比 ffprobe 高，
+     * 真解不了的文件会在转码阶段以 415 被拦下，错误码一样，但不会把
+     * "ffprobe 解析不了"和"根本没有音轨"混成一个结论。
+     */
     private long declaredDurationMs(Path input, Path stdout, Path stderr) {
         // 注意：ffprobe 没有 -nostdin 和 -hide_banner，传了会直接报错。
         List<String> args = List.of(properties.getFfprobePath(),
@@ -121,13 +132,10 @@ public class AudioNormalizer {
                 "-of", "json",
                 input.toString());
         int exit = runTool(stdout, stderr, args);
-        if (exit != 0 || stdout == null) {
-            log.warn("ffprobe 失败 exit={} stderr={}", exit, tail(stderr));
-            throw new InterviewException(415, UNREADABLE);
-        }
-        JsonNode root = readTree(readFile(stdout));
+        JsonNode root = readTree(exit == 0 ? readFile(stdout) : "");
         if (root == null) {
-            throw new InterviewException(415, UNREADABLE);
+            log.warn("ffprobe 未能解析出结构 exit={} input={} stderr={}", exit, input.getFileName(), tail(stderr));
+            return -1;
         }
         boolean hasAudio = false;
         for (JsonNode stream : root.path("streams")) {
