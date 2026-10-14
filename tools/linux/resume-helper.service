@@ -1,0 +1,70 @@
+# =============================================================================
+#  拾阶求职工作台 · systemd 服务单元
+#
+#  为什么需要它：
+#    直接在 SSH 里 `java -jar` 有个致命问题——**你一断开连接，进程就被杀掉了**。
+#    用 systemd 托管才能：开机自启、挂了自动重启、断开 SSH 不影响。
+#
+#  安装（把下面的路径换成你的实际路径）：
+#    sudo cp resume-helper.service /etc/systemd/system/
+#    sudo systemctl daemon-reload
+#    sudo systemctl enable --now resume-helper
+#
+#  查看状态与日志：
+#    systemctl status resume-helper
+#    journalctl -u resume-helper -f
+#
+#  改端口或内存：编辑下面的 Environment 两行，然后
+#    sudo systemctl daemon-reload && sudo systemctl restart resume-helper
+# =============================================================================
+
+[Unit]
+Description=ShiJie Resume Helper (拾阶求职工作台)
+Documentation=https://github.com/habhab783124-lab/Resume-helper
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+
+# ↓↓↓ 改成你放包的目录 ↓↓↓
+#
+# ★ 注意是 app 子目录，不是包根目录 ★
+#   前端静态文件按 `file:./webapp/` 相对**工作目录**找，
+#   设成包根目录会导致接口正常但所有前端页面 404，而且日志里没有任何报错。
+WorkingDirectory=/opt/resume-helper/app
+ExecStart=/opt/resume-helper/jre/bin/java \
+    -Dfile.encoding=UTF-8 \
+    -Dsun.jnu.encoding=UTF-8 \
+    -Djava.awt.headless=true \
+    -Xmx768m \
+    -jar /opt/resume-helper/app/resume-helper-backend-0.1.0-SNAPSHOT.jar \
+    --server.port=8080
+
+# 端口与内存也在这里改。用 Environment 而不是写死在 ExecStart 里，
+# 是为了让人一眼看到"这两个值是要按机器调整的"。
+Environment=PORT=8080
+Environment=JVM_MEM=768m
+
+Restart=on-failure
+RestartSec=5s
+
+# 用普通用户跑，不要用 root：
+#   这个服务会解析用户上传的文件、写出文件。万一解析库有漏洞，
+#   root 权限会让影响面大得多。
+# User=resume
+# Group=resume
+
+# 基础加固：只允许写自己的工作目录
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=full
+ProtectHome=read-only
+ReadWritePaths=/opt/resume-helper
+
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=resume-helper
+
+[Install]
+WantedBy=multi-user.target
