@@ -4,9 +4,9 @@
 
 ## 一、当前部署与真实服务准备
 
-- [ ] 在当前后端部署环境配置语音技术控制台的 `VOLC_SPEECH_API_KEY`，核实真实授权与额度。
-- [ ] 显式配置账号实际授权的 `VOLC_ASR_RESOURCE_ID`，使后端与 smoke 脚本使用相同资源；核实 TTS 资源及 `VOLC_TTS_SPEAKER` 权限。
-- [ ] 用当前凭据重新执行 TTS→ASR 冒烟，并人工试听音色与问题内容；历史账户记录不能代替当前复测。
+- [ ] 将根目录 `.env` 别名映射为正式环境变量并注入实际后端部署进程；核实剩余额度与实际计费。
+- [ ] 在实际部署显式配置 `VOLC_ASR_RESOURCE_ID=volc.seedasr.sauc.duration`，使后端与 smoke 脚本一致；确认部署采用已验证音色。
+- [ ] 人工试听当前凭据生成的音色与问题内容。
 - [ ] 用当前文本模型凭据验证真实出题、追问与 AI 报告，以及当前标签页个人模型设置的跨页面使用。
 - [ ] 在目标部署进程中核对 FFmpeg/FFprobe 路径与权限、HTTPS/localhost 入口和至少 100 秒代理超时；前端转写默认 90 秒。
 - [ ] 若演示部署在 Windows，实测 PATH 下 ffmpeg.exe/ffprobe.exe 的能力报告、WebM/MP4 转码及子进程/临时文件清理；POSIX 自动化测试不能替代。
