@@ -1,8 +1,8 @@
 package com.shijie.resumehelper.interview;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.shijie.resumehelper.job.ai.AiClient;
-import com.shijie.resumehelper.job.ai.AiClientResolver;
+import com.shijie.resumehelper.common.ai.AiClient;
+import com.shijie.resumehelper.common.ai.AiClientResolver;
 import jakarta.servlet.http.HttpServletRequest;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;

@@ -1,12 +1,11 @@
-package com.shijie.resumehelper.job.ai;
+package com.shijie.resumehelper.common.ai;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ArrayNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
-import com.shijie.resumehelper.job.config.JobModuleProperties;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.io.IOException;
 import java.net.URI;
@@ -41,11 +40,11 @@ public final class OpenAiCompatibleAiClient implements AiClient {
             .build();
 
     private final AiCredentials credentials;
-    private final JobModuleProperties.Ai config;
+    private final AiProperties config;
     private final ObjectMapper mapper;
 
     public OpenAiCompatibleAiClient(AiCredentials credentials,
-                                    JobModuleProperties.Ai config,
+                                    AiProperties config,
                                     ObjectMapper mapper) {
         this.credentials = credentials;
         this.config = config;

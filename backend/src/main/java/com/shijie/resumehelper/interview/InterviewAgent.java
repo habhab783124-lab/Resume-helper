@@ -1,7 +1,7 @@
 package com.shijie.resumehelper.interview;
 
-import com.shijie.resumehelper.job.ai.AiClient;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.ai.AiClient;
+import com.shijie.resumehelper.common.util.TextKit;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;

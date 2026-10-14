@@ -28,3 +28,9 @@ tools/sources.txt
 
 ### 本地配置：不要把真实 API Key 提交上来 ###
 src/main/resources/application-local.yml
+
+### 材料模块的运行时存储（上传的原文件、抽出的原文、抽取结果）###
+# 这里面是**用户上传的简历**，属于个人信息，绝对不能提交。
+data/
+# 抽取质量的排查输出
+tools/material-check-out/

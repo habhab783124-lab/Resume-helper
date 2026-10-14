@@ -1,6 +1,6 @@
-package com.shijie.resumehelper.job.ai;
+package com.shijie.resumehelper.common.ai;
 
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.util.ArrayList;
 import java.util.List;

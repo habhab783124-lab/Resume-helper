@@ -1,8 +1,7 @@
 package com.shijie.resumehelper.interview;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.shijie.resumehelper.job.ai.*;
-import com.shijie.resumehelper.job.config.JobModuleProperties;
+import com.shijie.resumehelper.common.ai.*;
 import com.sun.net.httpserver.HttpServer;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
@@ -26,7 +25,7 @@ class InterviewModelTransportTest {
         });
         server.start();
         try {
-            var client = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1", "test-model"), new JobModuleProperties.Ai(), new ObjectMapper());
+            var client = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1", "test-model"), new AiProperties(), new ObjectMapper());
             String question = new InterviewAgent().nextQuestion("Java Redis 校园项目", "Java后端", List.of(new InterviewService.Turn("q1", "如何优化？", "增加缓存")), 5, client);
             assertEquals("缓存失效后如何保护数据库？", question);
             var body = new ObjectMapper().readTree(payload.get());
@@ -48,7 +47,7 @@ class InterviewModelTransportTest {
         });
         server.start();
         try {
-            var client = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1", "test-model"), new JobModuleProperties.Ai(), new ObjectMapper());
+            var client = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1", "test-model"), new AiProperties(), new ObjectMapper());
             var thrown = assertThrows(AiClient.AiException.class, () -> client.chat("系统提示", "用户提示"));
             assertFalse(thrown.getMessage().contains("思考过程"), "错误提示不应回显思考内容");
             var agent = assertThrows(InterviewException.class, () -> new InterviewAgent().nextQuestion("简历内容", "Java后端", List.of(), 5, client));
@@ -67,12 +66,11 @@ class InterviewModelTransportTest {
         });
         server.start();
         try {
-            var ai = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1", "test-model"), new JobModuleProperties.Ai(), new ObjectMapper());
-            var materials = new MaterialService();
-            var materialId = materials.upload("owner", new MockMultipartFile("file", "resume.txt", "text/plain",
-                    "张同学：Java Spring Boot 校园项目，负责 Redis 缓存优化。".getBytes(StandardCharsets.UTF_8))).materialId();
-            var service = new InterviewService(materials, new InterviewAgent());
-            var session = service.start("owner", materialId, "", 3, (s, p) -> "介绍你的项目？");
+            var ai = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1", "test-model"), new AiProperties(), new ObjectMapper());
+            // 面试服务不再自己查材料：统一材料模块后，简历正文由调用方传入
+            var service = new InterviewService(new InterviewAgent());
+            var session = service.start("owner", "mat-test",
+                    "张同学：Java Spring Boot 校园项目，负责 Redis 缓存优化。", "", 3, (s, p) -> "介绍你的项目？");
             String questionId = session.currentQuestion().questionId();
             assertThrows(InterviewException.class, () -> service.answer("owner", session.sessionId(), questionId, "我的回答", ai));
             var state = service.get("owner", session.sessionId());
@@ -98,7 +96,7 @@ class InterviewModelTransportTest {
         });
         server.start();
         try {
-            var client = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1/redirect", "test-model"), new JobModuleProperties.Ai(), new ObjectMapper());
+            var client = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key", "http://127.0.0.1:"+server.getAddress().getPort()+"/v1/redirect", "test-model"), new AiProperties(), new ObjectMapper());
             var thrown = assertThrows(AiClient.AiException.class, () -> client.chat("系统提示", "用户提示"));
             assertTrue(thrown.getMessage().contains("302"), "302 未被跟随而被当成异常状态返回：" + thrown.getMessage());
         } finally { server.stop(0); }

@@ -1,16 +1,15 @@
 package com.shijie.resumehelper.interview;
 
-import com.shijie.resumehelper.job.ai.AiClient;
+import com.shijie.resumehelper.common.ai.AiClient;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
 
 @Service
 public class InterviewService {
-    private final MaterialService materials;
     private final InterviewAgent agent;
     private final Map<String, State> sessions = new HashMap<>();
-    public InterviewService(MaterialService materials, InterviewAgent agent) { this.materials = materials; this.agent = agent; }
+    public InterviewService(InterviewAgent agent) { this.agent = agent; }
     public record Turn(String questionId, String question, String answer) {}
     public record Session(String sessionId, String materialId, String targetRole, int questionCount,
                           String status, List<Turn> turns, Turn currentQuestion, String pendingAnswer) {}
@@ -20,19 +19,34 @@ public class InterviewService {
         final Instant expires = Instant.now().plusSeconds(86400);
         final List<Turn> turns = new ArrayList<>();
         String status = "ACTIVE", pending;
-        State(String owner, MaterialService.Material material, String role, int count) {
-            this.owner = owner; this.materialId = material.materialId(); this.resume = material.text(); this.role = role; this.count = count;
+        State(String owner, String materialId, String resume, String role, int count) {
+            this.owner = owner; this.materialId = materialId; this.resume = resume; this.role = role; this.count = count;
         }
         Session snapshot() {
             Turn current = status.equals("ACTIVE") && !turns.isEmpty() ? turns.get(turns.size()-1) : null;
             return new Session(id, materialId, role, count, status, List.copyOf(turns), current, pending);
         }
     }
-    public Session start(String owner, String materialId, String targetRole, int count, AiClient ai) {
+    /**
+     * 开始一场面试。
+     *
+     * <p><b>刻意接收 {@code resume} 原文，而不是自己去查材料</b>：这样面试模块
+     * 不依赖材料模块，简历从哪来由 Controller 决定。好处有两个：
+     * <ul>
+     *   <li>两个模块彻底解耦，各自可以独立测试和替换；</li>
+     *   <li>不会出现「两套材料实现打架」——之前两边的 {@code /api/materials}
+     *       路径撞在一起，会让 Spring 启动时抛 Ambiguous mapping，整个服务起不来。</li>
+     * </ul>
+     *
+     * @param resume 简历原文，由材料模块抽取后传入。为空直接拒绝，不要拿空白去问模型。
+     */
+    public Session start(String owner, String materialId, String resume, String targetRole, int count, AiClient ai) {
         if (count < 1 || count > 10) throw new IllegalArgumentException("面试题数须为 1–10");
         String role = targetRole == null ? "" : targetRole.strip();
         if (role.length() > 200) throw new IllegalArgumentException("目标岗位不能超过 200 字");
-        State state = new State(owner, materials.get(owner, materialId), role, count);
+        if (resume == null || resume.isBlank())
+            throw new InterviewException(400, "这份简历没有可用的文字内容，请换一份，或改用「粘贴文本」");
+        State state = new State(owner, materialId, resume, role, count);
         synchronized (sessions) {
             sessions.values().removeIf(s -> s.expires.isBefore(Instant.now()));
             if (sessions.size() >= 2000 || sessions.values().stream().filter(s -> s.owner.equals(owner)).count() >= 20)

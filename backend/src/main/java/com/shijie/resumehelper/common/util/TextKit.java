@@ -1,4 +1,4 @@
-package com.shijie.resumehelper.job.util;
+package com.shijie.resumehelper.common.util;
 
 import java.util.ArrayList;
 import java.util.List;
@@ -54,6 +54,57 @@ public final class TextKit {
             sb.append(normalize(part)).append('|');
         }
         return prefix + Integer.toHexString(sb.toString().hashCode() & 0x7fffffff);
+    }
+
+    /**
+     * 清洗从 PDF / DOCX 抽出的文本。
+     *
+     * <p>抽取出来的原文通常带一堆毛病：行尾空白、连续空行、全角空格、
+     * 以及 PDF 里常见的「字 间 被 插 入 空 格」。这一步只做**不影响含义**的整理，
+     * 目的是让大模型读得更准，同时让「原文对照」界面看起来不脏。
+     *
+     * <p>刻意保留换行结构：简历里的换行往往就是字段边界，压平了会丢信息。
+     */
+    public static String cleanExtractedText(String raw) {
+        if (raw == null || raw.isEmpty()) {
+            return "";
+        }
+        String text = raw.replace("\r\n", "\n")
+                .replace('\r', '\n')
+                .replace("\u0000", "")    // 二进制残留：有些 PDF/DOCX 抽出来会夹这个
+                .replace("\uFEFF", "")    // BOM：混进正文会让第一个字段识别不出来
+                .replace('\u00A0', ' ')   // 不间断空格
+                .replace('\u3000', ' ');  // 全角空格
+        StringBuilder sb = new StringBuilder(text.length());
+        boolean lastLineBlank = true;
+        for (String line : text.split("\n", -1)) {
+            String cleaned = line.replaceAll("[ \\t]+", " ").trim();
+            if (cleaned.isEmpty()) {
+                // 连续空行压成一个，且去掉开头的空行
+                if (lastLineBlank) {
+                    continue;
+                }
+                lastLineBlank = true;
+            } else {
+                lastLineBlank = false;
+            }
+            sb.append(cleaned).append('\n');
+        }
+        return sb.toString().trim();
+    }
+
+    /** 统计文本里非空白字符的数量。用于「抽出来的是不是空的」这类判断。 */
+    public static int countVisibleChars(String text) {
+        if (text == null) {
+            return 0;
+        }
+        int count = 0;
+        for (int i = 0; i < text.length(); i++) {
+            if (!Character.isWhitespace(text.charAt(i))) {
+                count++;
+            }
+        }
+        return count;
     }
 
     public static String truncate(String s, int max) {

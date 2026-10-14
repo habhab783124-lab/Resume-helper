@@ -1,16 +1,16 @@
 package com.shijie.resumehelper.job.agent;
 
-import com.shijie.resumehelper.job.ai.AiClient;
-import com.shijie.resumehelper.job.ai.FakeAiClient;
+import com.shijie.resumehelper.common.ai.AiClient;
+import com.shijie.resumehelper.common.ai.FakeAiClient;
 import com.shijie.resumehelper.job.domain.Job;
 import com.shijie.resumehelper.job.domain.JobMatchResult;
 import com.shijie.resumehelper.job.domain.JobQuery;
-import com.shijie.resumehelper.job.domain.UserProfileSnapshot;
+import com.shijie.resumehelper.common.profile.UserProfileSnapshot;
 import com.shijie.resumehelper.job.match.JobMatchService;
 import com.shijie.resumehelper.job.match.MatchScorer;
 import com.shijie.resumehelper.job.source.JobDeduplicator;
 import com.shijie.resumehelper.job.source.JobSourceRegistry;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 

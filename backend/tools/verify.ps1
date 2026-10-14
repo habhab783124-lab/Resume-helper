@@ -30,9 +30,20 @@ if (Test-Path $out) { Remove-Item -Recurse -Force $out }
 New-Item -ItemType Directory -Force -Path $out | Out-Null
 
 $files = @()
-$files += (Get-ChildItem -Path (Join-Path $backend 'src\main\java') -Recurse -File -Filter *.java).FullName
+# 排除 material 包：它依赖 Apache POI / Apache PDFBox 解析文档，
+# 而这两个库没有打桩（给它们打桩要几十个类，得不偿失）。
+# 材料模块的正确性由真实构建验证：
+#   mvn -B test          单元/集成测试
+#   tools/material-check.ps1   用真实简历样本跑一遍抽取，人工核对结果
+$mainSources = Get-ChildItem -Path (Join-Path $backend 'src\main\java') -Recurse -File -Filter *.java |
+    Where-Object { $_.FullName -notmatch '\\material\\' }
+$files += $mainSources.FullName
 $files += (Get-ChildItem -Path (Join-Path $backend 'tools\verify-stubs') -Recurse -File -Filter *.java).FullName
-$files += (Get-ChildItem -Path (Join-Path $backend 'src\test\java') -Recurse -File -Filter *.java).FullName
+# src/test 里只取**不依赖 JUnit** 的离线自检（JobAgentOfflineDemo）。
+# 其余测试都基于 JUnit 5，需要 Maven 拉依赖；离线 javac 环境里没有 JUnit，
+# 硬编进来只会一堆 "package org.junit.jupiter.api does not exist"。
+# 那些测试由 `mvn test` 负责（当前 39 项）。
+$files += (Get-ChildItem -Path (Join-Path $backend 'src\test\java') -Recurse -File -Filter 'JobAgentOfflineDemo.java').FullName
 $files = @($files | Where-Object { $_ -notmatch '[\\/]interview[\\/]' })
 
 Write-Host "编译 $($files.Count) 个文件 ..."

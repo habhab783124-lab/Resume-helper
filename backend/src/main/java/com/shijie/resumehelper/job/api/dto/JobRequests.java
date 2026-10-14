@@ -1,5 +1,7 @@
 package com.shijie.resumehelper.job.api.dto;
 
+import com.shijie.resumehelper.common.profile.ProfileDto;
+
 /**
  * 岗位相关接口的请求体集合。
  *

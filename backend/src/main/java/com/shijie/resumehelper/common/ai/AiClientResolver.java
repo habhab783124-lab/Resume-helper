@@ -1,8 +1,7 @@
-package com.shijie.resumehelper.job.ai;
+package com.shijie.resumehelper.common.ai;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import com.shijie.resumehelper.job.config.JobModuleProperties;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.stereotype.Component;
 
@@ -30,17 +29,17 @@ public class AiClientResolver {
     /** 用户选择的模型名。 */
     public static final String HEADER_MODEL = "X-AI-Model";
 
-    private final JobModuleProperties properties;
+    private final AiProperties properties;
     private final ObjectMapper mapper;
 
-    public AiClientResolver(JobModuleProperties properties, ObjectMapper mapper) {
+    public AiClientResolver(AiProperties properties, ObjectMapper mapper) {
         this.properties = properties;
         this.mapper = mapper;
     }
 
     /** 从请求头 + 服务端配置解析出本次调用使用的凭据。绝不记录 apiKey 明文。 */
     public AiCredentials fromRequest(HttpServletRequest request) {
-        JobModuleProperties.Ai config = properties.getAi();
+        AiProperties config = properties;
 
         String headerKey = request == null ? "" : TextKit.trim(request.getHeader(HEADER_API_KEY));
         String apiKey = headerKey.isEmpty() ? TextKit.trim(config.getApiKey()) : headerKey;
@@ -110,7 +109,7 @@ public class AiClientResolver {
         if (credentials == null || !credentials.usable()) {
             return null;
         }
-        return new OpenAiCompatibleAiClient(credentials, properties.getAi(), mapper);
+        return new OpenAiCompatibleAiClient(credentials, properties, mapper);
     }
 
     private static String firstNonBlank(String preferred, String fallback) {

@@ -23,16 +23,30 @@
     </properties>
 
     <dependencies>
-        <dependency>
-            <groupId>org.apache.pdfbox</groupId>
-            <artifactId>pdfbox</artifactId>
-            <version>3.0.8</version>
-        </dependency>
+        <!--
+          文档解析：材料模块（功能一）和面试模块（功能三）都要从上传的简历里抽文本。
+          两个库都是纯 Java、无本地依赖。
+
+          - poi-ooxml：读 .docx 的段落与表格。
+            旧版 .doc 是二进制格式，需要额外的 poi-scratchpad；我们选择明确提示用户
+            「另存为 .docx」，而不是为此多引一个依赖。
+          - pdfbox：读文本型 PDF；扫描件（没有文字层）由我们自己检测并给出提示。
+
+          版本以面试模块引入的较新版为准（poi 5.4.1 / pdfbox 3.0.8）。
+          合并时两边各声明了一份，重复声明同一依赖会让 Maven 报
+          "building the effective model" 警告，已合并成一份。
+        -->
         <dependency>
             <groupId>org.apache.poi</groupId>
             <artifactId>poi-ooxml</artifactId>
             <version>5.4.1</version>
         </dependency>
+        <dependency>
+            <groupId>org.apache.pdfbox</groupId>
+            <artifactId>pdfbox</artifactId>
+            <version>3.0.8</version>
+        </dependency>
+
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-web</artifactId>

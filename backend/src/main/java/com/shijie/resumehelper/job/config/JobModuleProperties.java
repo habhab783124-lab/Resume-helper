@@ -21,7 +21,6 @@ public class JobModuleProperties {
     private int maxLimit = 50;
 
     private final Sources sources = new Sources();
-    private final Ai ai = new Ai();
     private final Cors cors = new Cors();
 
     public int getMaxRounds() {
@@ -60,10 +59,6 @@ public class JobModuleProperties {
         return sources;
     }
 
-    public Ai getAi() {
-        return ai;
-    }
-
     /** 岗位数据源开关。 */
     public static class Sources {
         /** 内置演示岗位库。关掉后如果外部来源都不可用，岗位页会变空。 */
@@ -95,95 +90,6 @@ public class JobModuleProperties {
 
         public void setCsvLocation(String csvLocation) {
             this.csvLocation = csvLocation;
-        }
-    }
-
-    /** 大模型配置。 */
-    public static class Ai {
-        /** OpenAI 兼容端点。DeepSeek / 通义 / 豆包 / 自建网关都按这个协议接。 */
-        private String baseUrl = "https://api.deepseek.com/v1";
-        private String model = "deepseek-chat";
-        /**
-         * 服务端兜底密钥。留空表示必须由前端携带用户自己的 token。
-         * <p>产品方案 5 要求「密钥放在后端配置中，不能写进前端代码」；
-         * 而实际需求是「让用户填自己的 token」——两者靠下面的优先级共存：
-         * 请求头里的用户 token 优先，没有再回落到这里的服务端密钥。
-         */
-        private String apiKey = "";
-        /**
-         * 允许浏览器自定义模型地址使用的 HTTPS origin 列表。
-         *
-         * <p>只填 origin（协议 + 主机 [+ 端口]），不带路径。用户带自己的密钥时，
-         * 请求里给的 Base URL 必须命中其中之一，否则拒绝。
-         *
-         * <p>不加这一层的话，任何非空用户密钥加一个自定义地址都能驱动后端去请求
-         * 环回或内网地址，等于给了 SSRF 入口。部署者要接自建网关就把自己的
-         * 可信 HTTPS 网关登记进来；服务端自身配置不受此限制。
-         */
-        private List<String> allowedBrowserOrigins = new ArrayList<>(List.of(
-                "https://api.deepseek.com",
-                "https://dashscope.aliyuncs.com",
-                "https://ark.cn-beijing.volces.com"));
-        private int timeoutSeconds = 60;
-        private int maxTokens = 800;
-        private double temperature = 0.2;
-
-        public String getBaseUrl() {
-            return baseUrl;
-        }
-
-        public void setBaseUrl(String baseUrl) {
-            this.baseUrl = baseUrl;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
-            this.model = model;
-        }
-
-        public String getApiKey() {
-            return apiKey;
-        }
-
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
-
-        public List<String> getAllowedBrowserOrigins() {
-            return allowedBrowserOrigins;
-        }
-
-        public void setAllowedBrowserOrigins(List<String> allowedBrowserOrigins) {
-            this.allowedBrowserOrigins = allowedBrowserOrigins == null
-                    ? new ArrayList<>()
-                    : new ArrayList<>(allowedBrowserOrigins);
-        }
-
-        public int getTimeoutSeconds() {
-            return timeoutSeconds;
-        }
-
-        public void setTimeoutSeconds(int timeoutSeconds) {
-            this.timeoutSeconds = timeoutSeconds;
-        }
-
-        public int getMaxTokens() {
-            return maxTokens;
-        }
-
-        public void setMaxTokens(int maxTokens) {
-            this.maxTokens = maxTokens;
-        }
-
-        public double getTemperature() {
-            return temperature;
-        }
-
-        public void setTemperature(double temperature) {
-            this.temperature = temperature;
         }
     }
 

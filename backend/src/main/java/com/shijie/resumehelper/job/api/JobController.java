@@ -2,14 +2,14 @@ package com.shijie.resumehelper.job.api;
 
 import com.shijie.resumehelper.common.ApiResponse;
 import com.shijie.resumehelper.job.agent.AgentRunResult;
-import com.shijie.resumehelper.job.ai.AiClient;
-import com.shijie.resumehelper.job.ai.AiClientResolver;
+import com.shijie.resumehelper.common.ai.AiClient;
+import com.shijie.resumehelper.common.ai.AiClientResolver;
 import com.shijie.resumehelper.job.api.dto.JobRequests;
 import com.shijie.resumehelper.job.api.dto.JobViews;
-import com.shijie.resumehelper.job.api.dto.ProfileDto;
+import com.shijie.resumehelper.common.profile.ProfileDto;
 import com.shijie.resumehelper.job.domain.Job;
 import com.shijie.resumehelper.job.service.JobService;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;

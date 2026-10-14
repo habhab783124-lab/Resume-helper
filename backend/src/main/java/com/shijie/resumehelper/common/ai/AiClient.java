@@ -1,4 +1,4 @@
-package com.shijie.resumehelper.job.ai;
+package com.shijie.resumehelper.common.ai;
 
 /**
  * 大模型调用抽象。

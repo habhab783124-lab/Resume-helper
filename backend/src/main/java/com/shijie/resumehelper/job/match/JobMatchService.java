@@ -1,10 +1,10 @@
 package com.shijie.resumehelper.job.match;
 
-import com.shijie.resumehelper.job.ai.AiClient;
+import com.shijie.resumehelper.common.ai.AiClient;
 import com.shijie.resumehelper.job.domain.Job;
 import com.shijie.resumehelper.job.domain.JobMatchResult;
-import com.shijie.resumehelper.job.domain.UserProfileSnapshot;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.profile.UserProfileSnapshot;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.util.ArrayList;
 import java.util.Collection;

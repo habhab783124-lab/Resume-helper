@@ -2,7 +2,7 @@ package com.shijie.resumehelper.job.source;
 
 import com.shijie.resumehelper.job.domain.Job;
 import com.shijie.resumehelper.job.match.SkillLexicon;
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.time.Instant;
 import java.util.ArrayList;

@@ -1,13 +1,19 @@
-package com.shijie.resumehelper.job.domain;
+package com.shijie.resumehelper.common.profile;
 
-import com.shijie.resumehelper.job.util.TextKit;
+import com.shijie.resumehelper.common.util.TextKit;
 
 import java.util.ArrayList;
 import java.util.List;
 
 /**
  * 用户求职画像快照。
- * <p>由「个人资料」模块（功能一，其他人负责）产出，岗位模块只读消费，不反向依赖。
+ *
+ * <p><b>跨模块共享的数据结构</b>，所以放在 {@code common.profile} 而不是某个业务模块下：
+ * <ul>
+ *   <li>材料模块（功能一）<b>产出</b>它：上传简历 → 抽取 → 用户确认 → 存成画像；</li>
+ *   <li>岗位模块（功能二）<b>只读消费</b>它，用于匹配打分与差距分析；</li>
+ *   <li>简历与面试模块以后也会读它。</li>
+ * </ul>
  * 字段对应产品方案 7 的 Profile：教育、经历、技能和求职偏好。
  */
 public record UserProfileSnapshot(
