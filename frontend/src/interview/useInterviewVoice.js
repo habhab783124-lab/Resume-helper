@@ -138,15 +138,31 @@ export function useInterviewVoice({
     const operation = { controller, timer: null }
     request = operation
     transcribing.value = true
+    let onAbort
     try {
-      const timedOut = new Promise((_, reject) => {
-        operation.timer = setTimeout(() => { controller.abort(); reject(new Error('语音识别超时，请重试或改用文字回答。')) }, timeoutMs)
+      // Both ASR and conflict recovery share this deadline. Abort must also settle
+      // the wait when a transport ignores its signal.
+      const stopped = new Promise((_, reject) => {
+        onAbort = () => reject(Object.assign(new Error('语音识别已取消。'), { name: 'AbortError' }))
+        controller.signal.addEventListener('abort', onAbort, { once: true })
+        operation.timer = setTimeout(() => {
+          reject(new Error('语音识别超时，请重试或改用文字回答。'))
+          controller.abort()
+        }, timeoutMs)
       })
       const extension = blob.value.type.includes('mp4') ? 'mp4' : blob.value.type.includes('ogg') ? 'ogg' : 'webm'
       // Give FormData a truthful container filename; the recorder already probes its format.
       const file = blob.value
       const namedFile = typeof File === 'function' ? new File([file], `answer.${extension}`, { type: file.type }) : file
-      const result = await Promise.race([api.transcribe(context.sessionId, { questionId: context.questionId, requestId: id, file: namedFile }, controller.signal), timedOut])
+      let result
+      try {
+        result = await Promise.race([api.transcribe(context.sessionId, { questionId: context.questionId, requestId: id, file: namedFile }, controller.signal), stopped])
+      } catch (cause) {
+        if (cause?.status !== 409 || !matches(context, my) || controller.signal.aborted) throw cause
+        error.value = cause?.message || '语音识别失败，请重试或改用文字回答。'
+        await Promise.race([syncSession(context, () => !controller.signal.aborted && matches(context, my), controller.signal), stopped])
+        return
+      }
       if (!matches(context, my)) return
       if (result?.sessionId !== context.sessionId || result?.questionId !== context.questionId || result?.requestId !== id || typeof result?.text !== 'string') throw new Error('语音识别结果格式异常，请重试。')
       if (!result.text.trim()) throw new Error('未识别到有效内容，请重试或改用文字回答。')
@@ -154,9 +170,9 @@ export function useInterviewVoice({
     } catch (cause) {
       if (!matches(context, my)) return
       if (cause?.name !== 'AbortError') error.value = cause?.message || '语音识别失败，请重试或改用文字回答。'
-      if (cause?.status === 409) await syncSession(context, () => matches(context, my))
     } finally {
       clearTimeout(operation.timer)
+      controller.signal.removeEventListener('abort', onAbort)
       if (request === operation) { request = null; transcribing.value = false }
     }
   }

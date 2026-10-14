@@ -77,6 +77,74 @@ test('409 recovery receives a freshness guard so canceled operations cannot appl
   await recording(f); await f.voice.transcribe(); assert.equal(typeof canApply, 'function'); assert.equal(canApply(), true)
   f.voice.cancelTranscription(); assert.equal(canApply(), false)
 })
+test('a hanging 409 recovery expires at the original ASR deadline and unlocks retained audio', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const asr = deferred()
+  let signal, canApply, settled = false
+  const f = setup({ api: { transcribe: () => asr.promise }, dependencies: { timeoutMs: 100,
+    syncSession: (_context, guard, value) => { canApply = guard; signal = value; return new Promise(() => {}) } } })
+  await recording(f)
+  const retained = f.voice.blob.value
+  const request = f.voice.transcribe().then(() => { settled = true })
+  t.mock.timers.tick(60)
+  asr.reject(Object.assign(new Error('state changed'), { status: 409 }))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(canApply(), true)
+  t.mock.timers.tick(39)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.voice.transcribing.value, true)
+  t.mock.timers.tick(1)
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, true, 'recovery must not extend the original deadline')
+  await request
+  assert.equal(f.voice.transcribing.value, false); assert.equal(f.voice.busy.value, false)
+  assert.ok(signal.aborted); assert.equal(canApply(), false); assert.match(f.voice.error.value, /超时/)
+  assert.equal(f.voice.blob.value, retained); assert.equal(f.voice.recordingUrl.value, 'blob:recording'); assert.equal(f.draft.value, '原草稿')
+})
+test('cancel settles a hanging 409 recovery and invalidates its session guard', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let signal, canApply, settled = false
+  const f = setup({ api: { transcribe: async () => { throw Object.assign(new Error('state changed'), { status: 409 }) } },
+    dependencies: { syncSession: (_context, guard, value) => { canApply = guard; signal = value; return new Promise(() => {}) } } })
+  await recording(f)
+  const retained = f.voice.blob.value
+  const request = f.voice.transcribe().then(() => { settled = true })
+  await new Promise(resolve => setImmediate(resolve))
+  f.voice.cancelTranscription()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, true, 'cancellation must settle even when recovery ignores abort')
+  await request
+  assert.equal(f.voice.busy.value, false); assert.ok(signal.aborted); assert.equal(canApply(), false)
+  assert.equal(f.voice.blob.value, retained); assert.equal(f.draft.value, '原草稿'); assert.equal(f.voice.preview.value, null)
+})
+test('a late recovery response after timeout cannot apply its session snapshot', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  const recovery = deferred()
+  let applied = 0
+  const f = setup({ api: { transcribe: async () => { throw Object.assign(new Error('state changed'), { status: 409 }) } },
+    dependencies: { timeoutMs: 100, syncSession: async (_context, canApply) => { await recovery.promise; if (canApply()) applied += 1 } } })
+  await recording(f)
+  const request = f.voice.transcribe()
+  await new Promise(resolve => setImmediate(resolve))
+  t.mock.timers.tick(100)
+  await new Promise(resolve => setImmediate(resolve))
+  recovery.resolve()
+  await request
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(applied, 0); assert.match(f.voice.error.value, /超时/); assert.equal(f.draft.value, '原草稿')
+})
+test('cancel settles ASR even when its transport ignores abort', async t => {
+  t.mock.timers.enable({ apis: ['setTimeout'] })
+  let settled = false
+  const f = setup({ api: { transcribe: () => new Promise(() => {}) } })
+  await recording(f)
+  const request = f.voice.transcribe().then(() => { settled = true })
+  f.voice.cancelTranscription()
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(settled, true)
+  await request
+  assert.equal(f.voice.busy.value, false); assert.ok(f.voice.blob.value); assert.equal(f.draft.value, '原草稿')
+})
 test('new recording clears old preview/replay and stops TTS; question and recording playback never overlap', async () => {
   const f = setup(); await recording(f); await f.voice.transcribe(); f.voice.playQuestion(); assert.ok(f.events.some(event => Array.isArray(event) && event[0] === 'play'))
   f.voice.replayRecording(); assert.equal(f.events.at(-1), 'stop-speech')

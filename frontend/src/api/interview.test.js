@@ -3,6 +3,16 @@ import assert from 'node:assert/strict'
 import { createInterviewApi } from './interview.js'
 
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status })
+test('session recovery forwards an optional abort signal and keeps existing reads compatible', async () => {
+  const calls = []
+  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { sessionId: 's1' } }) } })
+  const controller = new AbortController()
+  await api.getSession('s1', { signal: controller.signal })
+  await api.getSession('s1')
+  assert.equal(calls[0][1].signal, controller.signal)
+  assert.equal(calls[1][1].signal, undefined)
+  assert.equal(calls[0][1].method, 'GET')
+})
 test('uses API origin, cookies and ephemeral AI headers with JSON bodies', async () => {
   let request
   const api = createInterviewApi({ baseUrl: 'https://example.test/', fetchImpl: async (...args) => { request = args; return response({ success: true, data: { sessionId: 'abc' } }) } })

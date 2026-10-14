@@ -67,11 +67,11 @@ function applySession(value) {
   answer.value = value.pendingAnswer ?? (sameQuestion ? draft : '')
   voice.syncContext()
 }
-async function syncVoiceSession(context, canApply = () => true) {
+async function syncVoiceSession(context, canApply = () => true, signal) {
   try {
-    const value = await api.getSession(context.sessionId)
+    const value = await api.getSession(context.sessionId, { signal })
     // A recovery read can itself arrive after the page moved on. Never apply that old snapshot.
-    if (canApply() && session.value?.sessionId === context.sessionId && current.value?.questionId === context.questionId && active.value && !busy.value && pending.value == null) applySession(value)
+    if (!signal?.aborted && canApply() && session.value?.sessionId === context.sessionId && current.value?.questionId === context.questionId && active.value && !busy.value && pending.value == null) applySession(value)
   } catch { /* A voice error never clears the interview or its text draft. */ }
 }
 async function run(label, work, expireSession = false) {

@@ -150,6 +150,19 @@ test('same-question recovery preserves text; voice conflict sync cannot apply to
   await view.syncVoiceSession({ sessionId: 's1', questionId: 'q1' }); assert.equal(view.answer.value, '编辑草稿')
   view.applySession(session([], { questionId: 'q2', question: '新题' })); await view.syncVoiceSession({ sessionId: 's1', questionId: 'q1' }); assert.equal(view.current.value.questionId, 'q2')
 })
+test('voice recovery forwards cancellation and ignores a late snapshot even if its fetch ignores abort', async () => {
+  let resolve, options
+  const response = new Promise(ok => { resolve = ok })
+  const view = mount({ getSession: (_id, value) => { options = value; return response } })
+  view.applySession(firstQuestion); view.answer.value = '编辑草稿'
+  const controller = new AbortController()
+  const recovery = view.syncVoiceSession({ sessionId: 's1', questionId: 'q1' }, () => true, controller.signal)
+  controller.abort()
+  resolve(session([], { questionId: 'q2', question: '迟到的新题' }))
+  await recovery
+  assert.equal(view.current.value.questionId, 'q1'); assert.equal(view.answer.value, '编辑草稿')
+  assert.equal(options?.signal, controller.signal)
+})
 test('material accepts 10 MiB boundary and rejects empty extraction without losing interview on material 404', async () => {
   let calls = 0
   const view = mount({ upload: async () => { calls += 1; return { materialId: 'm1', text: '' } } })
