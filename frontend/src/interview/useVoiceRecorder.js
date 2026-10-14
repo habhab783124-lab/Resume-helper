@@ -51,6 +51,7 @@ export function useVoiceRecorder({
       // 先摘掉回调：stop() 触发的 onstop 属于上一次录音，不该再执行。
       recorder.ondataavailable = null
       recorder.onstop = null
+      recorder.onerror = null
       if (recorder.state !== 'inactive') {
         try { recorder.stop() } catch { /* 已经在停止过程中 */ }
       }
@@ -133,10 +134,16 @@ export function useVoiceRecorder({
         }
       }
     }
+    recorder.onerror = () => {
+      if (my !== generation) return
+      release()
+      fail('录音中断，请重新录音或改用文字回答。')
+    }
     recorder.onstop = () => {
       if (my !== generation) return
       clearTimer()
-      if (chunks.length) blob.value = new Blob(chunks, { type: mimeType || 'audio/webm' })
+      if (chunks.length) blob.value = new Blob(chunks, { type: recorder.mimeType || mimeType || 'audio/webm' })
+      else error.value = '录音为空，请重新录音或改用文字回答。'
       state.value = blob.value ? 'recorded' : 'idle'
       stopTracks()
     }

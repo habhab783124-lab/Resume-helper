@@ -32,7 +32,7 @@ function makeDevices({ deny = null, delay = 0 } = {}) {
   }
 }
 
-function makeRecorder({ supported = ['audio/webm;codecs=opus'] } = {}) {
+function makeRecorder({ supported = ['audio/webm;codecs=opus'], nativeType = '' } = {}) {
   const instances = []
   class Recorder {
     static isTypeSupported(type) {
@@ -41,6 +41,7 @@ function makeRecorder({ supported = ['audio/webm;codecs=opus'] } = {}) {
     constructor(stream, options) {
       this.stream = stream
       this.options = options
+      this.mimeType = options?.mimeType || nativeType
       this.state = 'inactive'
       this.ondataavailable = null
       this.onstop = null
@@ -247,4 +248,23 @@ test('dispose clears every timer, track and pending callback', async () => {
   // 迟到回调只能改自己的计数，不能再写入界面状态。
   recorder.cancel()
   assert.equal(recorder.state.value, 'idle')
+})
+
+test('native default recording preserves its actual MIME type instead of labeling MP4 as WebM', async () => {
+  const { recorder, instances } = await record({ Recorder: makeRecorder({ supported: [], nativeType: 'audio/mp4' }) })
+  instances[0].push(10); recorder.stop()
+  assert.equal(recorder.blob.value.type, 'audio/mp4')
+  recorder.dispose()
+})
+test('empty stopped recording gives an actionable error and releases the microphone', async () => {
+  const { recorder, devices } = await record(); recorder.stop()
+  assert.equal(recorder.blob.value, null); assert.match(recorder.error.value, /空/); assert.ok(devices.tracks.every(track => track.stopped))
+  recorder.dispose()
+})
+test('asynchronous recorder error releases tracks and ignores later data callbacks', async () => {
+  const { recorder, instances, devices } = await record()
+  assert.equal(typeof instances[0].onerror, 'function')
+  instances[0].onerror({ error: new Error('device disconnected') })
+  assert.equal(recorder.state.value, 'idle'); assert.ok(devices.tracks.every(track => track.stopped)); assert.match(recorder.error.value, /中断/)
+  assert.equal(instances[0].ondataavailable, null); assert.equal(instances[0].onerror, null)
 })
