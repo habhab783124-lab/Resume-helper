@@ -450,6 +450,14 @@ function educationLines() {
 async function confirmProfile() {
   if (!draft.value) return
   const base = getProfile()
+
+  // 每个字段都遵循同一条规则：**抽到了就用抽到的，没抽到就保留原来的**。
+  // 少了后半句就会出现"点一下确认，反而把已有资料清空了"——
+  // 没有 AI token 时抽取结果本来就是空的，直接覆盖等于把用户的东西删了。
+  const extractedSkills = skillsText.value
+    ? skillsText.value.split(/[,，、\s]+/).filter(Boolean)
+    : draft.value.skills
+
   // 与后端 ProfileDto / UserProfileSnapshot 字段一一对应，两侧可以直接互相透传
   const profile = {
     userId: base.userId || 'demo-user',
@@ -457,10 +465,10 @@ async function confirmProfile() {
     targetCities: targetCities.value
       ? targetCities.value.split(/[、,，\s]+/).filter(Boolean)
       : (base.targetCities || []),
-    yearsOfExperience: Number(draft.value.yearsOfExperience) || 0,
+    yearsOfExperience: Number(draft.value.yearsOfExperience) || base.yearsOfExperience || 0,
     education: draft.value.highestEducation || base.education || '',
     educations: educationLines().length ? educationLines() : (base.educations || []),
-    skills: (skillsText.value ? skillsText.value.split(/[,，、\s]+/).filter(Boolean) : draft.value.skills),
+    skills: extractedSkills.length ? extractedSkills : (base.skills || []),
     industries: base.industries || [],
     expectedSalary: expectedSalary.value || base.expectedSalary || '',
     summary: draft.value.summary || base.summary || '',

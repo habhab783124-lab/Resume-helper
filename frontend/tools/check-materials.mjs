@@ -148,6 +148,28 @@ async function main() {
   await send('Page.navigate', { url: `${BASE}/materials` })
   await sleep(3500)
 
+  // 先种一份"有技能"的画像。
+  // 目的：验证「确认」这一步在抽取结果为空（没有 AI token）时**不会把已有画像清空**——
+  // 这是实测踩到过的真 bug：技能字段少了回退，点一下确认就把用户的技能删了。
+  //
+  // 注意先清掉 localStorage 里的画像：getProfile() 的合并语义是
+  // `{...演示画像, ...已保存}`，一旦本地存了个 skills: []，空数组会盖掉演示值，
+  // 于是"回退到原值"拿到的也是空的。检查必须从干净状态开始，否则测的是上一轮的残留。
+  await evaluate(send, `window.localStorage.removeItem('resume-helper-profile'); true`)
+  await evaluate(send, `fetch('/api/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      targetTitle: 'Java 后端开发工程师', targetCities: ['上海'], yearsOfExperience: 0,
+      education: '本科', educations: ['上海理工大学 · 本科 · 计算机科学与技术 · 2022.09—2026.06'],
+      skills: ['Java', 'Spring Boot', 'MySQL', 'Redis'],
+      industries: ['互联网'], expectedSalary: '15-22K',
+      summary: '计算机专业应届生，有后端实习经历。', experiences: ['既有的一段经历']
+    })
+  }).then(r => r.ok)`)
+  await send('Page.navigate', { url: `${BASE}/materials` })
+  await sleep(2500)
+
   const path = await evaluate(send, `window.location.pathname`)
   check('已停留在 /materials（没被守卫弹回登录页）', path === '/materials', `当前路径 ${path}`)
 
@@ -237,6 +259,15 @@ async function main() {
     `fetch('/api/profile').then(r => r.json()).then(d => JSON.stringify(d.data || {})).catch(e => 'ERR:' + e.message)`)
   check('确认后画像也同步到了后端（简历/面试模块以后从这里读）',
     backendProfile.includes('targetTitle'), backendProfile.slice(0, 70))
+
+  // 关键：没有 AI token 时抽取结果是空的，确认这一步**不能**把已有画像里的字段清空。
+  // 每个字段都要遵循"抽到了就用抽到的，没抽到就保留原来的"。
+  const saved = JSON.parse(backendProfile || '{}')
+  check('确认空抽取结果不会清空已有画像的技能（抽不到就保留原值）',
+    Array.isArray(saved.skills) && saved.skills.length >= 4,
+    `技能 ${JSON.stringify(saved.skills || [])}`)
+  check('同样不会清空教育经历', Array.isArray(saved.educations) && saved.educations.length >= 1,
+    `教育 ${JSON.stringify(saved.educations || [])}`)
 
   // 7) 未捕获异常
   check('页面没有未捕获的 JS 异常', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '))

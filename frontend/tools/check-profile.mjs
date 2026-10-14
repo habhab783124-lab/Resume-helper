@@ -137,6 +137,23 @@ async function main() {
   await sleep(2000)
   await evaluate(send, `window.localStorage.setItem('resume-helper-demo-session', JSON.stringify({authenticated:true,email:'demo@resume-helper.cn',displayName:'林同学',createdAt:new Date().toISOString()})); true`)
 
+  // 种一份完整画像，让断言不依赖上一轮运行留下的状态。
+  // 不清干净的话，上一次跑完留下的 targetTitle:'' / skills:[] 会让这一跑莫名其妙地失败——
+  // 检查脚本自己必须能重复运行。
+  await evaluate(send, `window.localStorage.removeItem('resume-helper-profile'); true`)
+  await evaluate(send, `fetch('/api/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      targetTitle: 'Java 后端开发工程师', targetCities: ['上海'], yearsOfExperience: 0,
+      education: '本科', educations: ['上海理工大学 · 本科 · 计算机科学与技术 · 2022.09—2026.06'],
+      skills: ['Java', 'Spring Boot', 'MySQL', 'Redis', 'Git'],
+      industries: ['互联网'], expectedSalary: '15-22K',
+      summary: '计算机科学与技术专业应届毕业生，具备 Java 后端开发项目实践经验。',
+      experiences: ['校园活动管理平台（后端开发 · 个人项目，2025.03—2025.07）：基于 Spring Boot 构建活动管理服务']
+    })
+  }).then(r => r.ok)`)
+
   await send('Page.navigate', { url: `${BASE}/profile` })
   await sleep(3500)
 
