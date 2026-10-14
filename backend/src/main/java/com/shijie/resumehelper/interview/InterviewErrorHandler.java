@@ -8,7 +8,9 @@ import org.springframework.web.bind.MissingServletRequestParameterException;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.multipart.support.MissingServletRequestPartException;
 
-@RestControllerAdvice(assignableTypes = InterviewController.class)
+// 必须显式列出控制器：advice 的兜底异常处理器不会作用到未声明的控制器上，
+// 语音接口漏掉的话，InterviewException 会掉进全局兜底变成 500。
+@RestControllerAdvice(assignableTypes = {InterviewController.class, InterviewSpeechController.class})
 @Order(-1)
 public class InterviewErrorHandler {
     @ExceptionHandler(InterviewException.class)
