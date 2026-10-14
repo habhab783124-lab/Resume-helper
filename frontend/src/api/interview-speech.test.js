@@ -70,7 +70,7 @@ test('returns the question audio as a blob and forwards the abort signal', async
   assert.equal(init.credentials, 'include')
   assert.equal(init.signal, controller.signal)
   assert.equal(init.body, undefined)
-  assert.deepEqual(init.headers, {})
+  assert.deepEqual(init.headers, { 'X-User-Id': 'demo-user' })
 })
 
 test('treats a JSON error reply as a failure instead of audio', async () => {
@@ -82,7 +82,7 @@ test('treats a JSON error reply as a failure instead of audio', async () => {
 })
 
 test('rejects playback replies that are not playable audio', async () => {
-  // 服务端出错时返回的是 JSON 而不是音频；大小上限由后端把关，前端只拦「明显不是音频」。
+  // 服务端可能返回 JSON 错误；前端也拒绝空内容和不可播放的响应。
   const replies = [
     json({ success: false, message: '题目语音未完整生成，请重试' }),
     new Response('not audio at all', { status: 200, headers: { 'Content-Type': 'text/plain' } }),
@@ -103,4 +103,13 @@ test('surfaces an aborted request as AbortError', async () => {
   const pending = api.questionSpeech('s1', 'q1', controller.signal)
   controller.abort()
   await assert.rejects(pending, error => error.name === 'AbortError')
+})
+
+test('accepts only nonempty MPEG audio no larger than 5 MiB', async () => {
+  for (const [type, size] of [['audio/wav', 1], ['audio/mpeg-extra', 1], ['audio/mpeg', 5 * 1024 * 1024 + 1]]) {
+    const api = createInterviewApi({ fetchImpl: async () => new Response(new Uint8Array(size), { headers: { 'Content-Type': type } }) })
+    await assert.rejects(api.questionSpeech('s', 'q'), /语音/)
+  }
+  const api = createInterviewApi({ fetchImpl: async () => new Response(new Uint8Array(5 * 1024 * 1024), { headers: { 'Content-Type': 'audio/mpeg; charset=binary' } }) })
+  assert.equal((await api.questionSpeech('s', 'q')).size, 5 * 1024 * 1024)
 })

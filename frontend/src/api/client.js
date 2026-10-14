@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { getAiSettings, setAiSettings, getUserId } from './requestContext.js'
 
 /**
  * 岗位模块的 HTTP 客户端。
@@ -36,37 +37,20 @@ const http = axios.create({
  * 刻意用 sessionStorage 而不是 localStorage：关闭标签页即失效，泄露面更小。
  * 后端只在单次请求内使用它，不落库、不打日志。
  * ------------------------------------------------------------------------- */
-const AI_KEY_STORAGE = 'resume-helper-ai-key'
-
-export function getAiKey() {
-  try {
-    return window.sessionStorage.getItem(AI_KEY_STORAGE) || ''
-  } catch {
-    return ''
-  }
-}
+export function getAiKey() { return getAiSettings().apiKey }
 
 export function setAiKey(key) {
-  try {
-    const value = String(key || '').trim()
-    if (value) {
-      window.sessionStorage.setItem(AI_KEY_STORAGE, value)
-    } else {
-      window.sessionStorage.removeItem(AI_KEY_STORAGE)
-    }
-  } catch {
-    // 浏览器可能禁用 storage；此时只是不持久化，不影响本次请求
-  }
+  setAiSettings({ ...getAiSettings(), apiKey: key })
 }
 
-export function hasAiKey() {
-  return getAiKey().length > 0
-}
+export function hasAiKey() { return getAiKey().length > 0 }
 
 http.interceptors.request.use((config) => {
-  const key = getAiKey()
-  if (key) {
-    config.headers['X-AI-Api-Key'] = key
+  config.headers['X-User-Id'] = getUserId()
+  const settings = getAiSettings()
+  for (const [field, header] of Object.entries({ apiKey: 'X-AI-Api-Key', model: 'X-AI-Model', baseUrl: 'X-AI-Base-Url' })) {
+    if (settings[field]) config.headers[header] = settings[field]
+    else delete config.headers[header]
   }
   return config
 })

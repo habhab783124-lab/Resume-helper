@@ -16,7 +16,7 @@ test('uses API origin, cookies and ephemeral AI headers with JSON bodies', async
 })
 test('uploads multipart without overriding boundary and reads without AI credentials', async () => {
   const calls = []
-  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: {} }) } })
+  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { material: { id: 'm' }, text: 'resume' } }) } })
   await api.upload(new Blob(['resume']), 'resume.txt')
   await api.getSession('id with spaces')
   assert.ok(calls[0][1].body instanceof FormData)
@@ -53,4 +53,68 @@ test('sends model credentials to the connectivity check', async () => {
   assert.equal(request[1].headers['X-AI-Api-Key'], 'key')
   assert.equal(request[1].headers['X-AI-Model'], 'my-model')
   assert.equal(request[1].headers['X-AI-Base-Url'], 'https://model.example/v1')
+})
+
+test('maps unified material detail and preserves empty scanned text', async () => {
+  for (const text of ['resume text', '']) {
+    const api = createInterviewApi({ fetchImpl: async () => response({ success: true, data: { material: { id: 'm1', fileName: 'resume.pdf', status: text ? 'TEXT_EXTRACTED' : 'SCANNED' }, extraction: { ignored: true }, text } }) })
+    assert.deepEqual(await api.upload(new Blob(['bytes']), 'resume.pdf'), { materialId: 'm1', fileName: 'resume.pdf', status: text ? 'TEXT_EXTRACTED' : 'SCANNED', text })
+  }
+})
+
+test('rejects malformed material ids or original text without hiding deletion status', async () => {
+  for (const detail of [{ text: 'text' }, { material: { id: '' }, text: '' }, { material: { id: 1 }, text: '' }, { material: { id: 'm' }, text: {} }, { material: { id: 'm' } }]) {
+    const api = createInterviewApi({ fetchImpl: async () => response({ success: true, data: detail }) })
+    await assert.rejects(api.getMaterial('m'), /简历.*异常/)
+  }
+  const api = createInterviewApi({ fetchImpl: async () => response({ success: false, message: '材料已删除' }, 404) })
+  await assert.rejects(api.getMaterial('m'), error => error.status === 404 && error.message === '材料已删除')
+})
+
+test('all text routes read current shared settings and respect explicit overrides', async () => {
+  const { setAiSettings } = await import('./requestContext.js')
+  const calls = []
+  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { material: { id: 'm' }, text: 'resume' } }) } })
+  setAiSettings({ apiKey: 'first', model: 'm1', baseUrl: 'https://first.test' })
+  await api.start({})
+  setAiSettings({ apiKey: 'second', model: 'm2', baseUrl: 'https://second.test' })
+  await api.answer('s', {})
+  await api.checkAi()
+  await api.report('s')
+  await api.upload(new Blob(['text']), 'resume.txt')
+  await api.upload(new Blob(['text']), 'resume.txt', { apiKey: 'override' })
+  await api.report('s', {})
+  assert.equal(calls[0][1].headers['X-AI-Api-Key'], 'first')
+  for (const call of calls.slice(1, 5)) {
+    assert.equal(call[1].headers['X-AI-Api-Key'], 'second')
+    assert.equal(call[1].headers['X-AI-Model'], 'm2')
+    assert.equal(call[1].headers['X-AI-Base-Url'], 'https://second.test')
+  }
+  assert.equal(calls[5][1].headers['X-AI-Api-Key'], 'override')
+  assert.equal(calls[5][1].headers['X-AI-Model'], undefined)
+  assert.equal(calls[6][1].headers['X-AI-Api-Key'], undefined)
+})
+
+test('all routes share request-time identity and speech/read routes omit credentials', async () => {
+  const { setAiSettings } = await import('./requestContext.js')
+  setAiSettings({ apiKey: 'text-secret', model: 'model', baseUrl: 'https://models.test', volcApiKey: 'never' })
+  let user = 'user-a'
+  const calls = []
+  const api = createInterviewApi({ getUserId: () => user, fetchImpl: async (...args) => {
+    calls.push(args)
+    return args[0].endsWith('/speech') ? new Response('audio', { headers: { 'Content-Type': 'audio/mpeg' } }) : response({ success: true, data: { material: { id: 'm' }, text: 'text' } })
+  } })
+  await api.start({})
+  user = 'user-b'
+  await api.getSession('s'); await api.getMaterial('m'); await api.finish('s')
+  await api.getSpeechCapabilities()
+  await api.transcribe('s', { questionId: 'q', requestId: 'r', file: new File(['audio'], 'answer.webm') })
+  await api.questionSpeech('s', 'q')
+  assert.equal(calls[0][1].headers['X-User-Id'], 'user-a')
+  for (const call of calls.slice(1)) {
+    assert.equal(call[1].headers['X-User-Id'], 'user-b')
+    assert.deepEqual(Object.keys(call[1].headers).filter(name => /AI|VOLC|Authorization/i.test(name)), [])
+    assert.ok(!call[0].includes('secret'))
+  }
+  setAiSettings({})
 })

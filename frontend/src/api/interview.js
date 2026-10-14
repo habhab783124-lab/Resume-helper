@@ -1,7 +1,10 @@
-export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch } = {}) {
+import { getAiSettings, getUserId as sharedUserId } from './requestContext.js'
+
+export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch, getUserId = sharedUserId } = {}) {
   const root = `${baseUrl.replace(/\/$/, '')}/api`
-  async function request(path, { method = 'GET', body, ai = {}, signal } = {}) {
-    const headers = {}
+  async function request(path, { method = 'GET', body, ai, textModel = false, signal } = {}) {
+    const headers = { 'X-User-Id': getUserId() }
+    ai = textModel ? (ai ?? getAiSettings()) : {}
     if (ai.apiKey?.trim()) headers['X-AI-Api-Key'] = ai.apiKey.trim()
     if (ai.model?.trim()) headers['X-AI-Model'] = ai.model.trim()
     // Only honored server-side when the caller supplies their own key.
@@ -34,27 +37,30 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch 
    */
   function toInterviewMaterial(detail) {
     const material = detail?.material ?? {}
+    if (typeof material.id !== 'string' || !material.id.trim() || typeof detail?.text !== 'string') {
+      throw new Error('简历解析结果异常，请重试上传或恢复材料。')
+    }
     return {
       materialId: material.id,
       fileName: material.fileName,
       status: material.status,
-      text: typeof detail?.text === 'string' ? detail.text : ''
+      text: detail.text
     }
   }
 
   return {
-    checkAi: ai => request('/ai/check', { method: 'POST', ai }),
-    upload(file, fileName = file.name) {
+    checkAi: ai => request('/ai/check', { method: 'POST', ai, textModel: true }),
+    upload(file, fileName = file.name, ai) {
       const body = new FormData()
       body.append('file', file, fileName)
-      return request('/materials', { method: 'POST', body }).then(toInterviewMaterial)
+      return request('/materials', { method: 'POST', body, ai, textModel: true }).then(toInterviewMaterial)
     },
     getMaterial: id => request(`/materials/${encodeURIComponent(id)}`).then(toInterviewMaterial),
-    start: (body, ai) => request('/interviews', { method: 'POST', body, ai }),
+    start: (body, ai) => request('/interviews', { method: 'POST', body, ai, textModel: true }),
     getSession: id => request(sessionPath(id)),
-    answer: (id, body, ai) => request(`${sessionPath(id)}/turns`, { method: 'POST', body, ai }),
+    answer: (id, body, ai) => request(`${sessionPath(id)}/turns`, { method: 'POST', body, ai, textModel: true }),
     finish: id => request(`${sessionPath(id)}/finish`, { method: 'POST' }),
-    report: (id, ai = {}) => request(`${sessionPath(id)}/report`, { ai }),
+    report: (id, ai) => request(`${sessionPath(id)}/report`, { ai, textModel: true }),
     getSpeechCapabilities: () => request('/interview-speech/capabilities'),
     transcribe: (id, { questionId, requestId, file }, signal) => {
       const body = new FormData()
@@ -67,7 +73,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch 
     async questionSpeech(id, questionId, signal) {
       const reply = await fetchImpl(`${root}${sessionPath(id)}/questions/${encodeURIComponent(questionId)}/speech`, {
         method: 'POST',
-        headers: {},
+        headers: { 'X-User-Id': getUserId() },
         credentials: 'include',
         signal,
       })
@@ -79,9 +85,9 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch 
           { status: reply.status },
         )
       }
-      const type = (reply.headers.get('Content-Type') || '').toLowerCase()
+      const type = (reply.headers.get('Content-Type') || '').split(';')[0].trim().toLowerCase()
       const blob = await reply.blob()
-      if (!type.startsWith('audio/') || blob.size === 0) {
+      if (type !== 'audio/mpeg' || blob.size === 0 || blob.size > 5 * 1024 * 1024) {
         throw new Error('题目语音返回了无法播放的内容，请重试。')
       }
       return blob

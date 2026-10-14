@@ -10,9 +10,11 @@ const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || '
 const loading = ref(true)
 const error = ref('')
 const report = ref(null)
-const sessionRole = ref('')
+const sessionRole = ref('综合模拟')
+const session = ref(null)
+const warning = ref('')
 
-const sessionId = computed(() => route.query.sessionId || '')
+const sessionId = computed(() => typeof route.query.sessionId === 'string' ? route.query.sessionId.trim() : '')
 
 const scoreLevel = computed(() => {
   const s = report.value?.overallScore ?? 0
@@ -38,15 +40,34 @@ async function loadReport() {
   }
   loading.value = true
   error.value = ''
+  warning.value = ''
   try {
-    report.value = await api.report(sessionId.value)
-    const session = await api.getSession(sessionId.value)
-    sessionRole.value = session.targetRole || '综合模拟'
-  } catch (e) {
-    error.value = e.message || '报告加载失败，请稍后重试。'
+    const [reportResult, sessionResult] = await Promise.allSettled([
+      api.report(sessionId.value),
+      api.getSession(sessionId.value),
+    ])
+    if (sessionResult.status === 'fulfilled') {
+      session.value = sessionResult.value
+      sessionRole.value = session.value.targetRole || '综合模拟'
+    }
+    if (reportResult.status === 'fulfilled') {
+      report.value = reportResult.value
+      if (sessionResult.status === 'rejected') {
+        warning.value = '报告已加载，但面试记录暂时无法读取，岗位和回答记录可能不完整。请重试。'
+      }
+    } else {
+      const cause = reportResult.reason
+      error.value = cause.status === 404
+        ? '面试不存在或已过期，请重新开始一次模拟面试。'
+        : cause.message || '报告加载失败，请稍后重试。'
+    }
   } finally {
     loading.value = false
   }
+}
+
+function printReport() {
+  if (typeof window !== 'undefined' && typeof window.print === 'function') window.print()
 }
 
 onMounted(loadReport)
@@ -58,19 +79,31 @@ onMounted(loadReport)
     <p>正在生成面试报告…</p>
   </div>
 
-  <div v-else-if="error" class="error-wrap">
+  <div v-else-if="error && !report" class="error-wrap">
     <p class="notice error" role="alert">{{ error }}</p>
+    <button v-if="sessionId" class="button button-outline" @click="loadReport">重试加载报告</button>
     <button class="button button-primary" @click="router.push({ name: 'Interview' })">返回面试室</button>
+    <details v-if="session?.turns?.length" class="review-detail">
+      <summary>已保存的问答记录</summary>
+      <div v-for="turn in session.turns" :key="turn.questionId" class="review-expand-body">
+        <strong>{{ turn.question }}</strong>
+        <p>{{ turn.answer || '尚未回答' }}</p>
+      </div>
+    </details>
   </div>
 
   <template v-else-if="report">
+    <div v-if="error || warning" class="error-wrap">
+      <p class="notice error" role="alert">{{ error || warning }}</p>
+      <button class="button button-outline" @click="loadReport">重试加载报告</button>
+    </div>
     <div class="page-intro">
       <div>
         <div class="eyebrow"><span class="eyebrow-line"></span>INTERVIEW NOTES / 06</div>
         <h1>一次练习，一点进步<span class="greeting-dot">。</span></h1>
         <p>把反馈变成下一次表达的起点。</p>
       </div>
-      <button class="button button-outline" @click="window.print()">
+      <button class="button button-outline" @click="printReport">
         <svg><use href="#i-download"/></svg>导出练习报告
       </button>
     </div>
