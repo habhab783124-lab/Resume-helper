@@ -78,7 +78,7 @@ ASR/TTS 资源和音色按账号实际权限配置。能力接口只检查本机
 
 ## 验证方式
 
-2026-10-14 合并验证：后端 `mvn clean test` **118 项**、前端 `npm test` **88 项**通过，
+2026-10-14 合并验证：后端 `mvn clean test` **118 项**、前端 `npm test` **94 项**通过，
 `npm run build` 通过。原岗位、材料、资料、简历浏览器脚本继续保留，见 [后端说明](backend/README.md)。
 
 新增面试浏览器检查（Node 24+、Chrome、ffmpeg）：
