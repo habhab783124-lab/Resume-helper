@@ -352,6 +352,12 @@ onMounted(loadReport)
   color: v-bind(scoreColor);
 }
 @media print {
+  #page-report {
+    display: block !important;
+  }
+  .report-overview {
+    display: block;
+  }
   .report-side-panel, .page-footer button, .text-button {
     display: none;
   }
