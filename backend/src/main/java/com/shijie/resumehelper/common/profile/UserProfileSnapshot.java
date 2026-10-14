@@ -22,6 +22,7 @@ public record UserProfileSnapshot(
         List<String> targetCities,
         Integer yearsOfExperience,
         String education,
+        List<String> educations,
         List<String> skills,
         List<String> industries,
         String expectedSalary,
@@ -34,6 +35,7 @@ public record UserProfileSnapshot(
         targetCities = targetCities == null ? List.of() : List.copyOf(targetCities);
         yearsOfExperience = yearsOfExperience == null ? 0 : yearsOfExperience;
         education = TextKit.trim(education);
+        educations = educations == null ? List.of() : List.copyOf(educations);
         skills = skills == null ? List.of() : List.copyOf(skills);
         industries = industries == null ? List.of() : List.copyOf(industries);
         expectedSalary = TextKit.trim(expectedSalary);
@@ -76,6 +78,7 @@ public record UserProfileSnapshot(
         private List<String> targetCities = new ArrayList<>();
         private Integer yearsOfExperience;
         private String education;
+        private List<String> educations = new ArrayList<>();
         private List<String> skills = new ArrayList<>();
         private List<String> industries = new ArrayList<>();
         private String expectedSalary;
@@ -109,6 +112,17 @@ public record UserProfileSnapshot(
 
         public Builder education(String v) {
             this.education = v;
+            return this;
+        }
+
+        /**
+         * 教育经历，每条一行（例如「上海理工大学 · 本科 · 计算机科学与技术 · 2022.09—2026.06」）。
+         *
+         * <p>和 {@code education}（只有学历层次）分开：学历是岗位匹配的一个打分维度，
+         * 而教育经历要展示在个人资料页上，需要学校 / 专业 / 时间。
+         */
+        public Builder educations(List<String> v) {
+            this.educations = v == null ? new ArrayList<>() : new ArrayList<>(v);
             return this;
         }
 
@@ -150,7 +164,7 @@ public record UserProfileSnapshot(
 
         public UserProfileSnapshot build() {
             return new UserProfileSnapshot(userId, targetTitle, targetCities, yearsOfExperience, education,
-                    skills, industries, expectedSalary, summary, experiences);
+                    educations, skills, industries, expectedSalary, summary, experiences);
         }
     }
 }

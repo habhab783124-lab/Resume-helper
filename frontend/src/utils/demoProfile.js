@@ -23,6 +23,9 @@ export const DEMO_PROFILE = Object.freeze({
   // Profile.vue 上写的是「全职 · 应届校招」，2026.06 毕业 ⇒ 0 年经验
   yearsOfExperience: 0,
   education: '本科',
+  // 教育经历是给人看的（学校 / 专业 / 时间），和上面的 education（学历层次）分开：
+  // 后者是岗位匹配的打分维度，前者用于个人资料页展示。
+  educations: ['上海理工大学 · 本科 · 计算机科学与技术 · 2022.09—2026.06'],
   skills: ['Java', 'Spring Boot', 'MySQL', 'Redis', 'Git'],
   industries: ['互联网'],
   // Profile.vue 上没有展示期望薪资，这里给一个符合上海 Java 应届行情的演示值。

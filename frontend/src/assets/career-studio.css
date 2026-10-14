@@ -814,6 +814,9 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
   #page-resume { display: block !important; }
   .resume-workspace { display: block; }
   .resume-preview-panel { position: static; padding: 0; border: 0; background: white; }
-  .resume-paper { width: 210mm; min-height: 297mm; margin: 0 auto; padding: 18mm 20mm; border: 0; box-shadow: none; }
+  /* max-width: none 是必须的：窄屏的媒体查询里有一条 .resume-paper { max-width: 520px }，
+     而 max-width 会压过 width——不重置的话打印出来的纸面只有 520px 宽，不是 A4。
+     实测：窗口较窄时导出的 PDF 会被这一条压成 520px。 */
+  .resume-paper { width: 210mm; max-width: none; min-height: 297mm; margin: 0 auto; padding: 18mm 20mm; border: 0; box-shadow: none; }
   .paper-topline { margin: -18mm -20mm 14mm; }
 }
