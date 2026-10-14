@@ -27,7 +27,7 @@ export function useInterviewVoice({
   const ttsEnabled = computed(() => capabilityState.value === 'ready' && capabilities.value.ttsEnabled === true)
   const maxSeconds = computed(() => capabilities.value?.maxRecordingSeconds || 120)
   const maxBytes = computed(() => capabilities.value?.maxAudioBytes || 5 * 1024 * 1024)
-  let generation = 0, capabilityGeneration = 0, contextKey = '', request = null, disposed = false
+  let generation = 0, capabilityGeneration = 0, contextKey = '', request = null, disposed = false, recorderLimits = ''
 
   function clearRecordingUrl() {
     pauseReplay()
@@ -47,6 +47,14 @@ export function useInterviewVoice({
   function matches(context, my) {
     return generation === my && answerable() && contextSignature(context) === contextSignature(getContext())
   }
+  function configureRecorder() {
+    const limits = { maxSeconds: maxSeconds.value, maxBytes: maxBytes.value }
+    const key = JSON.stringify(limits)
+    if (recorder.value && recorderLimits === key) return
+    recorder.value?.dispose()
+    recorder.value = createRecorder(limits)
+    recorderLimits = key
+  }
   async function loadCapabilities() {
     if (disposed || capabilityState.value === 'loading' || busy.value) return
     const my = ++capabilityGeneration
@@ -59,9 +67,9 @@ export function useInterviewVoice({
       capabilities.value = { ...value,
         maxRecordingSeconds: Number.isFinite(value.maxRecordingSeconds) && value.maxRecordingSeconds > 0 ? Math.min(value.maxRecordingSeconds, 120) : 120,
         maxAudioBytes: Number.isFinite(value.maxAudioBytes) && value.maxAudioBytes > 0 ? Math.min(value.maxAudioBytes, 5 * 1024 * 1024) : 5 * 1024 * 1024 }
-      // Retry may change the server limits. No recording is active here.
-      recorder.value?.dispose()
-      recorder.value = createRecorder({ maxSeconds: maxSeconds.value, maxBytes: maxBytes.value })
+      // A capability retry must not discard an unsent recording or its preview.
+      // New limits validate retained audio below and configure the next recording.
+      if (!blob.value) configureRecorder()
       capabilityState.value = 'ready'
     } catch {
       if (disposed || my !== capabilityGeneration) return
@@ -92,6 +100,7 @@ export function useInterviewVoice({
     error.value = ''
     speech.stop()
     pauseReplay()
+    configureRecorder()
     recorder.value.cancel()
     await recorder.value.start()
   }
@@ -118,6 +127,7 @@ export function useInterviewVoice({
     error.value = ''
     if (!blob.value?.size) { error.value = '录音为空，请重新录音后识别。'; return }
     if (blob.value.size > maxBytes.value) { error.value = '录音超过大小限制，请缩短后重新录音。'; return }
+    if (durationSeconds.value > maxSeconds.value) { error.value = '录音超过当前时长限制，请缩短后重新录音。'; return }
     cancelTranscription()
     speech.stop()
     pauseReplay()

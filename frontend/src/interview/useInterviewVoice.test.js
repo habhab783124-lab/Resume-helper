@@ -85,3 +85,23 @@ test('new recording clears old preview/replay and stops TTS; question and record
   f.voice.playQuestion(); assert.equal(f.events.filter(event => Array.isArray(event) && event[0] === 'play').length, plays)
   f.voice.dispose()
 })
+
+test('capability refresh preserves retained recording, replay URL and accepted-later preview even if only TTS is unavailable', async () => {
+  const f = setup({ api: { getSpeechCapabilities: async () => ({ asrEnabled: true, ttsEnabled: false, maxRecordingSeconds: 60, maxAudioBytes: 100 }) } })
+  await recording(f); await f.voice.transcribe()
+  const retained = f.voice.blob.value, url = f.voice.recordingUrl.value
+  await f.voice.loadCapabilities()
+  assert.equal(f.voice.blob.value, retained); assert.equal(f.voice.recordingUrl.value, url); assert.equal(f.voice.recorderState.value, 'recorded'); assert.equal(f.voice.preview.value.text, '转写全文')
+  assert.deepEqual(f.revoked, [])
+  f.voice.dispose()
+})
+test('changed capability limits preserve audio but validate old duration before upload and apply new limits to the next recording', async () => {
+  let seconds = 60
+  const f = setup({ api: { getSpeechCapabilities: async () => ({ asrEnabled: true, ttsEnabled: false, maxRecordingSeconds: seconds, maxAudioBytes: 100 }) } })
+  await recording(f); f.recorder.durationSeconds.value = 30
+  const retained = f.voice.blob.value; seconds = 20; await f.voice.loadCapabilities()
+  assert.equal(f.voice.blob.value, retained)
+  await f.voice.transcribe(); assert.equal(f.calls.length, 0); assert.match(f.voice.error.value, /时长/)
+  await f.voice.startRecording(); assert.deepEqual(f.events.filter(value => typeof value === 'object').at(-1), { maxSeconds: 20, maxBytes: 100 })
+  f.voice.dispose()
+})

@@ -30,6 +30,12 @@ const completed = computed(() => session.value?.turns.filter(turn => turn.answer
 const current = computed(() => session.value?.currentQuestion)
 const pending = computed(() => session.value?.pendingAnswer ?? uncertainAnswer.value)
 const active = computed(() => session.value?.status === 'ACTIVE')
+const finishAlternativeLabel = computed(() => session.value?.pendingAnswer != null ? '保留已提交回答并结束' : uncertainAnswer.value != null ? '结束并保留已收到的回答' : '放弃草稿并结束')
+const finishMessage = computed(() => session.value?.pendingAnswer != null
+  ? '这份回答已提交并保留在服务端，结束时会计入面试报告。可以重试提交以生成下一题，或保留回答并结束。'
+  : uncertainAnswer.value != null
+    ? '上次提交结果尚未确认，回答可能已被服务端保留。结束会保留已收到的回答，无法撤回；也可继续作答后重试提交。'
+    : '还有未提交的草稿或转写预览。请选择如何结束。')
 function voiceContext() {
   return { sessionId: session.value?.sessionId, questionId: current.value?.questionId, status: session.value?.status, pending: pending.value, blocked: !!busy.value }
 }
@@ -162,7 +168,11 @@ async function chooseFinish(choice) {
     if (session.value?.status === 'FINISHED') { finishChoice.value = false; viewReport(); return }
     return endSession()
   }
-  if (choice === 'discard') return endSession()
+  if (choice === 'preserve' && pending.value != null) return endSession()
+  if (choice === 'discard') {
+    if (pending.value != null) { error.value = '已提交的回答不能作为本地草稿丢弃，请选择保留回答并结束。'; return }
+    return endSession()
+  }
 }
 function checkAi() {
   return run('正在测试连接…', async () => {
@@ -232,7 +242,7 @@ onUnmounted(() => voice.dispose())
             </div>
             <div class="answer-editor">
               <label for="interview-answer">你的回答 <span>围绕背景、行动与结果组织表达</span></label>
-              <p v-if="pending != null" class="notice">回答已保留。重试会提交同一份回答；录音和转写不能覆盖待提交回答。</p>
+              <p v-if="pending != null" class="notice">回答已保留。重试会提交同一份回答；结束时会保留服务端已收到的回答。录音和转写不能覆盖待提交回答。</p>
               <div class="voice-panel">
                 <p class="voice-note">可选语音作答：点击后才会申请麦克风。录音由你主动识别时发送至火山引擎；转写先预览，确认后再写入草稿，不会自动提交回答。</p>
                 <p class="voice-note">录音上限 {{ voice.maxSeconds }} 秒 / {{ (voice.maxBytes / 1024 / 1024).toFixed(1) }} MiB。</p>
@@ -271,11 +281,12 @@ onUnmounted(() => voice.dispose())
             </div>
           </template>
           <div v-if="finishChoice && active" class="notice finish-choice" role="group" aria-label="处理未提交内容">
-            <p>还有未提交的草稿或转写预览。请选择如何结束。</p>
+            <p>{{ finishMessage }}</p>
             <p v-if="voice.preview">转写尚未确认，请先替换、追加或保留原草稿，再提交后结束。</p>
             <div class="voice-actions">
               <button data-testid="finish-submit" class="button button-primary" :disabled="locked || !!voice.preview || !(pending ?? answer.trim()) || (pending ?? answer).length > 5000" @click="chooseFinish('submit')">提交后结束</button>
-              <button data-testid="finish-discard" class="button button-ghost" :disabled="locked" @click="chooseFinish('discard')">放弃草稿并结束</button>
+              <button v-if="pending != null" data-testid="finish-preserve" class="button button-ghost" :disabled="locked" @click="chooseFinish('preserve')">{{ finishAlternativeLabel }}</button>
+              <button v-else data-testid="finish-discard" class="button button-ghost" :disabled="locked" @click="chooseFinish('discard')">{{ finishAlternativeLabel }}</button>
               <button class="text-button" :disabled="locked" @click="chooseFinish('continue')">继续作答</button>
             </div>
           </div>

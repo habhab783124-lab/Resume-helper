@@ -11,7 +11,7 @@ const setupBody = /<script setup>([\s\S]*?)<\/script>/.exec(viewSource)[1]
   .replace(/^import\s.*$/gm, '')
   .replace(/import\.meta\.env/g, '({})')
   .trimEnd()
-  + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, checkAi, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, material, apiKey, model, modelBaseUrl };'
+  + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, checkAi, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, material, apiKey, model, modelBaseUrl };'
 
 function mount(apiStub) {
   const mounted = [], unmounted = [], pushes = [], events = [], settings = []
@@ -183,4 +183,26 @@ test('ordinary last answer completion keeps a usable report entry without callin
 test('reset clears active voice and unsaved finishing state', () => {
   const view = mount({}); view.applySession(firstQuestion); view.answer.value = '草稿'; view.finish(); view.reset()
   assert.equal(view.session.value, null); assert.equal(view.finishChoice.value, false); assert.ok(view.events.includes('cancel-recording'))
+})
+
+test('next-question failure preserves server pending answer and finishing honestly offers retention, never local discard', async () => {
+  let ends = 0
+  const held = '服务端已保留的回答'
+  const withPending = { ...firstQuestion, pendingAnswer: held }
+  const view = mount({ answer: async () => { throw new Error('生成下一题失败') }, getSession: async () => withPending,
+    finish: async () => { ends += 1; return { ...finishedSession, turns: [{ ...firstQuestion.turns[0], answer: held }] } } })
+  view.applySession(firstQuestion); view.answer.value = held; await view.submitAnswer(); await view.finish()
+  assert.equal(view.pending.value, held)
+  assert.equal(view.finishAlternativeLabel.value, '保留已提交回答并结束')
+  assert.match(view.finishMessage.value, /计入.*报告/)
+  await view.chooseFinish('discard'); assert.equal(ends, 0, 'local-discard action cannot falsely discard submitted content')
+  await view.chooseFinish('preserve'); assert.equal(ends, 1); assert.equal(view.session.value.turns[0].answer, held); assert.equal(view.pushes.length, 1)
+})
+test('unknown submission outcome warns finishing can retain an answer; local draft keeps real discard semantics', async () => {
+  const view = mount({ answer: async () => { throw new Error('lost') }, getSession: async () => { throw new Error('offline') } })
+  view.applySession(firstQuestion); view.answer.value = '待确认'; await view.submitAnswer(); await view.finish()
+  assert.equal(view.finishAlternativeLabel.value, '结束并保留已收到的回答'); assert.match(view.finishMessage.value, /可能.*保留/)
+  const local = mount({}); local.applySession(firstQuestion); local.answer.value = '未发送'
+  assert.equal(local.finishAlternativeLabel.value, '放弃草稿并结束')
+  assert.match(viewSource, /data-testid="finish-preserve"/)
 })
