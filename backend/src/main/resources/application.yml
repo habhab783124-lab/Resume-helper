@@ -84,6 +84,28 @@ app:
       max-tokens: 800
       temperature: 0.2
 
+  interview:
+    speech:
+      # 火山豆包语音，独立于上面的文本模型配置：两套密钥体系不通，
+      # 实测方舟 ark- 前缀的 key 调语音接口直接 401，不能借用 AI_API_KEY。
+      # 留空表示语音能力关闭，文字面试不受影响。
+      api-key: ${VOLC_SPEECH_API_KEY:}
+      # ASR 资源按账号实际开通情况填。计划原定 volc.bigasr.auc_turbo，
+      # 实测本账号未授权（45000030）；换用 sauc.duration 调同一端点可完整识别。
+      asr-resource-id: ${VOLC_ASR_RESOURCE_ID:volc.seedasr.sauc.duration}
+      tts-resource-id: ${VOLC_TTS_RESOURCE_ID:seed-tts-2.0}
+      # 音色要在该资源下有权限，最终以控制台权限与 smoke test 成功为准。
+      tts-speaker: ${VOLC_TTS_SPEAKER:zh_female_vv_uranus_bigtts}
+      # 后端转码依赖这两个可执行文件，部署机必须装 FFmpeg（见 backend/docs/语音面试接口与接入.md）。
+      ffmpeg-path: ${FFMPEG_PATH:ffmpeg}
+      ffprobe-path: ${FFPROBE_PATH:ffprobe}
+      max-audio-bytes: 5242880
+      max-duration-seconds: 120
+      asr-timeout-seconds: 60
+      tts-timeout-seconds: 30
+      conversion-timeout-seconds: 10
+      max-concurrent-requests: 2
+
 logging:
   level:
     com.shijie.resumehelper.job: INFO
