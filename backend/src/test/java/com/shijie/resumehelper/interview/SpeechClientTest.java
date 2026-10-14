@@ -318,6 +318,26 @@ class SpeechClientTest {
         assertFalse(reached.get(), "空录音不应发起付费调用");
     }
 
+    @Test
+    void transcribeTimesOutWhenBodyStallsAfterHeaders() {
+        properties.setAsrTimeoutSeconds(1);
+        server.createContext(ASR_PATH, exchange -> {
+            exchange.getRequestBody().readAllBytes();
+            byte[] body = "{\"result\":{\"text\":\"识别结果\"}}".getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("X-Api-Status-Code", "20000000");
+            exchange.sendResponseHeaders(200, body.length);
+            exchange.getResponseBody().write(body, 0, 1);
+            exchange.getResponseBody().flush();
+            sleepQuietly(2000);
+            try { exchange.getResponseBody().write(body, 1, body.length - 1); }
+            catch (IOException ignored) { /* 客户端超时后已关闭响应。 */ }
+            finally { exchange.close(); }
+        });
+        var thrown = assertThrows(InterviewException.class,
+                () -> client.transcribe(wav(), "req-asr-stalled-body"));
+        assertEquals(504, thrown.status());
+    }
+
     // ------------------------------------------------------------------
     // 本地服务辅助
     // ------------------------------------------------------------------

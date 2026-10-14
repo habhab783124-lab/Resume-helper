@@ -381,4 +381,46 @@ class InterviewSpeechApiTest {
             pool.shutdownNow();
         }
     }
+
+    @Test void rejectedGlobalRequestDoesNotIncreaseCapacity() throws Exception {
+        var owners = new MockHttpSession[]{new MockHttpSession(), new MockHttpSession(),
+                new MockHttpSession(), new MockHttpSession()};
+        Ref[] refs = new Ref[owners.length];
+        for (int i = 0; i < owners.length; i++) refs[i] = start(owners[i]);
+        CountDownLatch started = new CountDownLatch(2);
+        CountDownLatch release = new CountDownLatch(1);
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        when(speech.synthesize(anyString(), anyString())).thenAnswer(invocation -> {
+            if (calls.incrementAndGet() <= 2) {
+                started.countDown();
+                assertTrue(release.await(10, TimeUnit.SECONDS));
+            }
+            return new SpeechClient.SpeechAudio(SYNTH, "audio/mpeg");
+        });
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        try {
+            Future<MvcResult> first = pool.submit(() -> mvc.perform(post("/api/interviews/"
+                    + refs[0].sessionId() + "/questions/" + refs[0].questionId() + "/speech")
+                    .header("X-User-Id", owners[0].getId())).andReturn());
+            Future<MvcResult> second = pool.submit(() -> mvc.perform(post("/api/interviews/"
+                    + refs[1].sessionId() + "/questions/" + refs[1].questionId() + "/speech")
+                    .header("X-User-Id", owners[1].getId())).andReturn());
+            assertTrue(started.await(5, TimeUnit.SECONDS));
+            for (int i = 2; i < 4; i++) {
+                mvc.perform(post("/api/interviews/" + refs[i].sessionId() + "/questions/"
+                        + refs[i].questionId() + "/speech").header("X-User-Id", owners[i].getId()))
+                        .andExpect(status().isTooManyRequests());
+            }
+            assertEquals(2, calls.get(), "被拒请求不能制造额外许可或调用厂商");
+            release.countDown();
+            assertEquals(200, first.get(5, TimeUnit.SECONDS).getResponse().getStatus());
+            assertEquals(200, second.get(5, TimeUnit.SECONDS).getResponse().getStatus());
+            mvc.perform(post("/api/interviews/" + refs[2].sessionId() + "/questions/"
+                    + refs[2].questionId() + "/speech").header("X-User-Id", owners[2].getId()))
+                    .andExpect(status().isOk());
+        } finally {
+            release.countDown();
+            pool.shutdownNow();
+        }
+    }
 }

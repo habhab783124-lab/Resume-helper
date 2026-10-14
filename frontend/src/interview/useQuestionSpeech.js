@@ -115,7 +115,9 @@ export function useQuestionSpeech({
       }
       return
     }
-    silence(current.audio)
+    // 停播保留 src 和结束回调，同一题之后仍可用缓存重播。
+    current.audio.pause()
+    current.audio.currentTime = 0
     state.value = 'stopped'
   }
 

@@ -108,6 +108,7 @@ public class VolcengineSpeechClient implements SpeechClient {
                 .POST(HttpRequest.BodyPublishers.ofByteArray(toJson(asrBody(wav))))
                 .build();
 
+        long startedAtNanos = System.nanoTime();
         HttpResponse<InputStream> response;
         try {
             response = http.send(request, HttpResponse.BodyHandlers.ofInputStream());
@@ -128,7 +129,8 @@ public class VolcengineSpeechClient implements SpeechClient {
                 log.warn("ASR HTTP {} requestId={}", response.statusCode(), requestId);
                 throw upstreamFailure(response.statusCode());
             }
-            byte[] payload = readLimited(body, MAX_ASR_RESPONSE_BYTES);
+            byte[] payload = readAsrBody(body, requestId,
+                    remainingBudget(startedAtNanos, properties.getAsrTimeoutSeconds()));
             if (payload == null) {
                 log.warn("ASR 响应超过 {} 字节上限 requestId={}", MAX_ASR_RESPONSE_BYTES, requestId);
                 throw new InterviewException(502, "语音服务返回异常，请重试");
@@ -199,7 +201,7 @@ public class VolcengineSpeechClient implements SpeechClient {
         if (stream == null) {
             throw new InterviewException(502, "题目语音生成失败，请稍后重试");
         }
-        return readTts(stream, requestId, remainingTtsBudget(startedAtNanos));
+        return readTts(stream, requestId, remainingBudget(startedAtNanos, properties.getTtsTimeoutSeconds()));
     }
 
     // ------------------------------------------------------------------
@@ -305,8 +307,36 @@ public class VolcengineSpeechClient implements SpeechClient {
         }
     }
 
-    private Duration remainingTtsBudget(long startedAtNanos) {
-        long total = Duration.ofSeconds(properties.getTtsTimeoutSeconds()).toNanos();
+    /** ASR 同样必须限制响应头到达之后的读取，避免占住 owner 与全局许可。 */
+    private byte[] readAsrBody(InputStream stream, String requestId, Duration deadline) {
+        ExecutorService reader = Executors.newSingleThreadExecutor(runnable -> {
+            Thread thread = new Thread(runnable, "asr-response-reader");
+            thread.setDaemon(true);
+            return thread;
+        });
+        Future<byte[]> task = reader.submit(() -> readLimited(stream, MAX_ASR_RESPONSE_BYTES));
+        try {
+            return task.get(deadline.toMillis(), TimeUnit.MILLISECONDS);
+        } catch (TimeoutException e) {
+            log.warn("ASR 响应读取超时 requestId={}", requestId);
+            task.cancel(true);
+            closeQuietly(stream);
+            throw new InterviewException(504, "语音识别超时，请缩短录音后重试");
+        } catch (ExecutionException e) {
+            if (e.getCause() instanceof InterviewException expected) throw expected;
+            throw new InterviewException(502, "语音服务返回异常，请重试");
+        } catch (InterruptedException e) {
+            task.cancel(true);
+            closeQuietly(stream);
+            Thread.currentThread().interrupt();
+            throw new InterviewException(504, "语音识别中断，请重试");
+        } finally {
+            reader.shutdownNow();
+        }
+    }
+
+    private Duration remainingBudget(long startedAtNanos, int timeoutSeconds) {
+        long total = Duration.ofSeconds(timeoutSeconds).toNanos();
         long elapsed = System.nanoTime() - startedAtNanos;
         return Duration.ofNanos(Math.max(total - elapsed, 0));
     }

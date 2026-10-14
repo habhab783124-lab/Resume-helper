@@ -243,6 +243,24 @@ test('dispose releases the audio and clears every callback', async () => {
   assert.deepEqual(revoked, ['url-1'])
 })
 
+test('replaying after stop retains the source and playback callbacks', async () => {
+  const { speech, audio, requests } = harness()
+  speech.play('s1', 'q1')
+  requests[0].resolve(new Blob(['audio']))
+  await tick()
+  const source = audio[0].src
+  speech.stop()
+  speech.play('s1', 'q1')
+  await tick()
+
+  assert.equal(audio[0].src, source, '停止后重播仍须有音频源')
+  assert.equal(typeof audio[0].onended, 'function', '重播结束须能退出 playing 状态')
+  audio[0].onended()
+  assert.equal(speech.state.value, 'stopped')
+  assert.equal(requests.length, 1)
+  speech.dispose()
+})
+
 test('dispose before the response lands leaves no audio behind', async () => {
   const { speech, audio, revoked, requests } = harness()
 

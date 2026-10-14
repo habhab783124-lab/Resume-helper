@@ -117,17 +117,17 @@ public class InterviewSpeechService {
         if (!busyOwners.add(owner)) {
             throw new InterviewException(429, BUSY);
         }
+        boolean acquired = false;
         try {
-            if (!permits.tryAcquire()) {
+            acquired = permits.tryAcquire();
+            if (!acquired) {
                 throw new InterviewException(429, BUSY);
             }
             return work.get();
         } finally {
-            // busyOwners 里有这个 owner 当且仅当它持有一个 permit，
-            // 用 remove 的结果决定要不要 release，既不会泄漏也不会重复释放。
-            if (busyOwners.remove(owner)) {
-                permits.release();
-            }
+            // owner 标记在获取全局许可前就加入，获取失败不能释放不存在的许可。
+            if (acquired) permits.release();
+            busyOwners.remove(owner);
         }
     }
 
