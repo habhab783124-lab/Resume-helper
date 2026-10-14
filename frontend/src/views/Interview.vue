@@ -1,7 +1,9 @@
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
 
+const router = useRouter()
 const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || '' })
 const storageKey = 'career-studio-interview-id'
 const material = ref(null)
@@ -71,23 +73,45 @@ function start() {
 function submitAnswer() {
   const text = pending.value ?? answer.value.trim()
   if (!text || !current.value) return
+  // 编辑框有 maxlength 保护，但程序回填（例如语音转写）没有。超长在这里拦住，
+  // 不要等服务器 400 才知道。
+  if (text.length > 5000) {
+    error.value = '回答不能超过 5000 字，请精简后提交。'
+    return
+  }
   const questionId = current.value.questionId
   return run('正在处理回答并生成后续问题…', async () => {
     uncertainAnswer.value = text
     try {
       applySession(await api.answer(session.value.sessionId, { questionId, answer: text }, { apiKey: apiKey.value, model: model.value, baseUrl: modelBaseUrl.value }))
     } catch (cause) {
-      // A lost response may follow a successful turn. Read before offering an identical retry.
-      try { applySession(await api.getSession(session.value.sessionId)) } catch { /* Keep the identical answer for a safe retry. */ }
+      // 响应可能丢失但提交其实成功了。读回一次再决定是否提示重试。
+      let recovered = false
+      try {
+        applySession(await api.getSession(session.value.sessionId))
+        recovered = true
+      } catch { /* 原提交结果未知，保留同一回答供重试。 */ }
+      if (recovered) {
+        const saved = session.value.turns.find(turn => turn.questionId === questionId)
+        if (saved?.answer === text) return
+      }
       if (session.value?.currentQuestion?.questionId === questionId && session.value.pendingAnswer == null) {
-        uncertainAnswer.value = text
         answer.value = text
+        // 服务器明确说这道题还没有待提交回答时，草稿可以继续编辑；
+        // 只有网络结果不明才锁定原回答。
+        uncertainAnswer.value = recovered && cause.status === 400 ? null : text
       }
       throw cause
     }
   })
 }
-function finish() { return run('正在结束面试…', async () => applySession(await api.finish(session.value.sessionId))) }
+function finish() {
+  return run('正在结束面试并生成报告…', async () => {
+    const finished = await api.finish(session.value.sessionId)
+    applySession(finished)
+    router.push({ name: 'Report', query: { sessionId: finished.sessionId } })
+  })
+}
 function checkAi() {
   return run('正在测试连接…', async () => {
     aiCheck.value = ''

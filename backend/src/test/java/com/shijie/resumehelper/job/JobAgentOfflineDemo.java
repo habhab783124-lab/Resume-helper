@@ -19,8 +19,7 @@ import com.shijie.resumehelper.job.match.MatchScorer;
 import com.shijie.resumehelper.job.match.SkillLexicon;
 import com.shijie.resumehelper.job.service.JobService;
 import com.shijie.resumehelper.job.source.CsvJobSource;
-import com.shijie.resumehelper.job.source.JobImporter;
-import com.shijie.resumehelper.job.source.JobSourceRegistry;
+import com.shijie.resumehelper.job.source.JobImporter;import com.shijie.resumehelper.job.source.JobSourceRegistry;
 import com.shijie.resumehelper.job.source.MockJobSource;
 import com.shijie.resumehelper.job.store.InMemoryJobStore;
 import com.shijie.resumehelper.job.store.JobStore;
@@ -155,7 +154,12 @@ public final class JobAgentOfflineDemo {
         CsvJobSource csv = new CsvJobSource("示例 CSV 岗位库", "classpath:jobs/sample-jobs.csv", true);
         List<Job> jobs = csv.search(new JobQuery());
         System.out.println("  从 classpath CSV 读到 " + jobs.size() + " 个岗位");
-        check("读到了 CSV 岗位", jobs.size() == 2);
+        // 不写死行数：这份 CSV 是给队友随时补充演示数据的（已经从 2 行扩到十几行），
+        // 写死数字会因为"补数据"而莫名其妙地失败。改成先数一遍数据行再比对，
+        // 既能挡住"解析器漏读行"，也不会因为数据变多而误报。
+        int expectedCsvRows = countCsvDataRows("jobs/sample-jobs.csv");
+        check("读到了 CSV 岗位（解析行数 == 文件数据行数 " + expectedCsvRows + "）",
+                expectedCsvRows > 0 && jobs.size() == expectedCsvRows);
         check("CSV 技能用 | 分隔能正确拆开",
                 jobs.stream().anyMatch(j -> j.skills().contains("Spring Boot")));
         check("CSV 带逗号的引号字段能正确解析",
@@ -444,6 +448,41 @@ public final class JobAgentOfflineDemo {
         } else {
             failed++;
             System.out.println("  [失败] " + description);
+        }
+    }
+
+    /**
+     * 数一遍 CSV 里的数据行（跳过表头、空行和 {@code #} 注释）。
+     *
+     * <p>为什么要这么麻烦：这份 CSV 是给队友随时补充演示岗位用的，
+     * 把期望行数写死会在"只是补了数据"时莫名其妙地失败，
+     * 然后大家就学会了"这个测试红了不用管"——那才是最危险的。
+     * 数行再比对既能挡住解析器漏读，也不会因为数据变多而误报。
+     */
+    private static int countCsvDataRows(String classpathResource) {
+        try (var in = JobAgentOfflineDemo.class.getClassLoader().getResourceAsStream(classpathResource)) {
+            if (in == null) {
+                return -1;
+            }
+            try (var reader = new java.io.BufferedReader(new java.io.InputStreamReader(in, java.nio.charset.StandardCharsets.UTF_8))) {
+                int rows = 0;
+                String line;
+                boolean first = true;
+                while ((line = reader.readLine()) != null) {
+                    String trimmed = line.trim();
+                    if (first) {
+                        first = false;
+                        continue;   // 表头
+                    }
+                    if (trimmed.isEmpty() || trimmed.startsWith("#")) {
+                        continue;
+                    }
+                    rows++;
+                }
+                return rows;
+            }
+        } catch (java.io.IOException e) {
+            return -1;
         }
     }
 }

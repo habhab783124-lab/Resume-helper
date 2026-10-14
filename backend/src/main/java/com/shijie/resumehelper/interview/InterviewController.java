@@ -90,4 +90,16 @@ public class InterviewController {
     public ApiResponse<InterviewService.Session> finish(@PathVariable String id, HttpServletRequest request) {
         return ApiResponse.ok(interviews.finish(UserContext.resolve(request), id));
     }
+
+    /**
+     * 生成面试报告。
+     *
+     * <p>身份和别处一样走 {@link UserContext}。这个接口是队友后加的，
+     * 合并时它用的是原来的 {@code owner(request)}（HTTP session id）辅助方法——
+     * 那个方法在统一身份时被删掉了，这里改成和本类其它接口一致。
+     */
+    @GetMapping("/interviews/{id}/report")
+    public ApiResponse<InterviewAgent.InterviewReport> report(@PathVariable String id, HttpServletRequest request) {
+        return ApiResponse.ok(interviews.report(UserContext.resolve(request), id, clients.resolve(request)));
+    }
 }

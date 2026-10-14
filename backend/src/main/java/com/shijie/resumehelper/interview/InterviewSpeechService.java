@@ -1,0 +1,171 @@
+package com.shijie.resumehelper.interview;
+
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import org.springframework.stereotype.Service;
+import org.springframework.web.multipart.MultipartFile;
+
+import java.io.File;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Set;
+import java.util.UUID;
+import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Semaphore;
+import java.util.function.Supplier;
+
+/**
+ * 语音编排层：把火山调用接回带会话归属的面试状态。
+ *
+ * <p>职责只有三件——校验会话归属与当前题、限制并发、按顺序调用
+ * {@link AudioNormalizer} 与 {@link SpeechClient}。面试状态仍然只由 {@link InterviewService} 管理，
+ * 本类不持有任何面试状态锁等待网络返回：火山调用前后各做一次无锁校验，
+ * 结果和当前题目对不上就按 409 丢弃，前端重新同步。
+ *
+ * <p>转写只产出草稿，不调用 {@link InterviewService#answer}——
+ * 用户确认后才走现有 turns 接口提交，避免一次识别就推进一轮。
+ */
+@Service
+public class InterviewSpeechService {
+    private static final Logger log = LoggerFactory.getLogger(InterviewSpeechService.class);
+
+    private static final String BUSY = "语音服务繁忙，请稍后再试";
+    private static final String INVALID_REQUEST = "请求参数不正确，请重新提交";
+    private static final String STATE_CHANGED = "面试状态已变化，请同步当前题目后继续";
+    private static final String UNKNOWN_QUESTION = "题目不存在，请刷新面试记录";
+
+    /** 本机语音能力开关与本项目限制。只代表配置完整和转码工具可执行，不宣称账户额度可用。 */
+    public record Capabilities(boolean asrEnabled, boolean ttsEnabled,
+                               int maxRecordingSeconds, int maxAudioBytes) {}
+
+    /** 转写草稿；字段回带原值，供前端校验结果和本次操作确实对应。 */
+    public record Transcription(String sessionId, String questionId, String requestId,
+                                String text, long durationMs) {}
+
+    private final InterviewService interviews;
+    private final AudioNormalizer normalizer;
+    private final SpeechClient speech;
+    private final SpeechProperties properties;
+
+    /** 全局语音并发闸门；同一个 owner 的「最多 1 个」由 {@link #busyOwners} 单独限制。 */
+    private final Semaphore permits;
+    private final Set<String> busyOwners = ConcurrentHashMap.newKeySet();
+
+    public InterviewSpeechService(InterviewService interviews, AudioNormalizer normalizer,
+                                  SpeechClient speech, SpeechProperties properties) {
+        this.interviews = interviews;
+        this.normalizer = normalizer;
+        this.speech = speech;
+        this.properties = properties;
+        // 配成 0 或负数会让 tryAcquire 永远失败，语音变成永久 429，不如退回 1。
+        this.permits = new Semaphore(Math.max(1, properties.getMaxConcurrentRequests()));
+    }
+
+    public Capabilities capabilities() {
+        boolean keyReady = notBlank(properties.getApiKey());
+        boolean toolsReady = toolAvailable(properties.getFfmpegPath()) && toolAvailable(properties.getFfprobePath());
+        return new Capabilities(
+                keyReady && toolsReady && notBlank(properties.getAsrResourceId()),
+                keyReady && notBlank(properties.getTtsResourceId()) && notBlank(properties.getTtsSpeaker()),
+                properties.getMaxDurationSeconds(),
+                properties.getMaxAudioBytes());
+    }
+
+    public Transcription transcribe(String owner, String sessionId, String questionId,
+                                    String requestId, MultipartFile file) {
+        requireUuid(requestId);
+        requireAnswerable(owner, sessionId, questionId);
+        return withPermit(owner, () -> {
+            AudioNormalizer.NormalizedAudio audio = normalizer.normalize(file);
+            SpeechClient.Transcript transcript = speech.transcribe(audio.wav(), requestId);
+            // 识别期间用户可能已经切题、答完或结束：结果和当前题目对不上就不能当有效草稿。
+            requireAnswerable(owner, sessionId, questionId);
+            return new Transcription(sessionId, questionId, requestId, transcript.text(), audio.durationMs());
+        });
+    }
+
+    public SpeechClient.SpeechAudio synthesize(String owner, String sessionId, String questionId) {
+        // 只朗读服务器已经生成的题目文字，题目列表里没有就拒绝，
+        // 这样浏览器没法借这个接口朗读任意文本。答过或结束后的题仍可重播，方便回看。
+        InterviewService.Session session = interviews.get(owner, sessionId);
+        InterviewService.Turn turn = session.turns().stream()
+                .filter(t -> questionId.equals(t.questionId()))
+                .findFirst()
+                .orElseThrow(() -> new InterviewException(409, UNKNOWN_QUESTION));
+        return withPermit(owner, () -> speech.synthesize(turn.question(), UUID.randomUUID().toString()));
+    }
+
+    /** 只有本人、ACTIVE、题目就是当前题、且没有待重试回答时才允许转写。 */
+    private void requireAnswerable(String owner, String sessionId, String questionId) {
+        InterviewService.Session session = interviews.get(owner, sessionId);
+        if (!"ACTIVE".equals(session.status()) || session.pendingAnswer() != null
+                || session.currentQuestion() == null
+                || !questionId.equals(session.currentQuestion().questionId())) {
+            log.info("语音转写被拒绝 sessionId={} status={} pending={} current={} requested={}",
+                    sessionId, session.status(), session.pendingAnswer() != null,
+                    session.currentQuestion() == null ? null : session.currentQuestion().questionId(),
+                    questionId);
+            throw new InterviewException(409, STATE_CHANGED);
+        }
+    }
+
+    /**
+     * 同一个 owner 的语音请求串行执行，全局并发受 {@code max-concurrent-requests} 限制，
+     * 拿不到就立刻 429——语音调用会真的花钱，排队等待只会让用户以为系统卡死。
+     */
+    private <T> T withPermit(String owner, Supplier<T> work) {
+        if (!busyOwners.add(owner)) {
+            throw new InterviewException(429, BUSY);
+        }
+        try {
+            if (!permits.tryAcquire()) {
+                throw new InterviewException(429, BUSY);
+            }
+            return work.get();
+        } finally {
+            // busyOwners 里有这个 owner 当且仅当它持有一个 permit，
+            // 用 remove 的结果决定要不要 release，既不会泄漏也不会重复释放。
+            if (busyOwners.remove(owner)) {
+                permits.release();
+            }
+        }
+    }
+
+    private static void requireUuid(String requestId) {
+        if (requestId == null || requestId.isBlank()) {
+            throw new InterviewException(400, INVALID_REQUEST);
+        }
+        try {
+            UUID.fromString(requestId);
+        } catch (IllegalArgumentException e) {
+            throw new InterviewException(400, INVALID_REQUEST);
+        }
+    }
+
+    /** 相对命令名要在 PATH 里逐个目录找；绝对路径或带分隔符的路径直接判断。 */
+    private static boolean toolAvailable(String command) {
+        if (command == null || command.isBlank()) {
+            return false;
+        }
+        if (Files.isExecutable(Path.of(command))) {
+            return true;
+        }
+        if (command.contains("/") || command.contains("\\")) {
+            return false;
+        }
+        String pathVariable = System.getenv("PATH");
+        if (pathVariable == null) {
+            return false;
+        }
+        for (String dir : pathVariable.split(File.pathSeparator)) {
+            if (!dir.isBlank() && Files.isExecutable(Path.of(dir, command))) {
+                return true;
+            }
+        }
+        return false;
+    }
+
+    private static boolean notBlank(String value) {
+        return value != null && !value.isBlank();
+    }
+}
