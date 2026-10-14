@@ -1,6 +1,8 @@
 package com.shijie.resumehelper.interview;
 
 import org.junit.jupiter.api.BeforeAll;
+import org.junit.jupiter.api.condition.EnabledOnOs;
+import org.junit.jupiter.api.condition.OS;
 import org.junit.jupiter.api.Test;
 import org.springframework.mock.web.MockMultipartFile;
 
@@ -127,7 +129,17 @@ class AudioNormalizerTest {
                 () -> normalize(props(), mockFile("empty.webm", "audio/webm", new byte[0]))).status());
     }
 
+    /**
+     * 工具挂住时必须超时（504），不能一直等。
+     *
+     * <p><b>仅限 POSIX 平台</b>：这个用例用 {@code script("sleep 30")} 造一个假工具，
+     * 而 {@code sleep}、{@code printf}、{@code $@}、{@code command} 都是 POSIX shell 的写法。
+     * Windows 上脚本根本无法执行，"挂住"变成了"立刻失败"，
+     * 断言拿到的就不是 504 而是 415——测试失败的原因和被测行为无关。
+     * 与其在 Windows 上给一个假结论，不如明确跳过。
+     */
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void timesOutWhenTheToolHangs() throws Exception {
         Path webm = fixture("recording.webm", "sine=frequency=440:duration=2", List.of("-c:a", "libopus"));
         Path hanger = script("sleep 30\n");
@@ -144,7 +156,15 @@ class AudioNormalizerTest {
         }
     }
 
+    /**
+     * 转码进程退出码为 0 也不能信：产物必须是真 WAV，否则 ASR 一定会拒收。
+     *
+     * <p><b>仅限 POSIX 平台</b>：假工具是 shell 脚本。在 Windows 上它跑不起来，
+     * 于是"脚本输出假 WAV"变成了"脚本执行失败"，异常照抛、断言照过——
+     * <b>测试绿了，但什么都没验证</b>。这种假通过比失败更危险，所以直接跳过。
+     */
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void rejectsToolOutputThatIsNotReallyWav() throws Exception {
         // 转码进程退出码为 0 也不能信：产物必须是真 WAV，否则 ASR 一定会拒收。
         Path webm = fixture("recording.webm", "sine=frequency=440:duration=2", List.of("-c:a", "libopus"));
@@ -161,7 +181,14 @@ class AudioNormalizerTest {
         }
     }
 
+    /**
+     * 时长超限时必须报错，不能用 -t 默默截断：用户的 3 分钟回答不能被砍成 2 分钟再送识别。
+     *
+     * <p><b>仅限 POSIX 平台</b>：这里用一个 shell 包装脚本记录 ffmpeg 的实参，
+     * 需要 POSIX shell 才能运行。Windows 上会直接报错，测不出"有没有偷偷加 -t"。
+     */
     @Test
+    @EnabledOnOs({OS.LINUX, OS.MAC})
     void neverPassesATruncationFlag() throws Exception {
         // 时长超限时必须报错，不能用 -t 默默截断：用户的 3 分钟回答不能被砍成 2 分钟再送识别。
         Path webm = fixture("recording.webm", "sine=frequency=440:duration=5", List.of("-c:a", "libopus"));
