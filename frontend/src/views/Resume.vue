@@ -20,6 +20,12 @@
           </section>
 
           <template v-else>
+            <!-- 抬头缺联系方式时显眼提示：这种缺失在页面上很不起眼，用户很难自己发现 -->
+            <p v-if="!hasContact" class="contact-warning">
+              这份简历的抬头<b>还没有电话和邮箱</b>——没有联系方式的简历投出去等于白发。
+              <RouterLink to="/profile">去个人资料补上</RouterLink>，回来后这里会自动更新。
+            </p>
+
             <!-- 定向 -->
             <section class="panel target-panel">
               <div class="panel-heading"><div><div class="eyebrow">TAILOR</div><h3>定向到具体岗位</h3></div><span class="panel-count">{{ jd.length }} 字</span></div>
@@ -133,8 +139,18 @@ const suggesting = ref(false)
 const error = ref('')
 const notice = ref('')
 
-const personName = computed(() => getDemoSession()?.displayName || '求职者')
+const personName = computed(() => draft.value?.name || getDemoSession()?.displayName || '求职者')
 const isEmpty = computed(() => !draft.value || loading.value)
+/**
+ * 抬头有没有电话或邮箱。
+ *
+ * 没有就要显眼地提示——一份没有联系方式的简历投出去等于白发，
+ * 而这种缺失在页面上很不起眼（抬头那行短一点而已），用户自己很难注意到。
+ */
+const hasContact = computed(() => {
+  const contacts = draft.value?.contacts || []
+  return contacts.some((line) => /@|\d{5,}/.test(String(line)))
+})
 
 /**
  * 三块可编辑内容。
@@ -382,6 +398,9 @@ function printResume() {
 .empty-panel .button { display: inline-flex; }
 
 .template-note { color: #a8b0a6; font-size: 7px; }
+.contact-warning { margin: 0 0 14px; padding: 11px 14px; border: 1px solid #f0e2c8; border-radius: 4px; color: #8a7448; background: #fdf8ec; font-size: 9px; line-height: 1.8; }
+.contact-warning a { color: #6f8a5f; font-weight: 600; }
+@media print { .contact-warning { display: none !important; } }
 .resume-target input { padding: 7px 9px; border: 1px solid #e8ebe4; border-radius: 4px; color: #55645a; background: #fdfdfa; font-size: 9px; outline: none; min-width: 180px; }
 .resume-target input:focus { border-color: #a4b79c; box-shadow: 0 0 0 3px rgba(115, 151, 112, .08); }
 

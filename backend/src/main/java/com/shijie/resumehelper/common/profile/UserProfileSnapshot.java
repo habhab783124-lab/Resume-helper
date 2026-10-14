@@ -15,9 +15,18 @@ import java.util.List;
  *   <li>简历与面试模块以后也会读它。</li>
  * </ul>
  * 字段对应产品方案 7 的 Profile：教育、经历、技能和求职偏好。
+ *
+ * <p><b>联系方式（姓名 / 电话 / 邮箱）单独放在最前面</b>：它们只用于简历抬头，
+ * <b>不参与匹配打分</b>。之前的模型里没有这三项，导致生成的简历抬头只能显示
+ * 登录会话里写死的"林同学"，也没有电话邮箱——拿去投递是不完整的。
  */
 public record UserProfileSnapshot(
         String userId,
+        // ---- 联系方式：只出现在简历抬头，不参与匹配 ----
+        String name,
+        String phone,
+        String email,
+        // ---- 求职偏好与经历：参与匹配打分 ----
         String targetTitle,
         List<String> targetCities,
         Integer yearsOfExperience,
@@ -31,6 +40,9 @@ public record UserProfileSnapshot(
 
     public UserProfileSnapshot {
         userId = TextKit.orEmpty(userId);
+        name = TextKit.trim(name);
+        phone = TextKit.trim(phone);
+        email = TextKit.trim(email);
         targetTitle = TextKit.trim(targetTitle);
         targetCities = targetCities == null ? List.of() : List.copyOf(targetCities);
         yearsOfExperience = yearsOfExperience == null ? 0 : yearsOfExperience;
@@ -41,6 +53,11 @@ public record UserProfileSnapshot(
         expectedSalary = TextKit.trim(expectedSalary);
         summary = TextKit.orEmpty(summary);
         experiences = experiences == null ? List.of() : List.copyOf(experiences);
+    }
+
+    /** 有没有填联系方式——简历页据此提示"抬头还缺信息"。 */
+    public boolean hasContact() {
+        return !phone.isEmpty() || !email.isEmpty();
     }
 
     /** 画像是否信息量足够，可以跑智能体检索。 */
@@ -74,6 +91,9 @@ public record UserProfileSnapshot(
 
     public static final class Builder {
         private String userId;
+        private String name;
+        private String phone;
+        private String email;
         private String targetTitle;
         private List<String> targetCities = new ArrayList<>();
         private Integer yearsOfExperience;
@@ -87,6 +107,24 @@ public record UserProfileSnapshot(
 
         public Builder userId(String v) {
             this.userId = v;
+            return this;
+        }
+
+        /** 姓名，只用于简历抬头。 */
+        public Builder name(String v) {
+            this.name = v;
+            return this;
+        }
+
+        /** 联系电话，只用于简历抬头。 */
+        public Builder phone(String v) {
+            this.phone = v;
+            return this;
+        }
+
+        /** 联系邮箱，只用于简历抬头。 */
+        public Builder email(String v) {
+            this.email = v;
             return this;
         }
 
@@ -163,8 +201,9 @@ public record UserProfileSnapshot(
         }
 
         public UserProfileSnapshot build() {
-            return new UserProfileSnapshot(userId, targetTitle, targetCities, yearsOfExperience, education,
-                    educations, skills, industries, expectedSalary, summary, experiences);
+            return new UserProfileSnapshot(userId, name, phone, email, targetTitle, targetCities,
+                    yearsOfExperience, education, educations, skills, industries,
+                    expectedSalary, summary, experiences);
         }
     }
 }

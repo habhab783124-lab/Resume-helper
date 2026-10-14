@@ -458,9 +458,13 @@ async function confirmProfile() {
     ? skillsText.value.split(/[,，、\s]+/).filter(Boolean)
     : draft.value.skills
 
-  // 与后端 ProfileDto / UserProfileSnapshot 字段一一对应，两侧可以直接互相透传
+  // 与后端 ProfileDto / UserProfileSnapshot 字段一一对应，两侧可以直接互相透传。
+  // 联系方式不来自简历抽取——那是用户的身份信息，不该由模型猜，一律沿用已有的值。
   const profile = {
     userId: base.userId || 'demo-user',
+    name: base.name || '',
+    phone: base.phone || '',
+    email: base.email || '',
     targetTitle: targetTitle.value || base.targetTitle || '',
     targetCities: targetCities.value
       ? targetCities.value.split(/[、,，\s]+/).filter(Boolean)

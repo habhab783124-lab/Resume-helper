@@ -19,9 +19,10 @@ import java.util.List;
  * 直接整行塞进简历会很丑，所以 {@link com.shijie.resumehelper.resume.service.ResumeService}
  * 会按「第一个冒号」拆成抬头 + 要点。拆不出来就整行当要点，绝不丢内容。
  *
+ * @param name       姓名（抬头）
  * @param headline   抬头下的职位一行
  * @param summary    个人简介
- * @param contacts   联系方式（演示阶段只有城市；电话邮箱由用户自己决定要不要填）
+ * @param contacts   联系方式（城市 / 电话 / 邮箱 / 期望薪资）
  * @param educations 教育经历
  * @param experiences 实习 / 工作经历
  * @param projects   项目经历
@@ -29,6 +30,7 @@ import java.util.List;
  * @param keywords   简历末尾的关键词行（通常是技能里最相关的几个，方便 HR 扫）
  */
 public record ResumeDraft(
+        String name,
         String headline,
         String summary,
         List<String> contacts,
@@ -58,6 +60,7 @@ public record ResumeDraft(
     }
 
     public ResumeDraft {
+        name = TextKit.trim(name);
         headline = TextKit.trim(headline);
         summary = TextKit.orEmpty(summary);
         contacts = contacts == null ? List.of() : List.copyOf(contacts);
@@ -72,6 +75,11 @@ public record ResumeDraft(
     public boolean isEmpty() {
         return summary.isEmpty() && educations.isEmpty() && experiences.isEmpty()
                 && projects.isEmpty() && skills.isEmpty();
+    }
+
+    /** 抬头有没有联系方式。简历页据此提示"抬头还缺电话邮箱"。 */
+    public boolean hasContact() {
+        return !contacts.isEmpty();
     }
 
     /** 全部要点，用于把 AI 建议关联回具体某一条。 */

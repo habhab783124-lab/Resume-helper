@@ -86,6 +86,8 @@ const SNAPSHOT = `JSON.stringify({
   cards: document.querySelectorAll('.resume-editor .editable-card').length,
   paperText: (document.querySelector('#resume-paper')?.textContent || '').replace(/\\s+/g, ' ').trim(),
   paperSections: [...document.querySelectorAll('#resume-paper .paper-section h3')].map(e => e.textContent.trim()),
+  paperPerson: (document.querySelector('#resume-paper .paper-person')?.textContent || '').replace(/\\s+/g, ' ').trim(),
+  hasContactWarning: Boolean(document.querySelector('.contact-warning')),
   versionCount: document.querySelectorAll('.versions-panel .version-item').length,
   hasPrintButton: /打印/.test(document.querySelector('.intro-actions')?.textContent || ''),
   hasSaveButton: /保存版本/.test(document.querySelector('.intro-actions')?.textContent || '')
@@ -128,10 +130,27 @@ async function main() {
   await sleep(2000)
   await evaluate(send, `window.localStorage.setItem('resume-helper-demo-session', JSON.stringify({authenticated:true,email:'demo@resume-helper.cn',displayName:'林同学',createdAt:new Date().toISOString()})); true`)
 
+  // 种一份带联系方式的画像，让这个检查可以独立重复运行
+  // （简历抬头读的正是画像里的姓名 / 电话 / 邮箱）
+  await evaluate(send, `window.localStorage.removeItem('resume-helper-profile'); true`)
+  await evaluate(send, `fetch('/api/profile', {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      name: '林一舟', phone: '138 0000 0000', email: 'linyizhou@example.com',
+      targetTitle: 'Java 后端开发工程师', targetCities: ['上海'], yearsOfExperience: 0,
+      education: '本科', educations: ['上海理工大学 · 本科 · 计算机科学与技术 · 2022.09—2026.06'],
+      skills: ['Java', 'Spring Boot', 'MySQL', 'Redis'], industries: ['互联网'],
+      expectedSalary: '15-22K', summary: '计算机科学与技术专业应届毕业生，具备 Java 后端开发项目实践经验。',
+      experiences: ['上海璞云信息技术有限公司 · Java 后端开发实习生 · 2025.07—2025.09：参与了权限模块开发；把权限校验改成 Redis 缓存']
+    })
+  }).then(r => r.ok)`)
+
   await send('Page.navigate', { url: `${BASE}/resume` })
   await sleep(4000)
 
   const page = JSON.parse(await evaluate(send, SNAPSHOT))
+  console.log(`  抬头：${page.paperPerson}`)
   console.log(`  分区：${page.groups.join(' / ')}`)
   console.log(`  纸面区块：${page.paperSections.join(' / ')}`)
   console.log(`  纸面预览长度：${page.paperText.length} 字`)
@@ -146,6 +165,12 @@ async function main() {
   check('A4 预览里有简历正文', page.paperText.length > 100, `${page.paperText.length} 字`)
   check('预览里出现了教育经历（说明内容是生成的，不是空模板）',
     page.paperSections.includes('教育经历'), page.paperSections.join('、'))
+  // 抬头三件套：姓名 / 电话 / 邮箱。没有联系方式的简历投出去等于白发
+  check('抬头显示画像里的姓名（不是会话里写死的"林同学"）',
+    page.paperPerson.includes('林一舟') && !page.paperPerson.includes('林同学'), page.paperPerson)
+  check('抬头有电话', page.paperPerson.includes('138 0000 0000'), page.paperPerson)
+  check('抬头有邮箱', page.paperPerson.includes('linyizhou@example.com'), page.paperPerson)
+  check('联系方式齐全时不显示"缺联系方式"的警告', page.hasContactWarning === false)
 
   // 1) 改一条要点 → 预览应当立刻变
   const marker = `验证用要点${Date.now() % 100000}`
@@ -227,6 +252,27 @@ async function main() {
   check('没有 token 时给出可读提示，而不是编造建议或报错',
     afterSuggest.cards > 0 || /token/i.test(afterSuggest.notice),
     afterSuggest.notice || `${afterSuggest.cards} 条建议`)
+
+  // 5) 反向验证：把电话邮箱清掉后，"缺联系方式"的警告必须出现。
+  //    只验证"有联系方式时不显示警告"是不够的——那样即使警告是死代码也能通过。
+  await evaluate(send, `fetch('/api/profile').then(r => r.json()).then(d => {
+    const p = d.data || {};
+    delete p.phone; delete p.email;
+    return fetch('/api/profile', {
+      method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(p)
+    });
+  }).then(r => r.ok)`)
+  await send('Page.navigate', { url: `${BASE}/resume` })
+  await sleep(3500)
+
+  const withoutContact = JSON.parse(await evaluate(send, SNAPSHOT))
+  console.log(`  清掉联系方式后抬头：${withoutContact.paperPerson}`)
+  check('清掉电话邮箱后出现"缺联系方式"的警告（说明它不是死代码）',
+    withoutContact.hasContactWarning === true)
+  check('抬头里确实不再有电话邮箱',
+    !withoutContact.paperPerson.includes('138 0000 0000')
+      && !withoutContact.paperPerson.includes('linyizhou@example.com'),
+    withoutContact.paperPerson)
 
   check('页面没有未捕获的 JS 异常', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '))
 

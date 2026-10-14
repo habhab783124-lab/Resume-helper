@@ -9,7 +9,7 @@
             <div class="profile-avatar">{{ avatarChar }}</div>
             <div class="profile-banner-info">
               <span class="profile-kicker">求职者档案 · {{ sourceLabel }}</span>
-              <h2>{{ displayName }}</h2>
+              <h2>{{ profile.name || displayName }}</h2>
               <p><template v-for="(part, index) in kickerParts" :key="part"><i v-if="index">·</i>{{ part }}</template></p>
             </div>
             <div class="profile-completion"><span>档案完整度</span><strong>{{ completeness }}%</strong><div class="tiny-progress"><i :style="{ width: completeness + '%' }"></i></div></div>
@@ -22,6 +22,9 @@
                 <div class="panel-heading"><div><div class="eyebrow">BASIC INFORMATION</div><h3>基本信息</h3></div><button class="icon-button" type="button" :aria-label="editing ? '取消编辑' : '编辑基本信息'" @click="toggleEdit"><svg><use href="#i-edit"/></svg></button></div>
 
                 <div v-if="!editing" class="detail-grid">
+                  <div><span>姓名</span><strong>{{ filled(profile.name) }}</strong></div>
+                  <div><span>联系电话</span><strong>{{ filled(profile.phone) }}</strong></div>
+                  <div><span>电子邮箱</span><strong>{{ filled(profile.email) }}</strong></div>
                   <div><span>目标职位</span><strong>{{ filled(profile.targetTitle) }}</strong></div>
                   <div><span>求职城市</span><strong>{{ filled(cityText) }}</strong></div>
                   <div><span>学历</span><strong>{{ filled(profile.education) }}</strong></div>
@@ -31,6 +34,9 @@
                 </div>
 
                 <div v-else class="edit-grid">
+                  <label><span>姓名</span><input v-model.trim="form.name" type="text" placeholder="你的名字"></label>
+                  <label><span>联系电话</span><input v-model.trim="form.phone" type="text" placeholder="138 0000 0000"></label>
+                  <label class="edit-wide"><span>电子邮箱</span><input v-model.trim="form.email" type="text" placeholder="you@example.com"></label>
                   <label><span>目标职位</span><input v-model.trim="form.targetTitle" type="text" placeholder="Java 后端开发工程师"></label>
                   <label><span>求职城市（多个用逗号分隔）</span><input v-model.trim="form.cities" type="text" placeholder="上海"></label>
                   <label><span>学历</span><input v-model.trim="form.education" type="text" placeholder="本科"></label>
@@ -108,6 +114,9 @@ const notice = ref('')
 const fromServer = ref(false)
 
 const form = reactive({
+  name: '',
+  phone: '',
+  email: '',
   targetTitle: '',
   cities: '',
   education: '',
@@ -121,7 +130,8 @@ const form = reactive({
 })
 
 const displayName = computed(() => getDemoSession()?.displayName || '求职者')
-const avatarChar = computed(() => (displayName.value || '求').slice(0, 1))
+/** 头像用姓名首字。姓名改成自己的之后，这里也跟着变。 */
+const avatarChar = computed(() => ((profile.value.name || displayName.value || '求')).slice(0, 1))
 
 const cityText = computed(() => (profile.value.targetCities || []).join('、'))
 const industryText = computed(() => (profile.value.industries || []).join('、'))
@@ -209,6 +219,9 @@ function flash(message) {
 /* ------------------------------------------------------------------ 读写 */
 
 function toForm(p) {
+  form.name = p.name || ''
+  form.phone = p.phone || ''
+  form.email = p.email || ''
   form.targetTitle = p.targetTitle || ''
   form.cities = (p.targetCities || []).join('、')
   form.education = p.education || ''
@@ -252,6 +265,10 @@ async function submit() {
   const base = getProfile()
   const payload = {
     userId: profile.value.userId || base.userId || 'demo-user',
+    // 联系方式：只出现在简历抬头，不参与匹配打分
+    name: form.name,
+    phone: form.phone,
+    email: form.email,
     targetTitle: form.targetTitle,
     targetCities: splitList(form.cities),
     yearsOfExperience: Number(form.yearsOfExperience) || 0,

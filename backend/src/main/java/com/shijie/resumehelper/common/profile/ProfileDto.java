@@ -18,6 +18,16 @@ public class ProfileDto {
 
     /** 用户标识。收藏功能需要它；没有登录体系时前端可以传固定值。 */
     private String userId;
+    /**
+     * 姓名。**只用于简历抬头，不参与匹配打分。**
+     *
+     * <p>在此之前简历抬头只能显示登录会话里写死的"林同学"，用户改不了。
+     */
+    private String name;
+    /** 联系电话。只用于简历抬头。 */
+    private String phone;
+    /** 联系邮箱。只用于简历抬头。 */
+    private String email;
     /** 目标职位，例如「Java 后端开发工程师」。这是最影响检索效果的一个字段。 */
     private String targetTitle;
     /** 期望城市，例如 ["上海"]。 */
@@ -47,6 +57,9 @@ public class ProfileDto {
     public UserProfileSnapshot toSnapshot() {
         return UserProfileSnapshot.builder()
                 .userId(userId)
+                .name(name)
+                .phone(phone)
+                .email(email)
                 .targetTitle(targetTitle)
                 .targetCities(targetCities)
                 .yearsOfExperience(yearsOfExperience)
@@ -66,6 +79,30 @@ public class ProfileDto {
 
     public void setUserId(String userId) {
         this.userId = userId;
+    }
+
+    public String getName() {
+        return name;
+    }
+
+    public void setName(String name) {
+        this.name = name;
+    }
+
+    public String getPhone() {
+        return phone;
+    }
+
+    public void setPhone(String phone) {
+        this.phone = phone;
+    }
+
+    public String getEmail() {
+        return email;
+    }
+
+    public void setEmail(String email) {
+        this.email = email;
     }
 
     public String getTargetTitle() {

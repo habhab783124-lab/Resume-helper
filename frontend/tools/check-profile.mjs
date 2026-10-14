@@ -98,14 +98,30 @@ const SNAPSHOT = `JSON.stringify({
   hasEditButton: /编辑资料/.test(document.querySelector('.page-intro .button')?.textContent || '')
 })`
 
-/** 在当前页面里改一个输入框的值。Vue 的 v-model 需要派发 input 事件才会同步。 */
-const setInput = (selector, value) => `(() => {
-  const el = document.querySelector(${JSON.stringify(selector)});
-  if (!el) return false;
-  const setter = Object.getOwnPropertyDescriptor(el.constructor.prototype, 'value').set;
-  setter.call(el, ${JSON.stringify(value)});
-  el.dispatchEvent(new Event('input', { bubbles: true }));
+/**
+ * 按**字段名**改一个输入框。
+ *
+ * 不能用 `.edit-grid input` 这种按位置选的写法：字段一多就会选错——
+ * 加了姓名 / 电话 / 邮箱之后，第一个输入框已经不是"目标职位"了，
+ * 而按位置写的断言还会"看起来通过"，实际改的是别的字段。
+ */
+const setField = (labelText, value) => `(() => {
+  const label = [...document.querySelectorAll('.edit-grid label')]
+    .find((l) => (l.querySelector('span')?.textContent || '').includes(${JSON.stringify(labelText)}));
+  if (!label) return false;
+  const input = label.querySelector('input, textarea');
+  if (!input) return false;
+  const proto = input.tagName === 'TEXTAREA' ? HTMLTextAreaElement.prototype : HTMLInputElement.prototype;
+  Object.getOwnPropertyDescriptor(proto, 'value').set.call(input, ${JSON.stringify(value)});
+  input.dispatchEvent(new Event('input', { bubbles: true }));
   return true;
+})()`
+
+/** 读取编辑态里某个字段当前的值。 */
+const fieldValue = (labelText) => `(() => {
+  const label = [...document.querySelectorAll('.edit-grid label')]
+    .find((l) => (l.querySelector('span')?.textContent || '').includes(${JSON.stringify(labelText)}));
+  return label?.querySelector('input, textarea')?.value ?? null;
 })()`
 
 async function main() {
@@ -146,6 +162,7 @@ async function main() {
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({
       targetTitle: 'Java 后端开发工程师', targetCities: ['上海'], yearsOfExperience: 0,
+      name: '林一舟', phone: '138 0000 0000', email: 'linyizhou@example.com',
       education: '本科', educations: ['上海理工大学 · 本科 · 计算机科学与技术 · 2022.09—2026.06'],
       skills: ['Java', 'Spring Boot', 'MySQL', 'Redis', 'Git'],
       industries: ['互联网'], expectedSalary: '15-22K',
@@ -165,26 +182,38 @@ async function main() {
   console.log(`  教育：${page.educations.join(' / ')}`)
 
   check('已停留在 /profile（没被守卫弹回登录页）', page.path === '/profile', page.path)
-  check('显示了登录会话里的姓名', page.name === '林同学', page.name)
+  // 画像里的姓名要压过登录会话里写死的"林同学"——用户自己的名字优先
+  check('抬头显示画像里的姓名（而不是会话里写死的名字）', page.name === '林一舟', page.name)
   check('有「编辑资料」按钮', page.hasEditButton === true)
   check('完整度是按实际字段算出来的（不是写死的 82%）', /^\d+%$/.test(page.completeness),
     `${page.completeness}，进度条 ${page.barWidth}`)
   check('进度条宽度与百分比一致', page.barWidth === page.completeness, `${page.barWidth} vs ${page.completeness}`)
   check('基本信息有真实内容', page.fields.some((f) => f.label === '目标职位' && f.value && f.value !== '未填写'),
     JSON.stringify(page.fields.slice(0, 2)))
+  // 联系方式：一份没有电话邮箱的简历投出去等于白发，必须真的显示出来
+  check('基本信息里显示了联系电话', page.fields.some((f) => f.label === '联系电话' && f.value === '138 0000 0000'),
+    JSON.stringify(page.fields.find((f) => f.label === '联系电话')))
+  check('基本信息里显示了电子邮箱', page.fields.some((f) => f.label === '电子邮箱' && f.value === 'linyizhou@example.com'),
+    JSON.stringify(page.fields.find((f) => f.label === '电子邮箱')))
   check('技能来自画像（不是模板写死的）', page.skills.length > 0, page.skills.join('、'))
   check('教育经历来自画像', page.educations.length > 0, page.educations.join(' / '))
   check('经历来自画像', page.experiences.length > 0, `${page.experiences.length} 条`)
 
-  // 2) 编辑：改目标职位
+  // 2) 编辑：改目标职位与电话
   const marker = `验证用岗位${Date.now() % 100000}`
+  const phone = `139${String(Date.now()).slice(-8)}`
   await evaluate(send, `document.querySelector('.page-intro .button')?.click(); true`)
   await sleep(700)
   const editing = await evaluate(send, `Boolean(document.querySelector('.edit-grid'))`)
   check('点「编辑资料」切到编辑态', editing === true)
 
-  const typed = await evaluate(send, setInput('.edit-grid input', marker))
-  check('能往输入框里输入', typed === true)
+  // 按字段名改，不按位置改：加了联系方式后第一个输入框已经不是"目标职位"了
+  const typedTitle = await evaluate(send, setField('目标职位', marker))
+  const typedPhone = await evaluate(send, setField('联系电话', phone))
+  check('能按字段名往输入框里输入', typedTitle === true && typedPhone === true,
+    `目标职位 ${typedTitle} / 联系电话 ${typedPhone}`)
+  check('输入后表单里读到的就是刚填的值',
+    (await evaluate(send, fieldValue('联系电话'))) === phone)
 
   await evaluate(send,
     `[...document.querySelectorAll('.edit-actions .button')].find(b => /保存资料/.test(b.textContent))?.click(); true`)
@@ -194,6 +223,8 @@ async function main() {
   check('保存后回到查看态', !(await evaluate(send, `Boolean(document.querySelector('.edit-grid'))`)))
   check('页面上的目标职位已更新', after.fields.some((f) => f.value === marker),
     after.fields.map((f) => `${f.label}=${f.value}`).join('　'))
+  check('页面上的联系电话已更新', after.fields.some((f) => f.label === '联系电话' && f.value === phone),
+    JSON.stringify(after.fields.find((f) => f.label === '联系电话')))
   check('保存后来源标注变成「已保存到后端」', after.source.includes('已保存到后端'), after.source)
 
   const local = await evaluate(send, `window.localStorage.getItem('resume-helper-profile') || ''`)
@@ -202,23 +233,29 @@ async function main() {
   const backend = await evaluate(send,
     `fetch('/api/profile').then(r => r.json()).then(d => JSON.stringify(d.data || {})).catch(e => 'ERR:' + e.message)`)
   check('画像同步到了后端', backend.includes(marker), backend.slice(0, 80))
+  check('联系方式也同步到了后端（简历抬头要用）', backend.includes(phone), backend.slice(0, 120))
 
-  // 3) 完整度确实是算出来的：清空目标职位后应当下降
+  // 3) 完整度确实是算出来的：清空目标职位后应当下降。
+  //    同样按字段名清，不按位置——否则清的可能是"姓名"，那这条断言就名不副实了。
   await evaluate(send, `document.querySelector('.page-intro .button')?.click(); true`)
   await sleep(600)
-  await evaluate(send, setInput('.edit-grid input', ''))
+  const clearedOk = await evaluate(send, setField('目标职位', ''))
   await sleep(400)
   await evaluate(send,
     `[...document.querySelectorAll('.edit-actions .button')].find(b => /保存资料/.test(b.textContent))?.click(); true`)
   await sleep(2500)
 
   const cleared = JSON.parse(await evaluate(send, SNAPSHOT))
+  check('清空字段的操作命中的是「目标职位」', clearedOk === true)
   check('清空一个字段后完整度真的下降（说明它是算出来的，不是装饰）',
     parseInt(cleared.completeness, 10) < parseInt(after.completeness, 10),
     `${after.completeness} -> ${cleared.completeness}`)
   check('清空的字段显示为「未填写」而不是空白',
     cleared.fields.some((f) => f.label === '目标职位' && f.value === '未填写'),
     JSON.stringify(cleared.fields.find((f) => f.label === '目标职位')))
+  check('但清空目标职位不会顺手把联系方式也清掉',
+    cleared.fields.some((f) => f.label === '联系电话' && f.value === phone),
+    JSON.stringify(cleared.fields.find((f) => f.label === '联系电话')))
 
   // 4) 异常
   check('页面没有未捕获的 JS 异常', consoleErrors.length === 0, consoleErrors.slice(0, 2).join(' | '))

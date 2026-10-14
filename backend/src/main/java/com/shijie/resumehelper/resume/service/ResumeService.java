@@ -92,7 +92,7 @@ public class ResumeService {
      */
     public ResumeDraft buildDraft(UserProfileSnapshot profile) {
         if (profile == null) {
-            return new ResumeDraft("", "", List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
+            return new ResumeDraft("", "", "", List.of(), List.of(), List.of(), List.of(), List.of(), List.of());
         }
 
         List<ResumeDraft.Entry> educations = new ArrayList<>();
@@ -111,9 +111,16 @@ public class ResumeService {
             }
         }
 
-        // 联系方式：演示阶段只有城市。电话 / 邮箱属于个人信息，让用户自己在页面上决定填不填，
-        // 不要从别处"猜"一个填进去。
+        // 联系方式：城市 → 电话 → 邮箱 → 期望薪资，和原型上抬头的排列一致。
+        // 电话与邮箱是简历**必须**有的：一份没有联系方式的简历投出去等于白发。
+        // 它们在画像里是独立字段（不参与匹配打分），这里只负责按顺序排进抬头。
         List<String> contacts = new ArrayList<>(profile.targetCities());
+        if (!profile.phone().isBlank()) {
+            contacts.add(profile.phone());
+        }
+        if (!profile.email().isBlank()) {
+            contacts.add(profile.email());
+        }
         if (!profile.expectedSalary().isBlank()) {
             contacts.add("期望薪资 " + profile.expectedSalary());
         }
@@ -122,6 +129,7 @@ public class ResumeService {
         List<String> keywords = profile.skills().stream().limit(8).toList();
 
         return new ResumeDraft(
+                profile.name(),
                 profile.targetTitle(),
                 profile.summary(),
                 contacts,

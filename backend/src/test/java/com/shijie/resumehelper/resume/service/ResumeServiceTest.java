@@ -52,6 +52,9 @@ class ResumeServiceTest {
     private static UserProfileSnapshot profile() {
         return UserProfileSnapshot.builder()
                 .userId("demo-user")
+                .name("林一舟")
+                .phone("138 0000 0000")
+                .email("linyizhou@example.com")
                 .targetTitle("Java 后端开发工程师")
                 .targetCities(List.of("上海"))
                 .yearsOfExperience(0)
@@ -135,18 +138,38 @@ class ResumeServiceTest {
     void buildsDraftFromProfile() {
         ResumeDraft draft = service().buildDraft(profile());
 
+        assertThat(draft.name()).isEqualTo("林一舟");
         assertThat(draft.headline()).isEqualTo("Java 后端开发工程师");
         assertThat(draft.summary()).contains("计算机专业应届生");
         assertThat(draft.educations()).hasSize(1);
         assertThat(draft.experiences()).hasSize(2);
         assertThat(draft.skills()).contains("Java", "Spring Boot");
         assertThat(draft.keywords()).isNotEmpty();
-        // 城市与期望薪资出现在联系方式行里
+        // 城市 / 电话 / 邮箱 / 期望薪资都要进抬头——
+        // 一份没有联系方式的简历投出去等于白发
         assertThat(draft.contacts()).contains("上海");
+        assertThat(draft.contacts()).contains("138 0000 0000");
+        assertThat(draft.contacts()).contains("linyizhou@example.com");
         assertThat(draft.contacts().stream().anyMatch(c -> c.contains("15-22K"))).isTrue();
+        assertThat(draft.hasContact()).isTrue();
         assertThat(draft.isEmpty()).isFalse();
         // 所有要点拼起来应当覆盖画像里的经历文本（不丢内容）
         assertThat(draft.allBullets()).hasSize(3);
+    }
+
+    @Test
+    @DisplayName("没填电话邮箱时 hasContact 为 false（简历页据此提示补全）")
+    void contactFlagReflectsMissingContactInfo() {
+        UserProfileSnapshot withoutContact = UserProfileSnapshot.builder()
+                .userId("demo-user")
+                .targetTitle("Java 后端开发工程师")
+                .skills(List.of("Java"))
+                .build();
+
+        ResumeDraft draft = service().buildDraft(withoutContact);
+
+        // 页面上这种缺失很不起眼（抬头那行短一点而已），所以要有一个明确的标志位
+        assertThat(draft.hasContact()).isFalse();
     }
 
     @Test

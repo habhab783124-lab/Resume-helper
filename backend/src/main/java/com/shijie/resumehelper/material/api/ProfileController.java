@@ -62,10 +62,25 @@ public class ProfileController {
         String resolved = UserContext.resolve(userId);
         // 以服务端解析出的用户为准，忽略请求体里可能带的 userId，
         // 否则客户端可以伪造别人的身份去覆盖资料
-        UserProfileSnapshot profile = new UserProfileSnapshot(
-                resolved, body.targetTitle(), body.targetCities(), body.yearsOfExperience(),
-                body.education(), body.educations(), body.skills(), body.industries(),
-                body.expectedSalary(), body.summary(), body.experiences());
+        //
+        // 用 Builder 而不是全参构造：字段已经 14 个，位置参数排错时根本看不出来
+        // （这次加 name / phone / email 就差点把顺序搞错）。
+        UserProfileSnapshot profile = UserProfileSnapshot.builder()
+                .userId(resolved)
+                .name(body.name())
+                .phone(body.phone())
+                .email(body.email())
+                .targetTitle(body.targetTitle())
+                .targetCities(body.targetCities())
+                .yearsOfExperience(body.yearsOfExperience())
+                .education(body.education())
+                .educations(body.educations())
+                .skills(body.skills())
+                .industries(body.industries())
+                .expectedSalary(body.expectedSalary())
+                .summary(body.summary())
+                .experiences(body.experiences())
+                .build();
         service.saveProfile(resolved, profile);
         return ApiResponse.ok(profile, "求职画像已保存");
     }

@@ -167,8 +167,28 @@ async function main() {
       summary: '计算机专业应届生，有后端实习经历。', experiences: ['既有的一段经历']
     })
   }).then(r => r.ok)`)
+  // 保证材料列表非空。
+  //
+  // 这个检查要验证"已有的材料能正确渲染出来"，所以列表里必须至少有一条。
+  // 之前是靠外部先 curl 传一个文件，一旦别人清过 backend/data 就会莫名其妙地失败——
+  // 检查脚本必须能独立重复运行，所以这里自己补一条。
   await send('Page.navigate', { url: `${BASE}/materials` })
-  await sleep(2500)
+  await sleep(2000)
+  const existing = JSON.parse(await evaluate(send, LIST_SNAPSHOT))
+  if (existing.count === 0) {
+    console.log('  列表是空的，先通过接口补一条材料…')
+    const seeded = await evaluate(send, `(async () => {
+      const text = '张小明\\n13800000000\\nzhangxiaoming@example.com\\n\\n教育经历\\n示例大学 · 本科 · 计算机科学与技术 · 2022.09—2026.06\\n\\n实习经历\\n示例科技有限公司 · 后端开发实习生 · 2025.07—2025.09：参与了订单模块开发';
+      const blob = new Blob([text], { type: 'text/plain' });
+      const form = new FormData();
+      form.append('file', new File([blob], 'seeded-resume.txt', { type: 'text/plain' }));
+      const response = await fetch('/api/materials', { method: 'POST', body: form });
+      return response.ok;
+    })()`)
+    check('能补一条材料让检查独立运行', seeded === true)
+    await send('Page.navigate', { url: `${BASE}/materials` })
+    await sleep(2500)
+  }
 
   const path = await evaluate(send, `window.location.pathname`)
   check('已停留在 /materials（没被守卫弹回登录页）', path === '/materials', `当前路径 ${path}`)

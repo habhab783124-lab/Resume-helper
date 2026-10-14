@@ -18,6 +18,12 @@ const PROFILE_KEY = 'resume-helper-profile'
 /** 演示画像：与 Profile.vue 页面上展示的内容保持一致。 */
 export const DEMO_PROFILE = Object.freeze({
   userId: 'demo-user',
+  // 联系方式：只用于简历抬头，不参与匹配打分。
+  // 这三项是**演示值**，用户应该在个人资料页改成自己的真实信息——
+  // 一份没有电话邮箱的简历投出去等于白发。
+  name: '林同学',
+  phone: '138 0000 0000',
+  email: 'demo@resume-helper.cn',
   targetTitle: 'Java 后端开发工程师',
   targetCities: ['上海'],
   // Profile.vue 上写的是「全职 · 应届校招」，2026.06 毕业 ⇒ 0 年经验
