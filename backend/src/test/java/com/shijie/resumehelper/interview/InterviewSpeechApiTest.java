@@ -54,18 +54,49 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  *
  * <p>{@link AudioNormalizer} 与 {@link SpeechClient} 都是 mock：本类只验证编排——
  * 归属校验、当前题校验、并发闸门、调用前后重校验，以及「转写不推进轮次」。
+ *
+ * <p><b>统一材料模块后适配的两处</b>：身份从 HTTP session 改成 {@code X-User-Id} 请求头
+ * （原来面试用 session id、材料用请求头，两边对不上号）；上传响应从 {@code /data/materialId}
+ * 改成 {@code /data/material/id}（材料模块返回 {@code {material, extraction, text}}）。
  * 真实转码由 {@link AudioNormalizerTest} 用真工具验证，真实协议由 {@link SpeechClientTest} 验证。
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT) @AutoConfigureMockMvc
-@TestPropertySource(properties = {
-        // 把 key 和工具路径钉死，capabilities 的断言不能依赖部署机恰好装了 FFmpeg。
-        // 本类里 AudioNormalizer 是 mock，/usr/bin/env 只是一个"存在且可执行"的占位。
-        "app.interview.speech.api-key=speech-test-key",
-        "app.interview.speech.ffmpeg-path=/usr/bin/env",
-        "app.interview.speech.ffprobe-path=/usr/bin/env",
-        "app.interview.speech.max-concurrent-requests=2"
-})
 class InterviewSpeechApiTest {
+
+    /**
+     * 把 key 和工具路径钉死，capabilities 的断言不依赖部署机恰好装了 FFmpeg。
+     *
+     * <h2>为什么占位工具用 java 可执行文件，而不是原来写死的 {@code /usr/bin/env}</h2>
+     * 本类里 {@code AudioNormalizer} 是 mock，这个路径只需要"存在且可执行"。
+     * 原来写的是 {@code /usr/bin/env}——那是 Unix 路径，<b>Windows 上根本不存在</b>，
+     * 于是 {@code toolAvailable} 返回 false、{@code asrEnabled} 变成 false，
+     * 这个类的 8 个用例在 Windows 上全部失败（而且看起来像功能坏了）。
+     *
+     * <p>改成本次运行的 JVM 自己的可执行文件：任何平台都有、都可执行，
+     * 也不依赖任何外部工具。因此这里必须用 {@code @DynamicPropertySource}
+     * 而不是 {@code @TestPropertySource}——后者的值要求编译期常量，算不出运行时路径。
+     */
+    @org.springframework.test.context.DynamicPropertySource
+    static void speechProperties(org.springframework.test.context.DynamicPropertyRegistry registry) {
+        String placeholder = currentJavaExecutable();
+        registry.add("app.interview.speech.api-key", () -> "speech-test-key");
+        registry.add("app.interview.speech.ffmpeg-path", () -> placeholder);
+        registry.add("app.interview.speech.ffprobe-path", () -> placeholder);
+        registry.add("app.interview.speech.max-concurrent-requests", () -> 2);
+    }
+
+    /** 当前 JVM 的可执行文件路径，各平台都存在且可执行。 */
+    private static String currentJavaExecutable() {
+        java.nio.file.Path home = java.nio.file.Path.of(System.getProperty("java.home"), "bin");
+        for (String name : new String[]{"java", "java.exe"}) {
+            java.nio.file.Path candidate = home.resolve(name);
+            if (java.nio.file.Files.isExecutable(candidate)) {
+                return candidate.toString();
+            }
+        }
+        return "java";
+    }
+
     private static final String QUESTION = "请介绍你的项目？";
     private static final byte[] WAV = {0x52, 0x49};
     private static final byte[] SYNTH = {9, 8, 7};
@@ -80,6 +111,17 @@ class InterviewSpeechApiTest {
 
     private record Ref(String sessionId, String questionId) {}
 
+    /**
+     * 当前 {@code resolver.resolve} 被调用的次数。
+     *
+     * <p>用来表达「转写不再解析模型客户端」这个意图。
+     * 不能写死 times(1)：材料上传统一之后，上传本身也会解析一次客户端
+     * （材料模块要做结构化抽取），所以 start() 之后的基线是 2 而不是 1。
+     * 记基线再比对，既表达了原意，也不会因为上传链路调整而假失败。
+     */
+    private int resolverInvocations() {
+        return org.mockito.Mockito.mockingDetails(resolver).getInvocations().size();
+    }
     private void stubModel() {
         when(resolver.resolve(any(HttpServletRequest.class))).thenReturn((s, p) -> QUESTION);
     }
@@ -89,10 +131,10 @@ class InterviewSpeechApiTest {
         var upload = mvc.perform(multipart("/api/materials")
                         .file(new MockMultipartFile("file", "cv.txt", "text/plain",
                                 "Java Redis 项目经验".getBytes(StandardCharsets.UTF_8)))
-                        .session(owner))
+                        .header("X-User-Id", owner.getId()))
                 .andExpect(status().isOk()).andReturn();
-        String material = json.readTree(upload.getResponse().getContentAsString()).at("/data/materialId").asText();
-        MvcResult started = mvc.perform(post("/api/interviews").session(owner).contentType("application/json")
+        String material = json.readTree(upload.getResponse().getContentAsString()).at("/data/material/id").asText();
+        MvcResult started = mvc.perform(post("/api/interviews").header("X-User-Id", owner.getId()).contentType("application/json")
                         .content("{\"materialId\":\"" + material + "\",\"questionCount\":2}"))
                 .andExpect(status().isOk()).andReturn();
         var data = json.readTree(started.getResponse().getContentAsString()).path("data");
@@ -105,7 +147,7 @@ class InterviewSpeechApiTest {
                 .file(new MockMultipartFile("file", "answer.webm", "audio/webm", WAV))
                 .param("questionId", ref.questionId());
         if (requestId != null) request.param("requestId", requestId);
-        return request.session(owner);
+        return request.header("X-User-Id", owner.getId());
     }
 
     private void stubTranscription() {
@@ -115,13 +157,13 @@ class InterviewSpeechApiTest {
     }
 
     private String sessionJson(MockHttpSession owner, Ref ref) throws Exception {
-        MvcResult result = mvc.perform(get("/api/interviews/" + ref.sessionId()).session(owner))
+        MvcResult result = mvc.perform(get("/api/interviews/" + ref.sessionId()).header("X-User-Id", owner.getId()))
                 .andExpect(status().isOk()).andReturn();
         return json.readTree(result.getResponse().getContentAsString()).path("data").toString();
     }
 
     private MvcResult answerCurrent(MockHttpSession owner, Ref ref, String answer) throws Exception {
-        return mvc.perform(post("/api/interviews/" + ref.sessionId() + "/turns").session(owner)
+        return mvc.perform(post("/api/interviews/" + ref.sessionId() + "/turns").header("X-User-Id", owner.getId())
                         .contentType("application/json")
                         .content("{\"questionId\":\"" + ref.questionId() + "\",\"answer\":\"" + answer + "\"}"))
                 .andExpect(status().isOk()).andReturn();
@@ -142,6 +184,7 @@ class InterviewSpeechApiTest {
     @Test void transcriptionReturnsDraftWithoutTouchingTheInterview() throws Exception {
         var owner = new MockHttpSession();
         Ref ref = start(owner);
+        int resolverBaseline = resolverInvocations();  // 上传+出题各一次，之后不应再增加
         stubTranscription();
         String before = sessionJson(owner, ref);
 
@@ -156,7 +199,7 @@ class InterviewSpeechApiTest {
 
         assertEquals(before, sessionJson(owner, ref), "转写不能改 turns / status / pendingAnswer");
         // start 之外没有再解析模型客户端，说明没有触发下一题
-        verify(resolver, times(1)).resolve(any(HttpServletRequest.class));
+        verify(resolver, times(resolverBaseline)).resolve(any(HttpServletRequest.class));
         ArgumentCaptor<byte[]> wav = ArgumentCaptor.forClass(byte[].class);
         verify(speech).transcribe(wav.capture(), eq(UUID_1));
         assertArrayEquals(WAV, wav.getValue());
@@ -174,7 +217,7 @@ class InterviewSpeechApiTest {
 
         // 缺文件、缺参数、requestId 不是 UUID
         mvc.perform(multipart("/api/interviews/" + ref.sessionId() + "/transcriptions")
-                        .param("questionId", ref.questionId()).param("requestId", UUID_1).session(owner))
+                        .param("questionId", ref.questionId()).param("requestId", UUID_1).header("X-User-Id", owner.getId()))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
         mvc.perform(transcription(owner, ref, null))
                 .andExpect(status().isBadRequest()).andExpect(jsonPath("$.success").value(false));
@@ -189,7 +232,7 @@ class InterviewSpeechApiTest {
                 .andExpect(jsonPath("$.message").value("面试状态已变化，请同步当前题目后继续"));
 
         // 已结束的会话
-        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/finish").session(owner))
+        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/finish").header("X-User-Id", owner.getId()))
                 .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("FINISHED"));
         mvc.perform(transcription(owner, ref, UUID_1)).andExpect(status().isConflict());
 
@@ -202,11 +245,11 @@ class InterviewSpeechApiTest {
         when(resolver.resolve(any(HttpServletRequest.class))).thenReturn((s, p) -> {
             throw new AiClient.AiException("生成失败", false);
         });
-        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/turns").session(owner)
+        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/turns").header("X-User-Id", owner.getId())
                         .contentType("application/json")
                         .content("{\"questionId\":\"" + ref.questionId() + "\",\"answer\":\"我的回答\"}"))
                 .andExpect(status().isBadRequest());
-        mvc.perform(get("/api/interviews/" + ref.sessionId()).session(owner))
+        mvc.perform(get("/api/interviews/" + ref.sessionId()).header("X-User-Id", owner.getId()))
                 .andExpect(jsonPath("$.data.pendingAnswer").value("我的回答"));
         mvc.perform(transcription(owner, ref, UUID_1)).andExpect(status().isConflict());
         verify(speech, never()).transcribe(any(byte[].class), anyString());
@@ -220,7 +263,7 @@ class InterviewSpeechApiTest {
 
         MvcResult result = mvc.perform(post("/api/interviews/" + ref.sessionId()
                         + "/questions/" + ref.questionId() + "/speech")
-                        .session(owner).contentType("application/json")
+                        .header("X-User-Id", owner.getId()).contentType("application/json")
                         .content("{\"text\":\"用户想自己朗读的文字\"}"))
                 .andExpect(status().isOk())
                 .andExpect(content().contentType("audio/mpeg"))
@@ -231,7 +274,7 @@ class InterviewSpeechApiTest {
         // 答过的历史题允许重播
         String answered = ref.questionId();
         answerCurrent(owner, ref, "负责缓存优化");
-        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/questions/" + answered + "/speech").session(owner))
+        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/questions/" + answered + "/speech").header("X-User-Id", owner.getId()))
                 .andExpect(status().isOk()).andExpect(content().contentType("audio/mpeg"));
 
         ArgumentCaptor<String> text = ArgumentCaptor.captor();
@@ -239,7 +282,7 @@ class InterviewSpeechApiTest {
         assertTrue(text.getAllValues().stream().allMatch(QUESTION::equals),
                 "朗读内容只能来自服务端题目，不能来自请求体");
 
-        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/questions/nope/speech").session(owner))
+        mvc.perform(post("/api/interviews/" + ref.sessionId() + "/questions/nope/speech").header("X-User-Id", owner.getId()))
                 .andExpect(status().isConflict())
                 .andExpect(jsonPath("$.message").value("题目不存在，请刷新面试记录"));
     }
@@ -267,6 +310,7 @@ class InterviewSpeechApiTest {
     @Test void transcriptionRechecksStateAfterTheVendorCall() throws Exception {
         var owner = new MockHttpSession();
         Ref ref = start(owner);
+        int resolverBaseline = resolverInvocations();  // 上传+出题各一次，之后不应再增加
         CountDownLatch asrStarted = new CountDownLatch(1);
         CountDownLatch asrRelease = new CountDownLatch(1);
         when(normalizer.normalize(any())).thenReturn(new AudioNormalizer.NormalizedAudio(new byte[]{1}, 100));
@@ -284,7 +328,7 @@ class InterviewSpeechApiTest {
             assertTrue(asrStarted.await(5, TimeUnit.SECONDS), "ASR 调用应已开始");
 
             // ASR 还没回来时，用户已经结束了面试
-            mvc.perform(post("/api/interviews/" + ref.sessionId() + "/finish").session(owner))
+            mvc.perform(post("/api/interviews/" + ref.sessionId() + "/finish").header("X-User-Id", owner.getId()))
                     .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("FINISHED"));
             asrRelease.countDown();
 
@@ -292,7 +336,7 @@ class InterviewSpeechApiTest {
             assertEquals(409, result.getResponse().getStatus(), "识别期间会话已结束，结果不能当成有效草稿");
             assertFalse(json.readTree(result.getResponse().getContentAsString()).path("success").asBoolean());
             verify(speech, times(1)).transcribe(any(byte[].class), anyString());
-            verify(resolver, times(1)).resolve(any(HttpServletRequest.class));
+            verify(resolver, times(resolverBaseline)).resolve(any(HttpServletRequest.class));
         } finally {
             pool.shutdownNow();
         }

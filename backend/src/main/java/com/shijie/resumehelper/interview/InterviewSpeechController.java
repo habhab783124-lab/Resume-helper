@@ -1,6 +1,7 @@
 package com.shijie.resumehelper.interview;
 
 import com.shijie.resumehelper.common.ApiResponse;
+import com.shijie.resumehelper.common.util.UserContext;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.http.MediaType;
 import org.springframework.http.ResponseEntity;
@@ -9,11 +10,20 @@ import org.springframework.web.multipart.MultipartFile;
 
 /**
  * 语音接口的 HTTP 层。归属与并发限制都在 {@link InterviewSpeechService}，
- * 这里只负责路由、session 归属和响应的媒体类型。
+ * 这里只负责路由、身份解析和响应的媒体类型。
  *
  * <p>朗读成功时返回二进制音频而不是 {@link ApiResponse} 包装，省得前端再做一次 Base64；
  * 失败仍然走 {@link InterviewErrorHandler} 的统一 JSON 格式。前端因此要把
  * 「成功是 audio、失败是 JSON」分开解析。
+ *
+ * <h2>身份来源必须是 {@link UserContext}</h2>
+ * 这里原来用的是 {@code request.getSession(true).getId()}，而 {@link InterviewController}
+ * 用的是请求头。两边对不上号的后果是：面试在 A 身份下创建，语音却在 B 身份下查找，
+ * <b>永远 404「面试不存在」</b>——而且不报错、不提示身份问题，只显示"找不到"，
+ * 排查时很容易怀疑到会话过期上去。
+ *
+ * <p>身份是跨模块的约定，只能有一个来源。这个 bug 和"材料模块用请求头、面试模块用
+ * session id"是同一类问题，在统一时一并修掉。
  */
 @RestController
 @RequestMapping("/api")
@@ -25,7 +35,7 @@ public class InterviewSpeechController {
     }
 
     private String owner(HttpServletRequest request) {
-        return request.getSession(true).getId();
+        return UserContext.resolve(request);
     }
 
     @GetMapping("/interview-speech/capabilities")

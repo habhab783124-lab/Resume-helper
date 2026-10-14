@@ -142,7 +142,19 @@ public class InterviewSpeechService {
         }
     }
 
-    /** 相对命令名要在 PATH 里逐个目录找；绝对路径或带分隔符的路径直接判断。 */
+    /**
+     * 相对命令名要在 PATH 里逐个目录找；绝对路径或带分隔符的路径直接判断。
+     *
+     * <h2>Windows 上必须补扩展名</h2>
+     * Windows 的 PATH 里可执行文件是带扩展名的（{@code ffmpeg.exe}），
+     * 而配置里写的是命令名（{@code ffmpeg}）。
+     * 只查 {@code Path.of(dir, "ffmpeg")} 在 Windows 上<b>永远找不到</b>，
+     * 结果是：明明装了 FFmpeg，能力接口却报告语音关闭——而且不报错，只显示"不可用"，
+     * 排查起来很费时间（这正是"沉默失败"，最难查的那类）。
+     *
+     * <p>这段原来是 macOS/Linux 上开发的（那边文件名就是 {@code ffmpeg}，不带扩展名），
+     * 所以在 Windows 上一直没暴露。部署到 Windows 时才会踩到。
+     */
     private static boolean toolAvailable(String command) {
         if (command == null || command.isBlank()) {
             return false;
@@ -158,12 +170,30 @@ public class InterviewSpeechService {
             return false;
         }
         for (String dir : pathVariable.split(File.pathSeparator)) {
-            if (!dir.isBlank() && Files.isExecutable(Path.of(dir, command))) {
+            if (dir.isBlank()) {
+                continue;
+            }
+            if (Files.isExecutable(Path.of(dir, command))) {
                 return true;
+            }
+            for (String extension : WINDOWS_EXECUTABLE_EXTENSIONS) {
+                if (Files.isExecutable(Path.of(dir, command + extension))) {
+                    return true;
+                }
             }
         }
         return false;
     }
+
+    /**
+     * Windows 上按命令名找可执行文件时要试的扩展名。
+     *
+     * <p>在其它系统上是空数组——不加扩展名去查反而可能误命中一个无关文件。
+     */
+    private static final String[] WINDOWS_EXECUTABLE_EXTENSIONS =
+            System.getProperty("os.name", "").toLowerCase(java.util.Locale.ROOT).contains("win")
+                    ? new String[]{".exe", ".cmd", ".bat"}
+                    : new String[0];
 
     private static boolean notBlank(String value) {
         return value != null && !value.isBlank();
