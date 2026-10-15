@@ -61,6 +61,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
     answer: (id, body, ai) => request(`${sessionPath(id)}/turns`, { method: 'POST', body, ai, textModel: true }),
     finish: id => request(`${sessionPath(id)}/finish`, { method: 'POST' }),
     report: (id, ai) => request(`${sessionPath(id)}/report`, { ai, textModel: true }),
+    retryReport: (id, ai) => request(`${sessionPath(id)}/report/retry`, { method: 'POST', ai, textModel: true }),
     getSpeechCapabilities: () => request('/interview-speech/capabilities'),
     transcribe: (id, { questionId, requestId, file }, signal) => {
       const body = new FormData()

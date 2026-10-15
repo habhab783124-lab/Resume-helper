@@ -100,6 +100,11 @@ public class InterviewController {
      */
     @GetMapping("/interviews/{id}/report")
     public ApiResponse<InterviewAgent.InterviewReport> report(@PathVariable String id, HttpServletRequest request) {
-        return ApiResponse.ok(interviews.report(UserContext.resolve(request), id, clients.resolve(request)));
+        return ApiResponse.ok(interviews.report(UserContext.resolve(request), id, () -> clients.resolve(request), false));
+    }
+
+    @PostMapping("/interviews/{id}/report/retry")
+    public ApiResponse<InterviewAgent.InterviewReport> retryReport(@PathVariable String id, HttpServletRequest request) {
+        return ApiResponse.ok(interviews.report(UserContext.resolve(request), id, () -> clients.resolve(request), true));
     }
 }

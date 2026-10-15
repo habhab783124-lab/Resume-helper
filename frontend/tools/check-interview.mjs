@@ -28,7 +28,32 @@ const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 let caps = { asrEnabled: true, ttsEnabled: true, maxRecordingSeconds: 120, maxAudioBytes: 5242880 }
 let asrDelay = 60, asrText = '我使用 Redis 缓存热点数据，并用 Spring Boot 完成接口。'
 let failReport = 0, failAnswer = false, sessionCounter = 0
-const sessions = new Map()
+const sessions = new Map(), cachedReports = new Map(), reportStates = new Map(), reportGenerations = new Map()
+function weightedReport(value, state = {}) {
+  const answered = value.turns.filter(turn => turn.answer != null)
+  const weights = answered.map((_turn, i) => [8, 12, 12][i % 3]), total = weights.reduce((sum, weight) => sum + weight, 0)
+  const basis = weights.map(weight => Math.floor(weight * 10000 / total))
+  const order = weights.map((weight, i) => ({ i, remainder: weight * 10000 % total })).sort((a, b) => b.remainder - a.remainder || a.i - b.i)
+  for (let i = 0, left = weights.length ? 10000 - basis.reduce((sum, n) => sum + n, 0) : 0; i < left; i++) basis[order[i].i]++
+  const turnFeedbacks = value.turns.map((turn, index) => {
+    const answeredIndex = answered.findIndex(item => item.questionId === turn.questionId)
+    const status = answeredIndex < 0 ? 'UNANSWERED' : state.missing?.has(turn.questionId) ? 'PENDING' : 'SCORED'
+    const score = status === 'SCORED' ? state.zero ? 0 : [80, 90, 70][index % 3] : null
+    let remaining = score
+    const dimensionScores = status === 'SCORED' ? Object.fromEntries(['CORRECTNESS', 'COVERAGE', 'REASONING', 'EVIDENCE', 'CLARITY'].map(key => { const points = Math.min(20, remaining); remaining -= points; return [key, points] })) : {}
+    return { ...turn, index: index + 1, score, status, competency: '缓存优化与指标验证', difficulty: index === 1 ? 'ADVANCED' : 'BASIC', importance: index === 2 ? 'CORE' : 'RELATED',
+      weightUnits: [8, 12, 12][index % 3], weightPercent: answeredIndex < 0 ? null : basis[answeredIndex] / 100,
+      weightedContribution: score == null ? null : Number((score * weights[answeredIndex] / total).toFixed(2)), weightReason: '岗位核心能力与真实项目验证', dimensionScores,
+      evidence: status === 'SCORED' ? [turn.answer] : [], missingPoints: status === 'SCORED' ? ['未说明统计周期和样本范围'] : [],
+      highlight: status === 'SCORED' ? '说明了实际采用的验证方法' : null, improvement: status === 'SCORED' ? '补充真实统计周期' : null,
+      suggestedOutline: status === 'SCORED' ? '指标口径、测量方法、待补充真实样本范围' : null, aiModel: status === 'SCORED' ? 'local-model' : null }
+  })
+  const scored = turnFeedbacks.filter(turn => turn.status === 'SCORED')
+  const reportStatus = !answered.length ? 'EMPTY' : scored.length === answered.length ? 'COMPLETE' : scored.length ? 'PARTIAL' : 'UNAVAILABLE'
+  return { overallScore: reportStatus === 'COMPLETE' ? Number((scored.reduce((sum, turn) => sum + turn.score * turn.weightUnits, 0) / total).toFixed(1)) : null,
+    overallSummary: '本地模拟报告：已保存问答，仅对已回答内容提供训练参考。', strengths: scored.length ? ['说明实际验证方法'] : [], gaps: scored.length ? ['未说明统计周期'] : [], suggestions: scored.length ? ['补充真实统计周期'] : [],
+    turnFeedbacks, aiModel: scored.length ? 'local-model' : null, reportStatus, scoringVersion: 'weighted-evidence-v1', plannedCount: value.questionCount, answeredCount: answered.length, scoredCount: scored.length }
+}
 const material = { material: { id: 'local-material', fileName: '简历.txt', status: 'READY' }, extraction: {}, text: 'Java 项目：Spring Boot 与 Redis 缓存优化。' }
 function newSession(questionCount = 3) {
   const id = `local-session-${++sessionCounter}`
@@ -127,9 +152,21 @@ async function main() {
         delete value.pendingAnswer; delete value.currentQuestion; value.status = 'FINISHED'
         return json(res, value)
       }
-      if (suffix === '/report') {
+      if (suffix === '/report' || suffix === '/report/retry') {
         if (failReport-- > 0) return json(res, '本地模拟：报告暂时不可用', 503)
-        return json(res, { overallScore: 75, overallSummary: '本地模拟报告：建议补充可验证的数字。', strengths: ['围绕项目作答'], gaps: ['量化结果不足'], suggestions: ['用背景、行动、结果组织回答'], turnFeedbacks: value.turns.filter(q => q.answer != null).map((q, i) => ({ index: i + 1, question: q.question, score: 75, highlight: '表达清楚', improvement: '补充数字' })), aiModel: 'rule' })
+        const state = reportStates.get(value.sessionId) || {}
+        if (suffix === '/report/retry') {
+          assert.equal(req.method, 'POST')
+          call.retryQuestions = [...(state.missing || [])]
+          await sleep(400)
+          if (state.retryFails) { state.retryFails--; return json(res, '本地模拟：评分重试失败，原报告已保留', 503) }
+          state.missing?.clear()
+        } else assert.equal(req.method, 'GET')
+        if (!cachedReports.has(value.sessionId) || suffix === '/report/retry' && call.retryQuestions.length) {
+          reportGenerations.set(value.sessionId, (reportGenerations.get(value.sessionId) || 0) + 1)
+          cachedReports.set(value.sessionId, weightedReport(value, state))
+        }
+        return json(res, cachedReports.get(value.sessionId))
       }
       json(res, '本地模拟接口不存在', 404)
     } catch (cause) { errors.push(cause.message); if (!res.headersSent) json(res, cause.message, 500) }
@@ -202,7 +239,7 @@ async function main() {
     const result = await send('Page.captureScreenshot', { format: 'png' })
     await writeFile(join(artifacts, name), Buffer.from(result.data, 'base64'))
   }
-  const navigate = async url => { await send('Page.navigate', { url }); await waitFor(() => visible('#page-interview, #page-report, #login-email'), 'page render') }
+  const navigate = async url => { await send('Page.navigate', { url }); await waitFor(() => visible('#page-interview, #page-report, #page-settings, #login-email'), 'page render') }
   const loadSession = async value => {
     await evaluate(`sessionStorage.setItem('career-studio-interview-id',${JSON.stringify(value.sessionId)})`)
     await navigate(`${base}/interview`)
@@ -221,19 +258,29 @@ async function main() {
   await navigate(`${base}/login`)
   await evaluate(`localStorage.setItem('resume-helper-demo-session',JSON.stringify({authenticated:true,email:'browser@local.test',displayName:'本地验证',createdAt:new Date().toISOString()}))`)
   await navigate(`${base}/interview`)
+  const inlineModelSettings = await visible('.model-panel')
+  if (inlineModelSettings) {
+    await evaluate(`document.querySelector('.model-panel').open=true`)
+    await fill('.model-panel input[type="password"]', 'local-browser-test')
+    await fill('input[placeholder="留空使用服务端默认模型"]', 'local-model')
+    await fill('input[placeholder="例如 https://api.deepseek.com/v1"]', 'http://local.invalid/v1')
+  } else {
+    await navigate(`${base}/settings`)
+    await fill('.settings-panel input[type="password"]', 'local-browser-test')
+    await fill('input[placeholder="例如 deepseek-chat"]', 'local-model')
+    await fill('input[placeholder="例如 https://api.deepseek.com/v1"]', 'http://local.invalid/v1')
+    await navigate(`${base}/interview`)
+  }
   await check('no microphone or TTS request before explicit click', async () => { assert.equal(await evaluate('__media.mic'), 0); assert.equal(calls.filter(c => c.path.endsWith('/speech')).length, 0) })
-  await evaluate(`document.querySelector('.paste-panel').open=true;document.querySelector('.model-panel').open=true`)
+  await evaluate(`document.querySelector('.paste-panel').open=true`)
   await fill('#resume-paste', material.text)
-  await fill('input[type="password"]', 'local-browser-test')
-  await fill('input[placeholder="留空使用服务端默认模型"]', 'local-model')
-  await fill('input[placeholder="例如 https://api.deepseek.com/v1"]', 'http://local.invalid/v1')
   await fill('input[type="number"]', '2')
   await button('使用这份文本')
   await waitFor(() => visible('.resume-preview'), 'material preview')
   await check('unified material response renders original resume text', async () => assert.ok((await text()).includes(material.text)))
   await button('开始面试')
   await waitFor(() => visible('#interview-answer'), 'first question')
-  await check('start renders generated question and voice controls', async () => assert.ok((await text()).includes('Redis 优化 Spring Boot')))
+  await check('start renders generated question and voice controls without scoring criteria', async () => { assert.ok((await text()).includes('Redis 优化 Spring Boot')); assert.ok(!(await text()).includes('评分标准')); assert.equal(await visible('.dimension-scores'), false); assert.ok(!JSON.stringify(sessions.get('local-session-1')).includes('criteria')) })
   await testid('question-play')
   await waitFor(async () => await evaluate('__media.plays>0') && !(await disabled('[data-testid="question-stop"]')), 'native MP3 playback')
   await testid('question-stop')
@@ -242,8 +289,9 @@ async function main() {
   await check('stop and replay use cached native MP3 without second synthesis', async () => { await sleep(180); assert.equal(calls.filter(c => c.path.endsWith('/speech')).length, ttsCalls); assert.ok(await evaluate('__media.plays>=2')) })
   await testid('recording-start')
   await waitFor(async () => (await text()).includes('录音中'), 'recording locks', 30000)
-  await check('recording locks answer, submit, finish and model editing', async () => {
-    for (const selector of ['#interview-answer', '.answer-tools button', '[data-testid="finish-interview"]', '.model-panel input']) assert.equal(await disabled(selector), true)
+  await check('recording locks answer, submit and finish', async () => {
+    for (const selector of ['#interview-answer', '.answer-tools button', '[data-testid="finish-interview"]']) assert.equal(await disabled(selector), true)
+    if (inlineModelSettings) assert.equal(await disabled('.model-panel input'), true)
     assert.equal(await disabled('[data-testid="question-stop"]'), true)
   })
   await testid('recording-cancel')
@@ -300,18 +348,20 @@ async function main() {
   await check('report failure retains saved question-answer history', async () => { assert.equal(await evaluate('location.pathname'), '/report'); assert.ok((await text()).includes('已保存的问答记录')); await evaluate('document.querySelector(".review-detail").open=true'); assert.ok((await text()).includes('编辑后确认的回答')) })
   await button('重试加载报告')
   await waitFor(() => visible('.report-meta'), 'report retry')
-  await check('retry renders rule report and recovered target role', async () => assert.ok((await text()).includes('规则模式') && (await text()).includes('Java 后端')))
+  await check('GET retry renders weighted report and recovered target role', async () => assert.ok((await text()).includes('加权训练参考分') && (await text()).includes('Java 后端')))
   await button('导出练习报告')
   await check('report export click invokes guarded print method', async () => assert.equal(await evaluate('__media.prints'), 1))
+  await evaluate(`window.dispatchEvent(new Event('beforeprint'))`)
   await send('Emulation.setEmulatedMedia', { media: 'print' })
   try {
     await check('report score and feedback remain visible in print media', async () => {
       for (const selector of ['#page-report', '.score-main', '.question-review']) {
         assert.equal(await evaluate(`(()=>{const e=document.querySelector(${JSON.stringify(selector)});return !!e && getComputedStyle(e).display!=='none' && e.getBoundingClientRect().height>0})()`), true, `${selector} hidden in print`)
       }
-      assert.ok((await text()).includes('本地模拟报告'))
+      assert.ok((await text()).includes('本地模拟报告')); assert.ok((await text()).includes('原文证据')); assert.ok((await text()).includes('五维得分')); assert.ok((await text()).includes('权重'))
+      assert.equal(await evaluate(`[...document.querySelectorAll('#page-report button')].some(button=>getComputedStyle(button).display!=='none')`), false)
     })
-  } finally { await send('Emulation.setEmulatedMedia', { media: '' }) }
+  } finally { await send('Emulation.setEmulatedMedia', { media: '' }); await evaluate(`window.dispatchEvent(new Event('afterprint'))`) }
   const pdf = await send('Page.printToPDF', { printBackground: true })
   await writeFile(join(artifacts, 'interview-report.pdf'), Buffer.from(pdf.data, 'base64'))
   await check('native Chrome prints report PDF with text content', async () => {
@@ -355,9 +405,59 @@ async function main() {
   await loadSession(newSession()); await fill('#interview-answer', '纯文字回答')
   await check('disabled ASR/TTS leaves ordinary text submission available', async () => { assert.equal(await disabled('[data-testid="recording-start"]'), true); assert.equal(await disabled('[data-testid="question-play"]'), true); assert.equal(await disabled('.answer-tools button'), false); assert.ok((await text()).includes('请用文字回答')) })
   await button('提交回答'); await waitFor(async () => (await text()).includes('量化改进结果'), 'text fallback next question')
+  const fixture = (mode = 'complete') => {
+    const value = newSession(3)
+    value.status = 'FINISHED'; delete value.currentQuestion
+    value.turns = [1, 2, 3].map(index => ({ questionId: `${value.sessionId}-q${index}`, question: `加权题目 ${index}`, ...(mode === 'empty' || mode === 'early' && index > 1 ? {} : { answer: `原始回答 ${index}：用同一批接口压测验证缓存效果。` }) }))
+    const missing = new Set(mode === 'partial' ? [value.turns[1].questionId] : mode === 'unavailable' ? value.turns.map(turn => turn.questionId) : [])
+    reportStates.set(value.sessionId, { missing, zero: mode === 'zero', retryFails: mode === 'partial' ? 1 : 0 })
+    return value
+  }
+  const openReport = async value => { await navigate(`${base}/report?sessionId=${value.sessionId}`); await waitFor(() => visible('.report-meta'), 'weighted report fixture') }
+  const normal = fixture(); await openReport(normal)
+  await check('three answered weights show 25/37.5/37.5 and exact weighted total 80', async () => {
+    assert.equal(await evaluate(`document.querySelector('[data-testid="overall-score"] strong').textContent.trim()`), '80')
+    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.review-weight')].map(e=>e.textContent.match(/权重 ([0-9.]+)%/)[1])`), ['25', '37.5', '37.5'])
+    await evaluate(`document.querySelector('.review-detail').open=true`)
+    for (const textValue of ['原始回答 1', '原文证据', '统计周期', '复练回答框架', '切题与正确性', '关键要点覆盖', '推理与取舍', '证据与具体性', '表达结构']) assert.ok((await text()).includes(textValue), textValue)
+  })
+  await openReport(normal)
+  await check('refresh reuses cached scoring via GET', async () => { assert.equal(reportGenerations.get(normal.sessionId), 1); assert.equal(calls.filter(call=>call.path.includes(normal.sessionId) && call.path.endsWith('/report/retry')).length, 0) })
+  await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+  await check('weighted report has no mobile horizontal overflow', async () => { await sleep(100); assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth'), false) })
+  await screenshot('weighted-report-mobile.png')
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false })
+  await openReport(fixture('early'))
+  await check('early finish labels answered scope and unanswered rows without zero scores', async () => {
+    assert.ok((await text()).includes('已答 1/3 题，提前结束')); assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"]').length`), 2)
+    assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"] small').length`), 0)
+  })
+  const partial = fixture('partial'); await openReport(partial)
+  const stable = JSON.stringify(cachedReports.get(partial.sessionId).turnFeedbacks[0])
+  await check('partial report shows successful question scores but no total or level', async () => { assert.equal(await visible('[data-testid="overall-score"]'), false); assert.equal(await evaluate(`document.querySelectorAll('[data-status="SCORED"]').length`), 2); assert.equal(await visible('[data-testid="retry-scoring"]'), true); assert.ok(!(await text()).includes('合格')) })
+  await testid('retry-scoring')
+  await check('retry keeps prior report visible and disables duplicate scoring', async () => { assert.equal(await visible('.question-review'), true); assert.equal(await disabled('[data-testid="retry-scoring"]'), true) })
+  await waitFor(async () => (await text()).includes('评分重试失败'), 'retry failure')
+  await check('failed scoring retry retains question answers and successful scores', async () => { assert.equal(await evaluate(`document.querySelectorAll('[data-status="SCORED"]').length`), 2); await evaluate(`document.querySelector('.review-detail').open=true`); assert.ok((await text()).includes('原始回答 1')); assert.equal(await visible('[data-testid="overall-score"]'), false) })
+  await testid('retry-scoring'); await waitFor(() => visible('[data-testid="overall-score"]'), 'retry success')
+  await check('explicit POST retries missing question only and preserves successful assessment', async () => {
+    const retry = calls.findLast(call=>call.path.endsWith('/report/retry'))
+    assert.equal(retry.method, 'POST'); assert.deepEqual(retry.retryQuestions, [partial.turns[1].questionId])
+    assert.equal(JSON.stringify(cachedReports.get(partial.sessionId).turnFeedbacks[0]), stable)
+  })
+  await openReport(fixture('unavailable'))
+  await check('all scoring unavailable preserves question history with no invented score or praise', async () => {
+    assert.equal(await visible('[data-testid="overall-score"]'), false); assert.ok((await text()).includes('评分暂不可用')); assert.ok((await text()).includes('暂无有效反馈'))
+    assert.equal(await evaluate(`document.querySelectorAll('[data-status="PENDING"]').length`), 3); assert.ok(!(await text()).includes('合格'))
+  })
+  await openReport(fixture('empty'))
+  await check('empty report has no numeric score or scoring retry', async () => { assert.equal(await visible('[data-testid="overall-score"]'), false); assert.equal(await visible('[data-testid="retry-scoring"]'), false); assert.ok((await text()).includes('尚无可评分内容')); assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"]').length`), 3) })
+  await openReport(fixture('zero'))
+  await check('legitimate zero remains a scored total and per-question score', async () => { assert.equal(await evaluate(`document.querySelector('[data-testid="overall-score"] strong').textContent.trim()`), '0'); assert.equal(await evaluate(`document.querySelector('[data-status="SCORED"]').textContent.trim()`), '0 /100') })
+  await check('question speech sends only question ID route without answers or contracts', async () => { const speech = calls.filter(call=>call.path.includes('/questions/') && call.path.endsWith('/speech')); assert.ok(speech.length); assert.ok(speech.every(call=>call.bytes === 0 && /^\/api\/interviews\/[^/]+\/questions\/[^/]+\/speech$/.test(call.path))) })
   await check('every local API call carries common demo identity', async () => assert.ok(calls.length > 20 && calls.every(c => c.headers['x-user-id'] === 'demo-user')))
   await check('text settings shared into report; speech carries no model/provider credentials', async () => {
-    const reports = calls.filter(c => c.path.endsWith('/report'))
+    const reports = calls.filter(c => /\/report(?:\/retry)?$/.test(c.path))
     assert.ok(reports.length > 0 && reports.every(c => c.headers['x-ai-api-key'] === 'local-browser-test' && c.headers['x-ai-model'] === 'local-model'))
     const speech = calls.filter(c => c.path.includes('/interview-speech/') || c.path.endsWith('/speech') || c.path.endsWith('/transcriptions'))
     assert.ok(speech.length > 0 && speech.every(c => !Object.keys(c.headers).some(k => k.startsWith('x-ai-') || k.startsWith('x-api-key'))))

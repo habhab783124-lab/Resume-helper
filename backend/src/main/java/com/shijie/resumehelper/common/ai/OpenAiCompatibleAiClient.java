@@ -42,13 +42,28 @@ public final class OpenAiCompatibleAiClient implements AiClient {
     private final AiCredentials credentials;
     private final AiProperties config;
     private final ObjectMapper mapper;
+    private final Integer outputBudget;
 
     public OpenAiCompatibleAiClient(AiCredentials credentials,
                                     AiProperties config,
                                     ObjectMapper mapper) {
+        this(credentials, config, mapper, null);
+    }
+
+    private OpenAiCompatibleAiClient(AiCredentials credentials,
+                                     AiProperties config,
+                                     ObjectMapper mapper,
+                                     Integer outputBudget) {
         this.credentials = credentials;
         this.config = config;
         this.mapper = mapper;
+        this.outputBudget = outputBudget;
+    }
+
+    @Override
+    public AiClient withOutputBudget(int maxTokens) {
+        AiClient.super.withOutputBudget(maxTokens);
+        return new OpenAiCompatibleAiClient(credentials, config, mapper, maxTokens);
     }
 
     @Override
@@ -68,7 +83,7 @@ public final class OpenAiCompatibleAiClient implements AiClient {
         ObjectNode body = mapper.createObjectNode();
         body.put("model", credentials.model());
         body.put("temperature", config.getTemperature());
-        body.put("max_tokens", config.getMaxTokens());
+        body.put("max_tokens", outputBudget == null ? config.getMaxTokens() : outputBudget);
         body.put("stream", false);
         ArrayNode messages = body.putArray("messages");
         ObjectNode system = messages.addObject();

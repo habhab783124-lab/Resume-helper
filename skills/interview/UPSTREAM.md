@@ -7,6 +7,12 @@
 - License: MIT; see `LICENSE` (copyright 2026 Hisn00w).
 - The six upstream skill files are unchanged. Java runtime adaptation lives in `InterviewSkill.java`.
 
+## Project-owned extensions
+
+`README.md`, `references/project-question-contract.md` and `references/project-scoring-and-feedback.md` are local project documentation, not upstream files. Java explicitly loads the question reference during Grill and the scoring reference during end-of-interview Review; neither changes the upstream entrypoint or its hashes.
+
+The upstream guidance against uncalibrated precise totals remains intact. This project's scoped training extension asks the model for five per-question dimension levels and answer evidence; Java validates them and calculates scores and frozen weights. The resulting training reference score is not externally calibrated and makes no hiring prediction. Keep these local references separate when reviewing an upstream upgrade.
+
 ## SHA-256 of upstream skill files
 
 ```text

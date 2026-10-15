@@ -123,7 +123,7 @@ class InterviewSpeechApiTest {
         return org.mockito.Mockito.mockingDetails(resolver).getInvocations().size();
     }
     private void stubModel() {
-        when(resolver.resolve(any(HttpServletRequest.class))).thenReturn((s, p) -> QUESTION);
+        when(resolver.resolve(any(HttpServletRequest.class))).thenReturn((s, p) -> InterviewTestFixtures.question(QUESTION));
     }
 
     private Ref start(MockHttpSession owner) throws Exception {

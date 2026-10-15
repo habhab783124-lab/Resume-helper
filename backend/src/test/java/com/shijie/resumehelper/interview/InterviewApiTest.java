@@ -47,7 +47,7 @@ class InterviewApiTest {
     private static final String USER_B = "test-user-b";
 
     @Test void uploadStartAnswerRestoreFinishAndIsolation() throws Exception {
-        when(resolver.resolve(any(jakarta.servlet.http.HttpServletRequest.class))).thenReturn((s,p)->"请介绍你的项目？");
+        when(resolver.resolve(any(jakarta.servlet.http.HttpServletRequest.class))).thenReturn((s,p)->InterviewTestFixtures.question("请介绍你的项目？"));
 
         var upload = mvc.perform(multipart("/api/materials")
                         .file(new MockMultipartFile("file", "cv.txt", "text/plain",

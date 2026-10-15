@@ -33,6 +33,17 @@ public interface AiClient {
         return chat(systemPrompt, userPrompt);
     }
 
+    /**
+     * 为当前业务调用指定输出 token 预算，不修改共享配置或原客户端。
+     * 不支持输出预算的离线实现默认返回自身，保持 lambda 客户端兼容。
+     */
+    default AiClient withOutputBudget(int maxTokens) {
+        if (maxTokens < 1 || maxTokens > 32768) {
+            throw new IllegalArgumentException("输出 token 预算须在 1 到 32768 之间");
+        }
+        return this;
+    }
+
     /** 模型标识，用于在智能体执行轨迹里展示，不包含密钥。 */
     default String name() {
         return "ai";

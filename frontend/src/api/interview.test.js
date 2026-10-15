@@ -128,3 +128,18 @@ test('all routes share request-time identity and speech/read routes omit credent
   }
   setAiSettings({})
 })
+
+test('report GET and missing-assessment retry POST preserve request-time identity and text model credentials', async () => {
+  const { setAiSettings } = await import('./requestContext.js')
+  setAiSettings({ apiKey: 'report-key', model: 'report-model', baseUrl: 'https://report.test/v1' })
+  const calls = []
+  const api = createInterviewApi({ getUserId: () => 'report-owner', fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { reportStatus: 'PARTIAL', overallScore: null } }) } })
+  await api.report('id /'); await api.retryReport('id /'); await api.retryReport('id /', {})
+  assert.equal(calls[0][0], '/api/interviews/id%20%2F/report'); assert.equal(calls[0][1].method, 'GET')
+  assert.equal(calls[1][0], '/api/interviews/id%20%2F/report/retry'); assert.equal(calls[1][1].method, 'POST')
+  assert.equal(calls[1][1].credentials, 'include'); assert.equal(calls[1][1].headers['X-User-Id'], 'report-owner')
+  assert.equal(calls[1][1].headers['X-AI-Api-Key'], 'report-key'); assert.equal(calls[1][1].headers['X-AI-Model'], 'report-model')
+  assert.equal(calls[1][1].headers['X-AI-Base-Url'], 'https://report.test/v1'); assert.equal(calls[1][1].body, undefined)
+  assert.equal(calls[2][1].headers['X-AI-Api-Key'], undefined)
+  setAiSettings({})
+})

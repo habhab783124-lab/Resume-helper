@@ -80,7 +80,7 @@ class UploadBoundaryApiTest {
 
     @Test void sixMiBAudioReachesRealNormalizerAndGetsSpeechSpecific413() throws Exception {
         var session = interviews.start(owner, "test-material", RESUME, "Java engineer", 2,
-                (system, prompt) -> "Please describe your caching project?");
+                (system, prompt) -> InterviewTestFixtures.question("Please describe your caching project?"));
         var response = upload("/api/interviews/" + session.sessionId() + "/transcriptions",
                 Map.of("questionId", session.currentQuestion().questionId(), "requestId", UUID.randomUUID().toString()),
                 List.of(new FilePart("recording.webm", "audio/webm", new byte[6 * MIB])));

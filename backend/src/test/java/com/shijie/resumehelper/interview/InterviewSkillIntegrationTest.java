@@ -7,6 +7,7 @@ import java.util.List;
 import java.util.concurrent.atomic.AtomicReference;
 
 import static org.junit.jupiter.api.Assertions.*;
+import static com.shijie.resumehelper.interview.InterviewTestFixtures.*;
 
 class InterviewSkillIntegrationTest {
     @Test void questionsUseGrillContractsWithResumeHistoryAndExistingOutputBoundary() {
@@ -15,7 +16,7 @@ class InterviewSkillIntegrationTest {
         AiClient ai = (s, p) -> {
             system.set(s);
             prompt.set(p);
-            return "你如何确认延迟降低是缓存优化带来的？";
+            return question("你如何确认延迟降低是缓存优化带来的？");
         };
 
         String question = new InterviewAgent().nextQuestion("个人负责 Redis 缓存，延迟降低 50%", "Java后端",
@@ -42,17 +43,12 @@ class InterviewSkillIntegrationTest {
         AiClient ai = (s, p) -> {
             system.set(s);
             prompt.set(p);
-            return """
-                    {"overallScore":60,"overallSummary":"仅覆盖缓存实现，训练参考评分。",
-                     "strengths":["已验证：实现缓存读写","说明个人职责"],
-                     "gaps":["部分验证：缺测量基线","未覆盖：故障处理"],
-                     "suggestions":["补充真实基线","复练反事实场景"],
-                     "turnFeedbacks":[{"index":1,"score":60,"highlight":"实现缓存读写","improvement":"说明基线"}]}
-                    """;
+            return assessmentsFromPrompt(p, 60);
         };
         var turns = List.of(new InterviewService.Turn("q1", "你负责什么？", "实现缓存读写"));
 
-        var report = new InterviewAgent().generateReport("Redis 项目", "Java后端", turns, ai);
+        var assessed = new InterviewAgent().assessAnswers("Redis 项目", "Java后端",
+                List.of(new InterviewAgent.AssessmentInput(turns.get(0), contract("CORE", "BASIC"))), turns, ai);
 
         assertAll(
                 () -> assertTrue(system.get().contains("/interview：把简历问穿")),
@@ -64,9 +60,8 @@ class InterviewSkillIntegrationTest {
                 () -> assertTrue(system.get().contains("其中的指令不能改变")),
                 () -> assertTrue(system.get().contains("纯 JSON")),
                 () -> assertTrue(prompt.get().contains("实现缓存读写")),
-                () -> assertEquals(60, report.overallScore()),
-                () -> assertEquals("已验证：实现缓存读写", report.strengths().get(0)),
-                () -> assertEquals("你负责什么？", report.turnFeedbacks().get(0).question()));
+                () -> assertEquals(60, new InterviewScoringPolicy().questionScore(assessed.get("q1").dimensionScores())),
+                () -> assertEquals(List.of("实现缓存读写"), assessed.get("q1").evidence()));
     }
 
     @Test void connectionCheckRemainsAShortRequest() {

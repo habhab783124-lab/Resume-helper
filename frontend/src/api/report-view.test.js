@@ -10,8 +10,8 @@ const setup = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   + '\nreturn { loadReport, report, error, loading, sessionRole, session: typeof session === "undefined" ? null : session, printReport: typeof printReport === "undefined" ? null : printReport, warning: typeof warning === "undefined" ? null : warning }'
 function mount(api, query = { sessionId: 's1' }) {
   const printed = []
-  const view = new Function('ref', 'computed', 'onMounted', 'createInterviewApi', 'useRoute', 'useRouter', 'window', setup)(
-    value => ({ value }), getter => ({ get value() { return getter() } }), () => {}, () => api,
+  const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRoute', 'useRouter', 'window', setup)(
+    value => ({ value }), getter => ({ get value() { return getter() } }), () => {}, () => {}, () => api,
     () => ({ query }), () => ({ push() {} }), { print: () => printed.push(true) })
   return { ...view, printed }
 }

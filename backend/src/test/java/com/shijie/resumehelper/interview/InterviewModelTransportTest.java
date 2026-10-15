@@ -12,6 +12,34 @@ import java.util.concurrent.atomic.AtomicReference;
 import static org.junit.jupiter.api.Assertions.*;
 
 class InterviewModelTransportTest {
+    @Test void realReportUsesDedicatedOutputBudgetForFiveAssessments() throws Exception {
+        var budget = new java.util.concurrent.atomic.AtomicInteger();
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            var request = new ObjectMapper().readTree(exchange.getRequestBody());
+            budget.set(request.path("max_tokens").asInt());
+            String content = budget.get() < 8192 ? "{\"assessments\":["
+                    : InterviewTestFixtures.assessmentsFromPrompt(request.at("/messages/1/content").asText(), 80);
+            byte[] body = InterviewTestFixtures.json(java.util.Map.of("choices", java.util.List.of(
+                    java.util.Map.of("message", java.util.Map.of("content", content))))).getBytes(StandardCharsets.UTF_8);
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, body.length); exchange.getResponseBody().write(body); exchange.close();
+        });
+        server.start();
+        try {
+            var config = new AiProperties();
+            var client = new OpenAiCompatibleAiClient(new AiCredentials("test-only-key",
+                    "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "test-model"), config, new ObjectMapper());
+            var inputs = java.util.stream.IntStream.rangeClosed(1, 5).mapToObj(i -> new InterviewAgent.AssessmentInput(
+                    new InterviewService.Turn("q" + i, "问题" + i, "实际回答" + i),
+                    InterviewTestFixtures.contract("CORE", "INTERMEDIATE"))).toList();
+            var result = new InterviewAgent().assessAnswers("简历", "后端", inputs, List.of(), client);
+            assertEquals(5, result.size(), "多题结构化评分需使用独立输出预算");
+            assertEquals(8192, budget.get());
+            assertEquals(800, config.getMaxTokens(), "不得修改其他业务共享的输出预算");
+        } finally { server.stop(0); }
+    }
+
     @Test void realCompatibleClientSendsResumeHistoryAndReturnsQuestion() throws Exception {
         var payload = new AtomicReference<String>();
         var auth = new AtomicReference<String>();
@@ -19,7 +47,7 @@ class InterviewModelTransportTest {
         server.createContext("/v1/chat/completions", exchange -> {
             payload.set(new String(exchange.getRequestBody().readAllBytes(), StandardCharsets.UTF_8));
             auth.set(exchange.getRequestHeaders().getFirst("Authorization"));
-            byte[] body = "{\"choices\":[{\"message\":{\"content\":\"缓存失效后如何保护数据库？\"}}]}".getBytes(StandardCharsets.UTF_8);
+            byte[] body = InterviewTestFixtures.json(java.util.Map.of("choices", java.util.List.of(java.util.Map.of("message", java.util.Map.of("content", InterviewTestFixtures.question("缓存失效后如何保护数据库？")))))).getBytes(StandardCharsets.UTF_8);
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, body.length); exchange.getResponseBody().write(body); exchange.close();
         });
@@ -30,6 +58,7 @@ class InterviewModelTransportTest {
             assertEquals("缓存失效后如何保护数据库？", question);
             var body = new ObjectMapper().readTree(payload.get());
             assertEquals("test-model", body.path("model").asText());
+            assertEquals(2400, body.path("max_tokens").asInt());
             assertEquals("Bearer test-only-key", auth.get());
             assertTrue(body.at("/messages/0/content").asText().contains("/interview：把简历问穿"));
             assertTrue(body.at("/messages/0/content").asText().contains("当前模式：Grill"));
@@ -72,7 +101,7 @@ class InterviewModelTransportTest {
             // 面试服务不再自己查材料：统一材料模块后，简历正文由调用方传入
             var service = new InterviewService(new InterviewAgent());
             var session = service.start("owner", "mat-test",
-                    "张同学：Java Spring Boot 校园项目，负责 Redis 缓存优化。", "", 3, (s, p) -> "介绍你的项目？");
+                    "张同学：Java Spring Boot 校园项目，负责 Redis 缓存优化。", "", 3, (s, p) -> InterviewTestFixtures.question("介绍你的项目？"));
             String questionId = session.currentQuestion().questionId();
             assertThrows(InterviewException.class, () -> service.answer("owner", session.sessionId(), questionId, "我的回答", ai));
             var state = service.get("owner", session.sessionId());

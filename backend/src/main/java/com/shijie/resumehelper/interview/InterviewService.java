@@ -4,6 +4,7 @@ import com.shijie.resumehelper.common.ai.AiClient;
 import org.springframework.stereotype.Service;
 import java.time.Instant;
 import java.util.*;
+import java.util.function.Supplier;
 
 @Service
 public class InterviewService {
@@ -12,19 +13,28 @@ public class InterviewService {
     public InterviewService(InterviewAgent agent) { this.agent = agent; }
     public record Turn(String questionId, String question, String answer) {}
     public record Session(String sessionId, String materialId, String targetRole, int questionCount,
-                          String status, List<Turn> turns, Turn currentQuestion, String pendingAnswer) {}
+                          String status, List<Turn> turns, Turn currentQuestion, String pendingAnswer,
+                          Map<String, InterviewQuestion.Overview> questionMetadata) {}
     private static final class State {
         final String id = UUID.randomUUID().toString(), owner, materialId, resume, role;
         final int count;
         final Instant expires = Instant.now().plusSeconds(86400);
         final List<Turn> turns = new ArrayList<>();
+        final Map<String, InterviewQuestion> questionContracts = new LinkedHashMap<>();
+        final Map<String, InterviewAssessment> assessments = new LinkedHashMap<>();
+        final Object reportLock = new Object();
+        InterviewAgent.InterviewReport cachedReport;
         String status = "ACTIVE", pending;
         State(String owner, String materialId, String resume, String role, int count) {
             this.owner = owner; this.materialId = materialId; this.resume = resume; this.role = role; this.count = count;
         }
         Session snapshot() {
             Turn current = status.equals("ACTIVE") && !turns.isEmpty() ? turns.get(turns.size()-1) : null;
-            return new Session(id, materialId, role, count, status, List.copyOf(turns), current, pending);
+            var metadata = new LinkedHashMap<String, InterviewQuestion.Overview>();
+            var policy = new InterviewScoringPolicy();
+            questionContracts.forEach((id, q) -> metadata.put(id, new InterviewQuestion.Overview(
+                    q.competency(), q.importance(), q.difficulty(), policy.weightUnits(q.importance(), q.difficulty()), q.weightReason())));
+            return new Session(id, materialId, role, count, status, List.copyOf(turns), current, pending, Map.copyOf(metadata));
         }
     }
     /**
@@ -55,8 +65,10 @@ public class InterviewService {
         }
         synchronized (state) {
             try {
-                String question = agent.nextQuestion(state.resume, role, List.of(), count, ai);
-                state.turns.add(new Turn(UUID.randomUUID().toString(), question, null));
+                InterviewQuestion question = agent.prepareQuestion(state.resume, role, List.of(), count, ai);
+                String questionId = UUID.randomUUID().toString();
+                state.questionContracts.put(questionId, question);
+                state.turns.add(new Turn(questionId, question.text(), null));
                 return state.snapshot();
             } catch (RuntimeException e) {
                 synchronized (sessions) { sessions.remove(state.id); }
@@ -90,9 +102,11 @@ public class InterviewService {
                 state.turns.set(last, answered); state.pending = null; state.status = "FINISHED";
             } else {
                 List<Turn> history = new ArrayList<>(state.turns); history.set(last, answered);
-                String question = agent.nextQuestion(state.resume, state.role, history, state.count, ai);
+                InterviewQuestion question = agent.prepareQuestion(state.resume, state.role, history, state.count, ai);
+                String nextId = UUID.randomUUID().toString();
                 state.turns.set(last, answered);
-                state.turns.add(new Turn(UUID.randomUUID().toString(), question, null));
+                state.questionContracts.put(nextId, question);
+                state.turns.add(new Turn(nextId, question.text(), null));
                 state.pending = null;
             }
             return state.snapshot();
@@ -111,16 +125,37 @@ public class InterviewService {
     }
 
     public InterviewAgent.InterviewReport report(String owner, String id, AiClient ai) {
+        return report(owner, id, () -> ai, false);
+    }
+
+    public InterviewAgent.InterviewReport report(String owner, String id, Supplier<AiClient> client, boolean retry) {
         State state = find(owner, id);
         synchronized (state) {
-            if (!state.status.equals("FINISHED")) {
+            if (!state.status.equals("FINISHED"))
                 throw new InterviewException(409, "面试尚未结束，请先完成所有回答或手动结束面试");
+        }
+        synchronized (state.reportLock) {
+            find(owner, id); // The session may have expired while this request waited for an earlier report.
+            List<Turn> turns;
+            Map<String, InterviewQuestion> contracts;
+            List<InterviewAgent.AssessmentInput> inputs;
+            synchronized (state) {
+                if (!retry && state.cachedReport != null) return state.cachedReport;
+                turns = List.copyOf(state.turns);
+                contracts = Map.copyOf(state.questionContracts);
+                inputs = turns.stream().filter(t -> t.answer() != null && !state.assessments.containsKey(t.questionId()))
+                        .map(t -> new InterviewAgent.AssessmentInput(t, contracts.get(t.questionId()))).toList();
+                if (inputs.isEmpty() && state.cachedReport != null) return state.cachedReport;
             }
-            if (state.pending != null && !state.turns.isEmpty()) {
-                int last = state.turns.size()-1; Turn current = state.turns.get(last);
-                state.turns.set(last, new Turn(current.questionId(), current.question(), state.pending)); state.pending = null;
+            // Retain the report-specific lock for single-flight generation, but never block session reads on network IO.
+            Map<String, InterviewAssessment> fresh = inputs.isEmpty() ? Map.of()
+                    : agent.assessAnswers(state.resume, state.role, inputs, turns, client.get());
+            find(owner, id);
+            synchronized (state) {
+                state.assessments.putAll(fresh);
+                state.cachedReport = new InterviewReportAssembler().assemble(state.count, turns, contracts, state.assessments);
+                return state.cachedReport;
             }
-            return agent.generateReport(state.resume, state.role, List.copyOf(state.turns), ai);
         }
     }
     private State find(String owner, String id) {
