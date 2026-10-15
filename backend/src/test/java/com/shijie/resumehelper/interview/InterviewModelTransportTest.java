@@ -31,6 +31,8 @@ class InterviewModelTransportTest {
             var body = new ObjectMapper().readTree(payload.get());
             assertEquals("test-model", body.path("model").asText());
             assertEquals("Bearer test-only-key", auth.get());
+            assertTrue(body.at("/messages/0/content").asText().contains("/interview：把简历问穿"));
+            assertTrue(body.at("/messages/0/content").asText().contains("当前模式：Grill"));
             assertTrue(body.at("/messages/1/content").asText().contains("增加缓存"));
             assertTrue(body.at("/messages/1/content").asText().contains("Redis"));
         } finally { server.stop(0); }
