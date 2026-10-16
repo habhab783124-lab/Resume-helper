@@ -29,36 +29,44 @@ let caps = { asrEnabled: true, ttsEnabled: true, maxRecordingSeconds: 120, maxAu
 let asrDelay = 60, asrText = '我使用 Redis 缓存热点数据，并用 Spring Boot 完成接口。'
 let failReport = 0, failAnswer = false, sessionCounter = 0
 const sessions = new Map(), cachedReports = new Map(), reportStates = new Map(), reportGenerations = new Map()
+const algorithm = { id: '1', title: '两数之和', url: 'https://leetcode.cn/problems/two-sum/', difficulty: 'EASY' }
+const rootTurns = value => value.turns.filter(turn => value.questionMetadata[turn.questionId].kind !== 'FOLLOW_UP')
+function metadata(index, kind = index === 13 ? 'ALGORITHM' : 'MAIN', parentQuestionId) {
+  return { kind, mainQuestionIndex: index, parentQuestionId, ...(kind === 'ALGORITHM' ? { algorithm } : {}) }
+}
 function weightedReport(value, state = {}) {
-  const answered = value.turns.filter(turn => turn.answer != null)
-  const weights = answered.map((_turn, i) => [8, 12, 12][i % 3]), total = weights.reduce((sum, weight) => sum + weight, 0)
-  const basis = weights.map(weight => Math.floor(weight * 10000 / total))
-  const order = weights.map((weight, i) => ({ i, remainder: weight * 10000 % total })).sort((a, b) => b.remainder - a.remainder || a.i - b.i)
-  for (let i = 0, left = weights.length ? 10000 - basis.reduce((sum, n) => sum + n, 0) : 0; i < left; i++) basis[order[i].i]++
-  const turnFeedbacks = value.turns.map((turn, index) => {
-    const answeredIndex = answered.findIndex(item => item.questionId === turn.questionId)
-    const status = answeredIndex < 0 ? 'UNANSWERED' : state.missing?.has(turn.questionId) ? 'PENDING' : 'SCORED'
-    const score = status === 'SCORED' ? state.zero ? 0 : [80, 90, 70][index % 3] : null
+  const roots = rootTurns(value), answered = roots.filter(turn => turn.answer != null)
+  const mains = roots.filter(turn => value.questionMetadata[turn.questionId].kind === 'MAIN')
+  const weights = mains.map((_turn, i) => [8, 12, 12][i % 3]), total = weights.reduce((sum, weight) => sum + weight, 0)
+  const basis = weights.map(weight => Math.floor(weight * 8000 / total))
+  const order = weights.map((weight, i) => ({ i, remainder: weight * 8000 % total })).sort((a, b) => b.remainder - a.remainder || a.i - b.i)
+  for (let i = 0, left = weights.length ? 8000 - basis.reduce((sum, n) => sum + n, 0) : 0; i < left; i++) basis[order[i].i]++
+  const turnFeedbacks = roots.map((turn, index) => {
+    const info = value.questionMetadata[turn.questionId], isAlgorithm = info.kind === 'ALGORITHM'
+    const status = turn.answer == null ? 'UNANSWERED' : state.missing?.has(turn.questionId) ? 'PENDING' : 'SCORED'
+    const score = status === 'SCORED' ? state.zero ? 0 : isAlgorithm ? 90 : [80, 90, 70][index % 3] : null
+    const share = isAlgorithm ? 20 : basis[index] / 100
     let remaining = score
     const dimensionScores = status === 'SCORED' ? Object.fromEntries(['CORRECTNESS', 'COVERAGE', 'REASONING', 'EVIDENCE', 'CLARITY'].map(key => { const points = Math.min(20, remaining); remaining -= points; return [key, points] })) : {}
-    return { ...turn, index: index + 1, score, status, competency: '缓存优化与指标验证', difficulty: index === 1 ? 'ADVANCED' : 'BASIC', importance: index === 2 ? 'CORE' : 'RELATED',
-      weightUnits: [8, 12, 12][index % 3], weightPercent: answeredIndex < 0 ? null : basis[answeredIndex] / 100,
-      weightedContribution: score == null ? null : Number((score * weights[answeredIndex] / total).toFixed(2)), weightReason: '岗位核心能力与真实项目验证', dimensionScores,
+    return { ...turn, ...info, followUps: value.turns.filter(follow => value.questionMetadata[follow.questionId].parentQuestionId === turn.questionId),
+      index: index + 1, score, status, competency: isAlgorithm ? '算法与数据结构' : '缓存优化与指标验证', difficulty: index === 1 ? 'ADVANCED' : 'BASIC', importance: index === 2 ? 'CORE' : 'RELATED',
+      weightUnits: isAlgorithm ? 0 : weights[index], weightPercent: share,
+      weightedContribution: score == null ? null : Number((score * share / 100).toFixed(4)), weightReason: isAlgorithm ? '算法题固定占20%' : '岗位核心能力与真实项目验证', dimensionScores,
       evidence: status === 'SCORED' ? [turn.answer] : [], missingPoints: status === 'SCORED' ? ['未说明统计周期和样本范围'] : [],
       highlight: status === 'SCORED' ? '说明了实际采用的验证方法' : null, improvement: status === 'SCORED' ? '补充真实统计周期' : null,
       suggestedOutline: status === 'SCORED' ? '指标口径、测量方法、待补充真实样本范围' : null, aiModel: status === 'SCORED' ? 'local-model' : null }
   })
   const scored = turnFeedbacks.filter(turn => turn.status === 'SCORED')
   const reportStatus = !answered.length ? 'EMPTY' : scored.length === answered.length ? 'COMPLETE' : scored.length ? 'PARTIAL' : 'UNAVAILABLE'
-  return { overallScore: reportStatus === 'COMPLETE' ? Number((scored.reduce((sum, turn) => sum + turn.score * turn.weightUnits, 0) / total).toFixed(1)) : null,
-    overallSummary: '本地模拟报告：已保存问答，仅对已回答内容提供训练参考。', strengths: scored.length ? ['说明实际验证方法'] : [], gaps: scored.length ? ['未说明统计周期'] : [], suggestions: scored.length ? ['补充真实统计周期'] : [],
-    turnFeedbacks, aiModel: scored.length ? 'local-model' : null, reportStatus, scoringVersion: 'weighted-evidence-v1', plannedCount: value.questionCount, answeredCount: answered.length, scoredCount: scored.length }
+  return { overallScore: reportStatus === 'COMPLETE' && answered.length === 13 ? Number(scored.reduce((sum, turn) => sum + turn.weightedContribution, 0).toFixed(1)) : null,
+    overallSummary: '本地模拟报告：12 道主问题占80%，算法题固定20%；仅在13题全部完成后显示综合分。', strengths: scored.length ? ['说明实际验证方法'] : [], gaps: scored.length ? ['未说明统计周期'] : [], suggestions: scored.length ? ['补充真实统计周期'] : [],
+    turnFeedbacks, aiModel: scored.length ? 'local-model' : null, reportStatus, scoringVersion: 'weighted-evidence-v2', plannedCount: 13, answeredCount: answered.length, scoredCount: scored.length }
 }
 const material = { material: { id: 'local-material', fileName: '简历.txt', status: 'READY' }, extraction: {}, text: 'Java 项目：Spring Boot 与 Redis 缓存优化。' }
-function newSession(questionCount = 3) {
+function newSession() {
   const id = `local-session-${++sessionCounter}`
   const q = { questionId: `${id}-q1`, question: '请介绍你如何用 Redis 优化 Spring Boot 项目的缓存？' }
-  const value = { sessionId: id, materialId: material.material.id, targetRole: 'Java 后端', questionCount, status: 'ACTIVE', turns: [q], currentQuestion: q }
+  const value = { sessionId: id, materialId: material.material.id, targetRole: 'Java 后端', questionCount: 13, status: 'ACTIVE', turns: [q], currentQuestion: q, questionMetadata: { [q.questionId]: metadata(1) } }
   sessions.set(id, value)
   return value
 }
@@ -140,9 +148,12 @@ async function main() {
         if (failAnswer) { value.pendingAnswer = input.answer; return json(res, '本地模拟：下一题生成失败，回答已保留', 502) }
         value.turns.at(-1).answer = input.answer
         delete value.pendingAnswer
-        if (value.turns.length >= value.questionCount) { value.status = 'FINISHED'; delete value.currentQuestion }
+        if (value.questionMetadata[input.questionId].kind === 'ALGORITHM') { value.status = 'FINISHED'; delete value.currentQuestion }
         else {
-          const q = { questionId: `${value.sessionId}-q${value.turns.length + 1}`, question: '请说明你的实际贡献，并量化改进结果。' }
+          const follow = value.turns.length === 1
+          const index = follow ? 1 : rootTurns(value).length + 1
+          const q = { questionId: `${value.sessionId}-${follow ? 'f1' : `q${index}`}`, question: index === 13 ? '给定整数数组和目标值，返回和为目标值的两个不同下标。例如 [2,7,11,15], 9 返回 [0,1]。保证存在唯一解。请提供思路、代码、复杂度和边界情况。' : '请说明你的实际贡献，并量化改进结果。' }
+          value.questionMetadata[q.questionId] = metadata(index, follow ? 'FOLLOW_UP' : index === 13 ? 'ALGORITHM' : 'MAIN', follow ? input.questionId : undefined)
           value.turns.push(q); value.currentQuestion = q
         }
         return json(res, value)
@@ -274,7 +285,7 @@ async function main() {
   await check('no microphone or TTS request before explicit click', async () => { assert.equal(await evaluate('__media.mic'), 0); assert.equal(calls.filter(c => c.path.endsWith('/speech')).length, 0) })
   await evaluate(`document.querySelector('.paste-panel').open=true`)
   await fill('#resume-paste', material.text)
-  await fill('input[type="number"]', '2')
+  await check('setup fixes 12+1 questions and explains the 80/20 split', async () => { assert.equal(await visible('input[type="number"]'), false); assert.ok((await text()).includes('12 道主问题 + 1 道 Hot 100 算法题')) })
   await button('使用这份文本')
   await waitFor(() => visible('.resume-preview'), 'material preview')
   await check('unified material response renders original resume text', async () => assert.ok((await text()).includes(material.text)))
@@ -325,7 +336,7 @@ async function main() {
   await transcribe(); await testid('transcript-replace'); await fill('#interview-answer', '编辑后确认的回答')
   await button('提交回答')
   await waitFor(async () => (await text()).includes('量化改进结果'), 'next question')
-  await check('only explicit submit advances question and saves edited answer', async () => { assert.equal(turns(), before + 1); assert.equal(calls.findLast(c => c.answer).answer.answer, '编辑后确认的回答'); assert.equal(await visible('audio[aria-label="回放自己的录音"]'), false) })
+  await check('follow-up retains 1/13 root progress and saves edited answer', async () => { assert.equal(turns(), before + 1); assert.ok((await text()).includes('追问（不计题数）')); assert.equal(await evaluate(`document.querySelector('.interview-progress b').textContent.replace(/\\s/g,'')`), '1/13'); assert.equal(calls.findLast(c => c.answer).answer.answer, '编辑后确认的回答'); assert.equal(await visible('audio[aria-label="回放自己的录音"]'), false) })
   await record(); asrDelay = 900
   await testid('transcription-start')
   await waitFor(() => visible('[data-testid="transcription-cancel"]'), 'ASR pending')
@@ -338,10 +349,32 @@ async function main() {
   await transcribe(); await testid('finish-interview')
   await check('unaccepted preview offers finish choices and blocks submit-and-finish', async () => { assert.equal(await visible('[data-testid="finish-discard"]'), true); assert.equal(await disabled('[data-testid="finish-submit"]'), true) })
   await button('继续作答'); await testid('transcript-keep'); await button('提交回答')
+  for (let index = 2; index <= 13; index++) {
+    await waitFor(async () => await visible('#interview-answer') && !await disabled('#interview-answer'), `root question ${index}`)
+    if (index === 13) await check('final algorithm exposes Hot100 source, fixed 20% and code answer guidance', async () => {
+      assert.ok((await text()).includes('算法题 · Hot 100 · 固定权重 20%'))
+      assert.equal(await evaluate(`document.querySelector('.algorithm-source a').href`), algorithm.url)
+      assert.ok((await text()).includes('代码或伪代码'))
+      await screenshot('algorithm-question.png')
+    })
+    await fill('#interview-answer', index === 13 ? '使用哈希表，逐个查找差值。\nfunction twoSum(nums, target) { /* O(n) time, O(n) space */ }' : `主问题 ${index} 的回答`)
+    await button('提交回答')
+    await waitFor(async () => index === 13 ? visible('[data-testid="view-report"]') : await evaluate('document.querySelector("#interview-answer")?.value === ""'), `saved root ${index}`)
+  }
   await waitFor(() => visible('[data-testid="view-report"]'), 'automatic last answer completion')
-  await check('last answer completes and offers report entry', async () => { assert.equal(await visible('#interview-answer'), false); assert.equal(await disabled('[data-testid="view-report"]'), false) })
+  await check('last answer completes, retains algorithm source and offers report entry', async () => {
+    assert.equal(await visible('#interview-answer'), false)
+    assert.equal(await disabled('[data-testid="view-report"]'), false)
+    assert.equal(await evaluate(`document.querySelector('.history .algorithm-source a')?.href`), algorithm.url)
+    assert.ok((await evaluate(`document.querySelector('.history .algorithm-source')?.textContent`)).includes(algorithm.title))
+  })
   await loadSession(sessions.get('local-session-1'))
   await check('restored FINISHED session exposes report entry', async () => assert.equal(await visible('[data-testid="view-report"]'), true))
+  await check('restored FINISHED history retains canonical algorithm title and official source link', async () => {
+    const source = await evaluate(`(()=>{const e=document.querySelector('.history .algorithm-source');return e ? {text:e.textContent,href:e.querySelector('a')?.href} : null})()`)
+    assert.equal(source?.href, algorithm.url, 'completed algorithm history must link to its official problem')
+    assert.ok(source.text.includes(algorithm.title), 'completed algorithm history must show the canonical title')
+  })
   failReport = 1
   await testid('view-report')
   await waitFor(async () => (await text()).includes('报告暂时不可用'), 'report error')
@@ -406,18 +439,28 @@ async function main() {
   await check('disabled ASR/TTS leaves ordinary text submission available', async () => { assert.equal(await disabled('[data-testid="recording-start"]'), true); assert.equal(await disabled('[data-testid="question-play"]'), true); assert.equal(await disabled('.answer-tools button'), false); assert.ok((await text()).includes('请用文字回答')) })
   await button('提交回答'); await waitFor(async () => (await text()).includes('量化改进结果'), 'text fallback next question')
   const fixture = (mode = 'complete') => {
-    const value = newSession(3)
+    const value = newSession()
     value.status = 'FINISHED'; delete value.currentQuestion
-    value.turns = [1, 2, 3].map(index => ({ questionId: `${value.sessionId}-q${index}`, question: `加权题目 ${index}`, ...(mode === 'empty' || mode === 'early' && index > 1 ? {} : { answer: `原始回答 ${index}：用同一批接口压测验证缓存效果。` }) }))
-    const missing = new Set(mode === 'partial' ? [value.turns[1].questionId] : mode === 'unavailable' ? value.turns.map(turn => turn.questionId) : [])
+    value.turns = Array.from({ length: mode === 'empty' ? 1 : mode === 'early' ? 2 : 13 }, (_unused, offset) => {
+      const index = offset + 1, questionId = `${value.sessionId}-q${index}`
+      value.questionMetadata[questionId] = metadata(index)
+      return { questionId, question: index === 13 ? '两数之和：请提供解法和复杂度。' : `加权题目 ${index}`, ...(mode === 'empty' || mode === 'early' && index > 1 ? {} : { answer: `原始回答 ${index}：用同一批接口压测验证缓存效果。` }) }
+    })
+    const follow = { questionId: `${value.sessionId}-f1`, question: '追问：如何确保统计结果可信？', answer: '补充回答：用对照组和相同样本验证。' }
+    if (mode !== 'empty') { value.questionMetadata[follow.questionId] = metadata(1, 'FOLLOW_UP', value.turns[0].questionId); value.turns.splice(1, 0, follow) }
+    const missing = new Set(mode === 'partial' ? [rootTurns(value)[1].questionId] : mode === 'unavailable' ? rootTurns(value).map(turn => turn.questionId) : [])
     reportStates.set(value.sessionId, { missing, zero: mode === 'zero', retryFails: mode === 'partial' ? 1 : 0 })
     return value
   }
   const openReport = async value => { await navigate(`${base}/report?sessionId=${value.sessionId}`); await waitFor(() => visible('.report-meta'), 'weighted report fixture') }
   const normal = fixture(); await openReport(normal)
-  await check('three answered weights show 25/37.5/37.5 and exact weighted total 80', async () => {
-    assert.equal(await evaluate(`document.querySelector('[data-testid="overall-score"] strong').textContent.trim()`), '80')
-    assert.deepEqual(await evaluate(`[...document.querySelectorAll('.review-weight')].map(e=>e.textContent.match(/权重 ([0-9.]+)%/)[1])`), ['25', '37.5', '37.5'])
+  await check('13 root weights sum to100 with algorithm20 and exact weighted total82', async () => {
+    assert.equal(await evaluate(`document.querySelector('[data-testid="overall-score"] strong').textContent.trim()`), '82')
+    const shares = await evaluate(`[...document.querySelectorAll('.review-weight')].map(e=>Number(e.textContent.match(/权重 ([0-9.]+)%/)[1]))`)
+    assert.equal(shares.length, 13); assert.equal(shares.at(-1), 20); assert.equal(shares.slice(0,12).reduce((sum, n) => sum + Math.round(n*100), 0), 8000)
+    await evaluate(`document.querySelector('.review-detail').open=true`)
+    assert.ok((await text()).includes('补充回答：用对照组和相同样本验证。'))
+    assert.equal(await evaluate(`document.querySelectorAll('.review-detail').length`), 13)
     await evaluate(`document.querySelector('.review-detail').open=true`)
     for (const textValue of ['原始回答 1', '原文证据', '统计周期', '复练回答框架', '切题与正确性', '关键要点覆盖', '推理与取舍', '证据与具体性', '表达结构']) assert.ok((await text()).includes(textValue), textValue)
   })
@@ -429,29 +472,29 @@ async function main() {
   await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false })
   await openReport(fixture('early'))
   await check('early finish labels answered scope and unanswered rows without zero scores', async () => {
-    assert.ok((await text()).includes('已答 1/3 题，提前结束')); assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"]').length`), 2)
+    assert.ok((await text()).includes('已答 1/13 题，提前结束')); assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"]').length`), 1)
     assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"] small').length`), 0)
   })
   const partial = fixture('partial'); await openReport(partial)
   const stable = JSON.stringify(cachedReports.get(partial.sessionId).turnFeedbacks[0])
-  await check('partial report shows successful question scores but no total or level', async () => { assert.equal(await visible('[data-testid="overall-score"]'), false); assert.equal(await evaluate(`document.querySelectorAll('[data-status="SCORED"]').length`), 2); assert.equal(await visible('[data-testid="retry-scoring"]'), true); assert.ok(!(await text()).includes('合格')) })
+  await check('partial report shows successful question scores but no total or level', async () => { assert.equal(await visible('[data-testid="overall-score"]'), false); assert.equal(await evaluate(`document.querySelectorAll('[data-status="SCORED"]').length`), 12); assert.equal(await visible('[data-testid="retry-scoring"]'), true); assert.ok(!(await text()).includes('合格')) })
   await testid('retry-scoring')
   await check('retry keeps prior report visible and disables duplicate scoring', async () => { assert.equal(await visible('.question-review'), true); assert.equal(await disabled('[data-testid="retry-scoring"]'), true) })
   await waitFor(async () => (await text()).includes('评分重试失败'), 'retry failure')
-  await check('failed scoring retry retains question answers and successful scores', async () => { assert.equal(await evaluate(`document.querySelectorAll('[data-status="SCORED"]').length`), 2); await evaluate(`document.querySelector('.review-detail').open=true`); assert.ok((await text()).includes('原始回答 1')); assert.equal(await visible('[data-testid="overall-score"]'), false) })
+  await check('failed scoring retry retains question answers and successful scores', async () => { assert.equal(await evaluate(`document.querySelectorAll('[data-status="SCORED"]').length`), 12); await evaluate(`document.querySelector('.review-detail').open=true`); assert.ok((await text()).includes('原始回答 1')); assert.equal(await visible('[data-testid="overall-score"]'), false) })
   await testid('retry-scoring'); await waitFor(() => visible('[data-testid="overall-score"]'), 'retry success')
   await check('explicit POST retries missing question only and preserves successful assessment', async () => {
     const retry = calls.findLast(call=>call.path.endsWith('/report/retry'))
-    assert.equal(retry.method, 'POST'); assert.deepEqual(retry.retryQuestions, [partial.turns[1].questionId])
+    assert.equal(retry.method, 'POST'); assert.deepEqual(retry.retryQuestions, [rootTurns(partial)[1].questionId])
     assert.equal(JSON.stringify(cachedReports.get(partial.sessionId).turnFeedbacks[0]), stable)
   })
   await openReport(fixture('unavailable'))
   await check('all scoring unavailable preserves question history with no invented score or praise', async () => {
     assert.equal(await visible('[data-testid="overall-score"]'), false); assert.ok((await text()).includes('评分暂不可用')); assert.ok((await text()).includes('暂无有效反馈'))
-    assert.equal(await evaluate(`document.querySelectorAll('[data-status="PENDING"]').length`), 3); assert.ok(!(await text()).includes('合格'))
+    assert.equal(await evaluate(`document.querySelectorAll('[data-status="PENDING"]').length`), 13); assert.ok(!(await text()).includes('合格'))
   })
   await openReport(fixture('empty'))
-  await check('empty report has no numeric score or scoring retry', async () => { assert.equal(await visible('[data-testid="overall-score"]'), false); assert.equal(await visible('[data-testid="retry-scoring"]'), false); assert.ok((await text()).includes('尚无可评分内容')); assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"]').length`), 3) })
+  await check('empty report has no numeric score or scoring retry', async () => { assert.equal(await visible('[data-testid="overall-score"]'), false); assert.equal(await visible('[data-testid="retry-scoring"]'), false); assert.ok((await text()).includes('尚无可评分内容')); assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"]').length`), 1) })
   await openReport(fixture('zero'))
   await check('legitimate zero remains a scored total and per-question score', async () => { assert.equal(await evaluate(`document.querySelector('[data-testid="overall-score"] strong').textContent.trim()`), '0'); assert.equal(await evaluate(`document.querySelector('[data-status="SCORED"]').textContent.trim()`), '0 /100') })
   await check('question speech sends only question ID route without answers or contracts', async () => { const speech = calls.filter(call=>call.path.includes('/questions/') && call.path.endsWith('/speech')); assert.ok(speech.length); assert.ok(speech.every(call=>call.bytes === 0 && /^\/api\/interviews\/[^/]+\/questions\/[^/]+\/speech$/.test(call.path))) })

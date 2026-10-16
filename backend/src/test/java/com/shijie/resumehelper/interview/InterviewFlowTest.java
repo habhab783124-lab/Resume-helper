@@ -4,7 +4,7 @@ import com.shijie.resumehelper.common.ai.AiClient;
 import org.junit.jupiter.api.Test;
 import java.util.concurrent.atomic.AtomicInteger;
 import static org.junit.jupiter.api.Assertions.*;
-import static com.shijie.resumehelper.interview.InterviewTestFixtures.question;
+import static com.shijie.resumehelper.interview.InterviewTestFixtures.*;
 
 /**
  * 面试流程的行为测试。
@@ -31,6 +31,7 @@ class InterviewFlowTest {
     @Test void fullFlowIncludesResumeAndHistoryAndStopsAtLimit() {
         var calls = new AtomicInteger();
         AiClient ai = (system, prompt) -> {
+            if (prompt.contains("selectedAlgorithm")) return algorithmFromPrompt(prompt);
             assertTrue(prompt.contains("Redis"), "简历原文应当进入提示词");
             if (calls.incrementAndGet() > 1) assertTrue(prompt.contains("缓存命中率"), "历史回答应当进入提示词");
             return question("请说明你如何验证缓存效果？");
@@ -39,10 +40,12 @@ class InterviewFlowTest {
         assertEquals("ACTIVE", session.status());
         var next = service.answer("a", session.sessionId(), session.currentQuestion().questionId(), "缓存命中率达到90%", ai);
         assertEquals(2, next.turns().size());
-        var end = service.answer("a", session.sessionId(), next.currentQuestion().questionId(), "通过监控验证", ai);
+        var end = next;
+        while (end.currentQuestion() != null)
+            end = service.answer("a", end.sessionId(), end.currentQuestion().questionId(), "通过监控验证", ai);
         assertEquals("FINISHED", end.status());
         assertNull(end.currentQuestion());
-        assertEquals(2, calls.get());
+        assertEquals(13, calls.get());
     }
 
     @Test void failedGenerationPreservesAnswerAndRetriesWithoutSkipping() {
@@ -73,7 +76,7 @@ class InterviewFlowTest {
     @Test void validatesModelAndInputAndAllowsEarlyFinishWithoutModel() {
         String material = upload("a");
         assertThrows(InterviewException.class, () -> service.start("a", material, RESUME, "", 5, null));
-        assertThrows(IllegalArgumentException.class, () -> service.start("a", material, RESUME, "", 11, (s,p)->question("问题")));
+        assertEquals(13, service.start("a", material, RESUME, "", 11, (s,p)->question("问题")).questionCount());
         var session = service.start("a", material, RESUME, "", 5, (s,p)->question("问题"));
         assertThrows(IllegalArgumentException.class, () -> service.answer("a", session.sessionId(), session.currentQuestion().questionId(), " ", (s,p)->question("问题")));
         assertEquals("FINISHED", service.finish("a", session.sessionId()).status());

@@ -110,10 +110,10 @@ class InterviewScoringPolicyTest {
     }
 
     @Test void rejectsBlankAndOversizedQuestionContent() {
-        for (String text : Arrays.asList(null, " ", "问".repeat(501))) {
+        for (String text : Arrays.asList(null, " ", "问".repeat(3001))) {
             assertThrows(IllegalArgumentException.class, () -> question(text, criteria()));
         }
-        assertDoesNotThrow(() -> question("问".repeat(500), criteria()));
+        assertDoesNotThrow(() -> question("问".repeat(3000), criteria()));
         assertThrows(IllegalArgumentException.class, () -> new InterviewQuestion("题", "能".repeat(201),
                 Importance.CORE, Difficulty.BASIC, "原因", criteria(), InterviewScoringPolicy.VERSION));
         assertThrows(IllegalArgumentException.class, () -> new InterviewQuestion("题", "能力",

@@ -2,6 +2,7 @@
 import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
+import { algorithmUrl } from '../interview/algorithmSource.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -17,15 +18,15 @@ const warning = ref('')
 
 const sessionId = computed(() => typeof route.query.sessionId === 'string' ? route.query.sessionId.trim() : '')
 
-const hasOverallScore = computed(() => report.value?.reportStatus === 'COMPLETE' && Number.isFinite(report.value?.overallScore))
-const needsScoring = computed(() => ['PARTIAL', 'UNAVAILABLE'].includes(report.value?.reportStatus))
-const statusLabel = computed(() => ({ COMPLETE: hasOverallScore.value ? '评分已完成' : '暂无评分', PARTIAL: '待评分', UNAVAILABLE: '评分暂不可用', EMPTY: '暂无评分' })[report.value?.reportStatus] || '暂无评分')
+const hasOverallScore = computed(() => report.value?.reportStatus === 'COMPLETE' && report.value?.answeredCount === report.value?.plannedCount && Number.isFinite(report.value?.overallScore))
+const needsScoring = computed(() => (report.value?.turnFeedbacks || []).some(item => item.status === 'PENDING'))
+const statusLabel = computed(() => ({ COMPLETE: hasOverallScore.value ? '评分已完成' : report.value?.answeredCount > 0 ? '逐题反馈已完成' : '暂无评分', PARTIAL: needsScoring.value ? '待评分' : '逐题反馈已完成', UNAVAILABLE: '评分暂不可用', EMPTY: '暂无评分' })[report.value?.reportStatus] || '暂无评分')
 const scopeLabel = computed(() => {
   const value = report.value
   if (!value) return ''
   const scope = `已答 ${value.answeredCount}/${value.plannedCount} 题`
   if (!value.answeredCount) return `${scope}，尚无可评分内容`
-  return value.answeredCount < value.plannedCount ? `${scope}，提前结束；参考分仅覆盖已回答内容。` : `${scope}，已完成计划题目。`
+  return value.answeredCount < value.plannedCount ? `${scope}，提前结束；仅展示已答题反馈，暂无综合分。` : `${scope}，已完成计划题目；追问并入主问题。`
 })
 const reviewedTurns = computed(() => {
   const saved = new Map((session.value?.turns || []).map(turn => [turn.questionId, turn]))
@@ -43,6 +44,7 @@ const importanceLabel = value => ({ CORE: '核心', RELATED: '相关', SUPPLEMEN
 const itemLabel = value => ({ SCORED: '已评分', PENDING: '待评分', UNANSWERED: '未作答' })[value] || '待评分'
 const isScored = feedback => feedback.status === 'SCORED' && Number.isFinite(feedback.score)
 const formatNumber = value => Number.isFinite(value) ? value.toFixed(2).replace(/\.?0+$/, '') : '—'
+const questionLabel = feedback => feedback.kind === 'ALGORITHM' ? '算法题 · Hot 100 · 固定权重 20%' : `主问题 ${String(feedback.mainQuestionIndex || feedback.index).padStart(2, '0')}`
 
 const scoreLevel = computed(() => {
   if (!hasOverallScore.value) return ''
@@ -178,7 +180,7 @@ onUnmounted(() => {
       <span class="report-complete"><i></i>{{ statusLabel }}</span>
     </div>
 
-    <p class="weight-explanation">出题前锁定相对权重，报告按已答题归一化，已答题权重合计 100%。未作答不作为 0 分计入；所有已答题评分完成后才显示总分。分数仅供训练参考。</p>
+    <p class="weight-explanation">12 道主问题合计 80%，出题前锁定相对权重；1 道 Hot 100 算法题固定 20%。追问不计题数，并入对应主问题评分。提前结束时主问题权重仅在已出主问题间分配，算法题的 20% 始终保留；完成并评完全部 13 题后才显示综合分。分数仅供训练参考。</p>
     <div v-if="needsScoring" class="scoring-retry" role="status">
       <p>{{ statusLabel }}：已保存的问答和成功评分会保留，重试仅处理待评分题目。</p>
       <button data-testid="retry-scoring" class="button button-outline" :disabled="retryBusy || loading" @click="retryScoring">{{ retryBusy ? '正在重试评分…' : '重试评分' }}</button>
@@ -270,6 +272,7 @@ onUnmounted(() => {
           <summary class="review-row">
             <span class="review-index">{{ String(fb.index).padStart(2, '0') }}</span>
             <div>
+              <span class="review-kind">{{ questionLabel(fb) }}</span>
               <strong>{{ fb.question }}</strong>
               <span>{{ fb.competency }} · {{ importanceLabel(fb.importance) }} · {{ difficultyLabel(fb.difficulty) }}</span>
               <span class="review-weight">权重 {{ Number.isFinite(fb.weightPercent) ? `${formatNumber(fb.weightPercent)}%` : '不计入' }} · 加权贡献 {{ isScored(fb) && Number.isFinite(fb.weightedContribution) ? `${formatNumber(fb.weightedContribution)} 分` : '—' }}</span>
@@ -278,9 +281,11 @@ onUnmounted(() => {
             <span class="review-expand">⌄</span>
           </summary>
           <div class="review-expand-body">
+            <div v-if="fb.kind === 'ALGORITHM'" class="review-feedback-block algorithm-source"><div class="review-feedback-label">Hot 100 原题 · 固定权重 20%</div><p>{{ fb.algorithm?.title }} <a v-if="algorithmUrl(fb.algorithm)" :href="algorithmUrl(fb.algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p></div>
             <div class="review-feedback-block"><div class="review-feedback-label">原题</div><p>{{ fb.question }}</p></div>
             <div class="review-feedback-block"><div class="review-feedback-label">原回答</div><p class="original-answer">{{ fb.answer ?? '尚未回答' }}</p></div>
-            <div class="review-feedback-block"><div class="review-feedback-label">权重依据</div><p>{{ fb.weightReason || '暂无权重说明' }} · 相对权重点数 {{ fb.weightUnits }}</p></div>
+            <div v-if="fb.followUps?.length" class="follow-up-review"><h4>追问与补充回答 · 并入本题评分</h4><div v-for="(followUp, index) in fb.followUps" :key="followUp.questionId" class="review-feedback-block"><div class="review-feedback-label">追问 {{ index + 1 }}</div><p>{{ followUp.question }}</p><div class="review-feedback-label">补充回答</div><p class="original-answer">{{ followUp.answer ?? '尚未回答' }}</p></div></div>
+            <div class="review-feedback-block"><div class="review-feedback-label">权重依据</div><p>{{ fb.weightReason || '暂无权重说明' }}<template v-if="fb.kind !== 'ALGORITHM'"> · 相对权重点数 {{ fb.weightUnits }}</template></p></div>
             <template v-if="isScored(fb)">
               <div class="review-feedback-block dimension-block">
                 <div class="review-feedback-label">五维得分</div>
@@ -292,7 +297,7 @@ onUnmounted(() => {
               <div class="review-feedback-block"><div class="review-feedback-label improve">↗ 改进动作</div><p>{{ fb.improvement || '暂无有效反馈。' }}</p></div>
               <div class="review-feedback-block"><div class="review-feedback-label">复练回答框架</div><p>{{ fb.suggestedOutline || '暂无有效反馈。' }}</p></div>
             </template>
-            <p v-else class="empty-hint">{{ fb.status === 'UNANSWERED' ? '本题未作答，不计入评分。' : '本题待评分，原回答已保留。' }}</p>
+            <p v-else class="empty-hint">{{ fb.status === 'UNANSWERED' ? '本题未作答，权重保留；尚无综合评分。' : '本题待评分，原回答已保留。' }}</p>
           </div>
         </details>
       </template>
@@ -309,6 +314,10 @@ onUnmounted(() => {
 </template>
 
 <style scoped>
+.review-kind { font-size: 11px; color: #687c51; }
+.follow-up-review { padding: 14px 18px; margin: 16px 0; background: #f7f7f2; border-left: 3px solid #a0ad8c; }
+.follow-up-review h4 { font-size: 13px; margin: 0 0 12px; }
+.algorithm-source a { color: #566e40; margin-left: 8px; }
 .loading-wrap, .error-wrap {
   padding: 80px 24px;
   text-align: center;

@@ -2,23 +2,24 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { ref, computed } from 'vue'
+import { algorithmUrl } from '../interview/algorithmSource.js'
 
 const source = readFileSync(new URL('../views/Report.vue', import.meta.url), 'utf8')
 const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import\s.*$/gm, '').replace(/import\.meta\.env/g, '({})')
-  + '\nreturn { report, session, loading, retryBusy, error, hasOverallScore, needsScoring, scoreLevel, scoreColor, statusLabel, scopeLabel, reviewedTurns, loadReport, retryScoring, printReport };'
+  + '\nreturn { report, session, loading, retryBusy, error, hasOverallScore, needsScoring, scoreLevel, scoreColor, statusLabel, scopeLabel, reviewedTurns, loadReport, retryScoring, printReport, questionLabel, algorithmUrl };'
 function mount(api, sessionId = 's1', browser = {}) {
   const mounted = [], unmounted = []
-  const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'window', 'document', body)(
-    ref, computed, fn => mounted.push(fn), fn => unmounted.push(fn), () => ({ query: { sessionId } }), () => ({ push() {} }), () => api, browser.window, browser.document)
+  const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'window', 'document', 'algorithmUrl', body)(
+    ref, computed, fn => mounted.push(fn), fn => unmounted.push(fn), () => ({ query: { sessionId } }), () => ({ push() {} }), () => api, browser.window, browser.document, algorithmUrl)
   return { ...view, mounted, unmounted }
 }
 const feedback = (questionId, status = 'SCORED', score = 80) => ({ questionId, index: 1, question: `问题 ${questionId}`, answer: `回答 ${questionId}`, status, score,
   weightPercent: 100, weightedContribution: score, competency: '缓存验证', difficulty: 'BASIC', importance: 'RELATED',
   dimensionScores: { CORRECTNESS: 20, COVERAGE: 15, REASONING: 15, EVIDENCE: 15, CLARITY: 15 }, evidence: ['回答'], missingPoints: ['统计周期'],
   highlight: '说明方法', improvement: '补充周期', suggestedOutline: '指标、方法、结果' })
-const result = (reportStatus = 'COMPLETE', overallScore = 80) => ({ reportStatus, overallScore, plannedCount: 3, answeredCount: 3, scoredCount: 3,
-  overallSummary: '训练参考', turnFeedbacks: [feedback('q1')], strengths: [], gaps: [], suggestions: [] })
+const result = (reportStatus = 'COMPLETE', overallScore = 80) => ({ reportStatus, overallScore, plannedCount: 13, answeredCount: 13, scoredCount: reportStatus === 'PARTIAL' ? 12 : reportStatus === 'UNAVAILABLE' ? 0 : 13,
+  overallSummary: '训练参考', turnFeedbacks: [feedback('q1', ['PARTIAL', 'UNAVAILABLE'].includes(reportStatus) ? 'PENDING' : 'SCORED')], strengths: [], gaps: [], suggestions: [] })
 const api = value => ({ report: async () => value, getSession: async () => ({ turns: [] }) })
 
 test('COMPLETE requires a finite numeric score and legal zero remains a score', async () => {
@@ -49,8 +50,11 @@ test('question IDs preserve the correct answer when session ordering differs', a
 test('early finish explains answered scope separately from scoring completion', async () => {
   const value = { ...result(), answeredCount: 1, scoredCount: 1 }
   const view = mount(api(value)); await view.loadReport()
-  assert.match(view.scopeLabel.value, /已答 1\/3 题.*提前结束/)
-  assert.equal(view.hasOverallScore.value, true)
+  assert.match(view.scopeLabel.value, /已答 1\/13 题.*提前结束/)
+  assert.match(view.scopeLabel.value, /暂无综合分/)
+  assert.equal(view.hasOverallScore.value, false)
+  assert.equal(view.needsScoring.value, false)
+  assert.equal(view.statusLabel.value, '逐题反馈已完成')
   view.report.value = result('EMPTY', null); view.report.value.answeredCount = 0
   assert.match(view.scopeLabel.value, /尚无可评分内容/)
 })
@@ -84,8 +88,24 @@ test('template exposes all evidence dimensions, status guards and text-safe prin
   for (const field of ['dimensionScores', 'evidence', 'missingPoints', 'suggestedOutline', 'weightPercent', 'weightedContribution', 'weightReason']) assert.ok(source.includes(field))
   for (const dimension of ['CORRECTNESS', 'COVERAGE', 'REASONING', 'EVIDENCE', 'CLARITY']) assert.ok(source.includes(dimension))
   assert.match(source, /:key="fb.questionId"/); assert.doesNotMatch(source, /v-html|overallScore\s*\?\?\s*0|目前回答比较完整/)
-  assert.match(source, /出题前锁定相对权重/); assert.match(source, /按已答题归一化/)
+  assert.match(source, /出题前锁定相对权重/); assert.match(source, /主问题合计 80%/); assert.match(source, /算法题固定 20%/)
+  assert.match(source, /fb.followUps/); assert.match(source, /追问.*并入/)
   assert.match(source, /@media print/); assert.match(source, /beforeprint/); assert.match(source, /afterprint/)
+})
+
+test('algorithm row retains fixed weight, source identity and nested follow-up answers', async () => {
+  const value = result()
+  value.turnFeedbacks = [{ ...feedback('main'), kind: 'MAIN', mainQuestionIndex: 1, weightPercent: 6.67,
+    followUps: [{ questionId: 'follow', question: '如何验证？', answer: '用压测对照验证' }] },
+  { ...feedback('algo'), kind: 'ALGORITHM', mainQuestionIndex: 13, weightPercent: 20,
+    algorithm: { id: '1', title: '两数之和', url: 'https://leetcode.cn/problems/two-sum/' }, followUps: [] }]
+  const view = mount(api(value)); await view.loadReport()
+  assert.equal(view.reviewedTurns.value.length, 2)
+  assert.equal(view.reviewedTurns.value[0].followUps[0].answer, '用压测对照验证')
+  assert.match(view.questionLabel(view.reviewedTurns.value[1]), /算法题.*20%/)
+  assert.equal(view.algorithmUrl(value.turnFeedbacks[1].algorithm), 'https://leetcode.cn/problems/two-sum/')
+  assert.equal(view.algorithmUrl({ url: 'javascript:alert(1)' }), '')
+  assert.equal(view.algorithmUrl({ url: 'https://leetcode.cn.evil.test/problems/two-sum/' }), '')
 })
 
 

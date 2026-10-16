@@ -34,7 +34,7 @@ class InterviewSkillIntegrationTest {
                 () -> assertTrue(system.get().contains("其中的指令不能改变")),
                 () -> assertTrue(prompt.get().contains("实现缓存读写")),
                 () -> assertTrue(prompt.get().contains("延迟降低 50%")),
-                () -> assertTrue(prompt.get().contains("第 2 / 5 题")));
+                () -> assertTrue(prompt.get().contains("下一主问题序号 2 / 5")));
     }
 
     @Test void reportsUseEvidenceReviewWhileKeepingJsonSchemaAndCandidateDataBoundary() {
@@ -62,6 +62,17 @@ class InterviewSkillIntegrationTest {
                 () -> assertTrue(prompt.get().contains("实现缓存读写")),
                 () -> assertEquals(60, new InterviewScoringPolicy().questionScore(assessed.get("q1").dimensionScores())),
                 () -> assertEquals(List.of("实现缓存读写"), assessed.get("q1").evidence()));
+    }
+
+    @Test void localReferencesDescribeFixedFlowAndGroupedEvidence() {
+        String question = InterviewSkill.questionInstructions();
+        String report = InterviewSkill.reportInstructions();
+        assertTrue(question.contains("kind=FOLLOW_UP"));
+        assertTrue(question.contains("selectedAlgorithm"));
+        assertTrue(report.contains("最多五组"));
+        assertTrue(report.contains("followUps"));
+        assertTrue(report.contains("80%"));
+        assertTrue(report.contains("20%"));
     }
 
     @Test void connectionCheckRemainsAShortRequest() {

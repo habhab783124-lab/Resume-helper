@@ -73,8 +73,12 @@ class InterviewApiTest {
                         .content("{\"materialId\":\"" + material + "\",\"questionCount\":2}"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.status").value("ACTIVE"))
+                .andExpect(jsonPath("$.data.questionCount").value(13))
                 .andReturn();
         var data = json.readTree(start.getResponse().getContentAsString()).path("data");
+        mvc.perform(post("/api/interviews").header(UserContext.HEADER, USER_A)
+                        .contentType("application/json").content("{\"materialId\":\"" + material + "\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.questionCount").value(13));
         String id = data.path("sessionId").asText();
         String q = data.at("/currentQuestion/questionId").asText();
 

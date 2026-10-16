@@ -8,6 +8,10 @@ import java.util.function.Supplier;
 
 @Service
 public class InterviewService {
+    public static final int MAIN_COUNT = 12, QUESTION_COUNT = 13;
+    public enum Kind { MAIN, FOLLOW_UP, ALGORITHM }
+    public record Context(Kind kind, String parentQuestionId, int mainQuestionIndex,
+                          Hot100Catalog.Algorithm algorithm) {}
     private final InterviewAgent agent;
     private final Map<String, State> sessions = new HashMap<>();
     public InterviewService(InterviewAgent agent) { this.agent = agent; }
@@ -17,7 +21,9 @@ public class InterviewService {
                           Map<String, InterviewQuestion.Overview> questionMetadata) {}
     private static final class State {
         final String id = UUID.randomUUID().toString(), owner, materialId, resume, role;
-        final int count;
+        final int count = QUESTION_COUNT;
+        final Hot100Catalog.Problem selectedAlgorithm = Hot100Catalog.select();
+        final Map<String, Context> contexts = new LinkedHashMap<>();
         final Instant expires = Instant.now().plusSeconds(86400);
         final List<Turn> turns = new ArrayList<>();
         final Map<String, InterviewQuestion> questionContracts = new LinkedHashMap<>();
@@ -26,14 +32,19 @@ public class InterviewService {
         InterviewAgent.InterviewReport cachedReport;
         String status = "ACTIVE", pending;
         State(String owner, String materialId, String resume, String role, int count) {
-            this.owner = owner; this.materialId = materialId; this.resume = resume; this.role = role; this.count = count;
+            this.owner = owner; this.materialId = materialId; this.resume = resume; this.role = role;
         }
         Session snapshot() {
             Turn current = status.equals("ACTIVE") && !turns.isEmpty() ? turns.get(turns.size()-1) : null;
             var metadata = new LinkedHashMap<String, InterviewQuestion.Overview>();
             var policy = new InterviewScoringPolicy();
-            questionContracts.forEach((id, q) -> metadata.put(id, new InterviewQuestion.Overview(
-                    q.competency(), q.importance(), q.difficulty(), policy.weightUnits(q.importance(), q.difficulty()), q.weightReason())));
+            var shares = weightShares(turns, questionContracts, contexts);
+            contexts.forEach((id, context) -> {
+                var q = questionContracts.get(id);
+                metadata.put(id, new InterviewQuestion.Overview(q.competency(), q.importance(), q.difficulty(),
+                        context.kind() == Kind.FOLLOW_UP ? 0 : policy.weightUnits(q.importance(), q.difficulty()), q.weightReason(),
+                        context.kind(), context.parentQuestionId(), context.mainQuestionIndex(), context.algorithm(), shares.get(id)));
+            });
             return new Session(id, materialId, role, count, status, List.copyOf(turns), current, pending, Map.copyOf(metadata));
         }
     }
@@ -51,7 +62,7 @@ public class InterviewService {
      * @param resume 简历原文，由材料模块抽取后传入。为空直接拒绝，不要拿空白去问模型。
      */
     public Session start(String owner, String materialId, String resume, String targetRole, int count, AiClient ai) {
-        if (count < 1 || count > 10) throw new IllegalArgumentException("面试题数须为 1–10");
+        // Legacy clients may still send a count. Product sessions always use the fixed 12 + 1 flow.
         String role = targetRole == null ? "" : targetRole.strip();
         if (role.length() > 200) throw new IllegalArgumentException("目标岗位不能超过 200 字");
         if (resume == null || resume.isBlank())
@@ -65,9 +76,10 @@ public class InterviewService {
         }
         synchronized (state) {
             try {
-                InterviewQuestion question = agent.prepareQuestion(state.resume, role, List.of(), count, ai);
+                InterviewQuestion question = agent.prepareQuestion(state.resume, role, List.of(), QUESTION_COUNT, ai);
                 String questionId = UUID.randomUUID().toString();
                 state.questionContracts.put(questionId, question);
+                state.contexts.put(questionId, new Context(Kind.MAIN, null, 1, null));
                 state.turns.add(new Turn(questionId, question.text(), null));
                 return state.snapshot();
             } catch (RuntimeException e) {
@@ -98,14 +110,37 @@ public class InterviewService {
                 throw new InterviewException(409, "已有待重试回答，请刷新记录并重试原回答");
             state.pending = value;
             Turn answered = new Turn(requested.questionId(), requested.question(), value);
-            if (state.turns.size() == state.count) {
+            var context = state.contexts.get(questionId);
+            if (context.kind() == Kind.ALGORITHM) {
                 state.turns.set(last, answered); state.pending = null; state.status = "FINISHED";
             } else {
                 List<Turn> history = new ArrayList<>(state.turns); history.set(last, answered);
-                InterviewQuestion question = agent.prepareQuestion(state.resume, state.role, history, state.count, ai);
+                String parentId = context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : questionId;
+                long followUpCount = state.contexts.values().stream().filter(c -> parentId.equals(c.parentQuestionId())).count();
+                int nextIndex = context.mainQuestionIndex() + 1;
+                InterviewAgent.Proposal proposal = followUpCount < 2
+                        ? agent.prepareNext(state.resume, state.role, history, QUESTION_COUNT, nextIndex, true, ai)
+                        : nextIndex <= MAIN_COUNT ? agent.prepareNext(state.resume, state.role, history, QUESTION_COUNT, nextIndex, false, ai)
+                        : new InterviewAgent.Proposal(null, false);
+                Context nextContext;
+                InterviewQuestion question;
+                if (proposal.followUp()) {
+                    var parent = state.questionContracts.get(parentId);
+                    // Freeze the parent's rubric; model-provided follow-up rubrics and weights are discarded.
+                    question = new InterviewQuestion(proposal.question().text(), parent.competency(), parent.importance(),
+                            parent.difficulty(), parent.weightReason(), parent.criteria(), parent.rubricVersion());
+                    nextContext = new Context(Kind.FOLLOW_UP, parentId, context.mainQuestionIndex(), null);
+                } else if (nextIndex == QUESTION_COUNT) {
+                    question = agent.prepareAlgorithm(state.selectedAlgorithm, ai);
+                    nextContext = new Context(Kind.ALGORITHM, null, QUESTION_COUNT, state.selectedAlgorithm.overview());
+                } else {
+                    question = proposal.question();
+                    nextContext = new Context(Kind.MAIN, null, nextIndex, null);
+                }
                 String nextId = UUID.randomUUID().toString();
                 state.turns.set(last, answered);
                 state.questionContracts.put(nextId, question);
+                state.contexts.put(nextId, nextContext);
                 state.turns.add(new Turn(nextId, question.text(), null));
                 state.pending = null;
             }
@@ -143,21 +178,41 @@ public class InterviewService {
                 if (!retry && state.cachedReport != null) return state.cachedReport;
                 turns = List.copyOf(state.turns);
                 contracts = Map.copyOf(state.questionContracts);
-                inputs = turns.stream().filter(t -> t.answer() != null && !state.assessments.containsKey(t.questionId()))
-                        .map(t -> new InterviewAgent.AssessmentInput(t, contracts.get(t.questionId()))).toList();
+                inputs = turns.stream().filter(t -> t.answer() != null && state.contexts.get(t.questionId()).kind() != Kind.FOLLOW_UP
+                                && !state.assessments.containsKey(t.questionId()))
+                        .map(t -> new InterviewAgent.AssessmentInput(t, contracts.get(t.questionId()),
+                                turns.stream().filter(f -> t.questionId().equals(state.contexts.get(f.questionId()).parentQuestionId())).toList())).toList();
                 if (inputs.isEmpty() && state.cachedReport != null) return state.cachedReport;
             }
             // Retain the report-specific lock for single-flight generation, but never block session reads on network IO.
-            Map<String, InterviewAssessment> fresh = inputs.isEmpty() ? Map.of()
-                    : agent.assessAnswers(state.resume, state.role, inputs, turns, client.get());
+            AiClient ai = inputs.isEmpty() ? null : client.get();
+            for (int offset = 0; offset < inputs.size(); offset += 5) {
+                var batch = inputs.subList(offset, Math.min(offset + 5, inputs.size()));
+                var fresh = agent.assessAnswers(state.resume, state.role, batch, turns, ai);
+                find(owner, id);
+                synchronized (state) { state.assessments.putAll(fresh); }
+            }
             find(owner, id);
             synchronized (state) {
-                state.assessments.putAll(fresh);
-                state.cachedReport = new InterviewReportAssembler().assemble(state.count, turns, contracts, state.assessments);
+                state.cachedReport = new InterviewReportAssembler().assemble(state.count, turns, contracts, state.assessments, state.contexts);
                 return state.cachedReport;
             }
         }
     }
+    /** Main contracts, including issued unanswered roots, share only the fixed 80% budget. */
+    static Map<String, java.math.BigDecimal> weightShares(List<Turn> turns, Map<String, InterviewQuestion> contracts,
+                                                       Map<String, Context> contexts) {
+        var policy = new InterviewScoringPolicy();
+        var mains = turns.stream().filter(t -> contexts.get(t.questionId()).kind() == Kind.MAIN).toList();
+        var units = mains.stream().map(t -> contracts.get(t.questionId()))
+                .map(q -> policy.weightUnits(q.importance(), q.difficulty())).toList();
+        var percentages = units.isEmpty() ? List.<java.math.BigDecimal>of() : policy.percentages(units, 8000);
+        Map<String, java.math.BigDecimal> result = new LinkedHashMap<>();
+        for (int i = 0; i < mains.size(); i++) result.put(mains.get(i).questionId(), percentages.get(i));
+        contexts.forEach((id, context) -> { if (context.kind() == Kind.ALGORITHM) result.put(id, new java.math.BigDecimal("20.00")); });
+        return result;
+    }
+
     private State find(String owner, String id) {
         synchronized (sessions) {
             State state = sessions.get(id);

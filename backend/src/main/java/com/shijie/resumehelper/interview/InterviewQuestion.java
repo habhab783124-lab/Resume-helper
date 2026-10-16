@@ -12,7 +12,7 @@ public record InterviewQuestion(
     public enum Dimension { CORRECTNESS, COVERAGE, REASONING, EVIDENCE, CLARITY }
 
     public InterviewQuestion {
-        requireText(text, 500, "问题正文");
+        requireText(text, 3000, "问题正文");
         requireText(competency, 200, "考察能力");
         requireText(weightReason, 200, "权重原因");
         if (importance == null || difficulty == null)
@@ -38,7 +38,9 @@ public record InterviewQuestion(
 
     /** Safe question metadata; the frozen answer criteria are deliberately absent. */
     public record Overview(String competency, Importance importance,
-                           Difficulty difficulty, int weightUnits, String weightReason) {}
+                           Difficulty difficulty, int weightUnits, String weightReason,
+                           InterviewService.Kind kind, String parentQuestionId, int mainQuestionIndex,
+                           Hot100Catalog.Algorithm algorithm, java.math.BigDecimal weightPercent) {}
 
     static void requireText(String value, int maximum, String field) {
         if (value == null || value.isBlank() || value.length() > maximum)

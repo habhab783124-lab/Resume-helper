@@ -48,7 +48,8 @@ class InterviewReportApiTest {
         owner = "report-" + UUID.randomUUID();
         ai = mock(AiClient.class);
         when(ai.withOutputBudget(anyInt())).thenReturn(ai);
-        when(ai.chat(anyString(), anyString())).thenReturn(question(QUESTION));
+        when(ai.chat(anyString(), anyString())).thenAnswer(call -> ((String) call.getArgument(1)).contains("selectedAlgorithm")
+                ? algorithmFromPrompt(call.getArgument(1)) : question(QUESTION));
         when(ai.chat(anyString(), anyString(), eq(60))).thenAnswer(call -> assessmentsFromPrompt(call.getArgument(1), 80));
         when(ai.name()).thenReturn("test-model");
         when(resolver.resolve(any(HttpServletRequest.class))).thenReturn(ai);
@@ -66,14 +67,14 @@ class InterviewReportApiTest {
     }
 
     @Test void reportUsesServerArithmeticAndKeepsCanonicalAnswersAndWeights() throws Exception {
-        var session = completed(1);
+        var session = completed(13);
         JsonNode before = sessionData(session.sessionId());
         report(session.sessionId(), owner).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.overallScore").value(80.0))
                 .andExpect(jsonPath("$.data.reportStatus").value("COMPLETE"))
-                .andExpect(jsonPath("$.data.plannedCount").value(1))
-                .andExpect(jsonPath("$.data.scoredCount").value(1))
-                .andExpect(jsonPath("$.data.turnFeedbacks[0].weightPercent").value(100.0))
+                .andExpect(jsonPath("$.data.plannedCount").value(13))
+                .andExpect(jsonPath("$.data.scoredCount").value(13))
+                .andExpect(jsonPath("$.data.turnFeedbacks[0].weightPercent").value(6.67))
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].weightUnits").value(15))
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].question").value(QUESTION))
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].answer").value(ANSWER))
@@ -103,7 +104,7 @@ class InterviewReportApiTest {
 
     @ParameterizedTest @ValueSource(booleans = {true, false})
     void failedScoringIsCachedAndExplicitRetryRestoresScoring(boolean throwsError) throws Exception {
-        var session = completed(1);
+        var session = completed(13);
         if (throwsError) when(ai.chat(anyString(), anyString(), eq(60))).thenThrow(new AiClient.AiException("test timeout"));
         else when(ai.chat(anyString(), anyString(), eq(60))).thenReturn("invalid JSON");
         report(session.sessionId(), owner).andExpect(status().isOk())
@@ -111,7 +112,7 @@ class InterviewReportApiTest {
                 .andExpect(jsonPath("$.data.overallScore").value(nullValue()))
                 .andExpect(jsonPath("$.data.strengths").isEmpty());
         report(session.sessionId(), owner).andExpect(status().isOk());
-        verify(ai, times(1)).chat(anyString(), anyString(), eq(60));
+        verify(ai, times(3)).chat(anyString(), anyString(), eq(60));
         when(ai.chat(anyString(), anyString(), eq(60))).thenAnswer(call -> assessmentsFromPrompt(call.getArgument(1), 90));
         retry(session.sessionId(), owner).andExpect(status().isOk())
                 .andExpect(jsonPath("$.data.overallScore").value(90.0));
@@ -144,7 +145,7 @@ class InterviewReportApiTest {
             return assessmentsFromPrompt(call.getArgument(1), 90);
         });
         retry(session.sessionId(), owner).andExpect(status().isOk())
-                .andExpect(jsonPath("$.data.overallScore").value(85.0))
+                .andExpect(jsonPath("$.data.overallScore").value(nullValue()))
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].score").value(80))
                 .andExpect(jsonPath("$.data.turnFeedbacks[1].score").value(90));
     }
@@ -187,7 +188,7 @@ class InterviewReportApiTest {
     }
 
     @Test void invalidRequestConfigurationKeepsFinishedSessionForLaterRetry() throws Exception {
-        var session = completed(1);
+        var session = completed(13);
         JsonNode before = sessionData(session.sessionId());
         when(resolver.resolve(any(HttpServletRequest.class))).thenThrow(new IllegalArgumentException("模型地址不正确"));
         report(session.sessionId(), owner).andExpect(status().isBadRequest());
@@ -202,9 +203,9 @@ class InterviewReportApiTest {
     }
     private InterviewService.Session completed(int count) {
         var session = start(count);
-        while (session.currentQuestion() != null)
+        for (int i = 0; i < count; i++)
             session = interviews.answer(owner, session.sessionId(), session.currentQuestion().questionId(), ANSWER, ai);
-        return session;
+        return interviews.finish(owner, session.sessionId());
     }
     private ResultActions report(String id, String user) throws Exception {
         return mvc.perform(get("/api/interviews/" + id + "/report").header(UserContext.HEADER, user));

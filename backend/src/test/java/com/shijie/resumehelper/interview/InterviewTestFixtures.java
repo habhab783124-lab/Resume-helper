@@ -29,6 +29,14 @@ final class InterviewTestFixtures {
                 "suggestedOutline", "先说明个人动作，再补充真实测量依据与局限"));
     }
 
+    static String algorithmFromPrompt(String prompt) {
+        try {
+            String id = JSON.readTree(prompt).path("selectedAlgorithm").path("id").asText();
+            return json(Map.of("algorithmId", id, "description", "根据所给输入计算题目要求的结果。",
+                    "examples", "输入与输出示例用于隔离流程测试。", "constraints", "测试用约束；真实题意由模型根据选题生成。"));
+        } catch (Exception e) { throw new AssertionError(e); }
+    }
+
     static String assessmentsFromPrompt(String prompt, int score) {
         try {
             var root = JSON.readTree(prompt);

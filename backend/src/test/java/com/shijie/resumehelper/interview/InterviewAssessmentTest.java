@@ -78,4 +78,22 @@ class InterviewAssessmentTest {
                 List.of(), (s, p) -> json(Map.of("assessments", List.of(unsupported))));
         assertTrue(result.isEmpty());
     }
+    @Test void groupedEvidenceAcceptsEachOwnAnswerButRejectsCrossBoundaryAndOtherGroups() {
+        var root = new InterviewService.Turn("q1", "主问题", "主回答甲");
+        var follow = new InterviewService.Turn("f1", "追问", "追问乙");
+        var grouped = new InterviewAgent.AssessmentInput(root, contract("CORE", "BASIC"), List.of(follow));
+        var agent = new InterviewAgent();
+        for (String evidence : List.of("主回答甲", "追问乙")) {
+            var found = agent.assessAnswers("简历", "Java", List.of(grouped), List.of(root, follow),
+                    (sys, prompt) -> json(Map.of("assessments", List.of(assessment("q1", evidence, 80)))));
+            assertTrue(found.containsKey("q1"), evidence);
+        }
+        var other = new InterviewService.Turn("q2", "其他问题", "别题丙");
+        for (String evidence : List.of("甲 追问", "别题丙")) {
+            var found = agent.assessAnswers("简历", "Java", List.of(grouped), List.of(root, follow, other),
+                    (sys, prompt) -> json(Map.of("assessments", List.of(assessment("q1", evidence, 80)))));
+            assertTrue(found.isEmpty(), evidence);
+        }
+    }
+
 }

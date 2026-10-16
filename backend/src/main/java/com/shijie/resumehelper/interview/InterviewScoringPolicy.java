@@ -9,7 +9,7 @@ import java.util.Map;
 
 /** Deterministic arithmetic for training scores, independent of model output. */
 public final class InterviewScoringPolicy {
-    public static final String VERSION = "weighted-evidence-v1";
+    public static final String VERSION = "weighted-evidence-12-plus-1-v2";
 
     public int weightUnits(InterviewQuestion.Importance importance, InterviewQuestion.Difficulty difficulty) {
         if (importance == null || difficulty == null)
@@ -49,6 +49,11 @@ public final class InterviewScoringPolicy {
 
     /** Largest remainders allocate exactly 10,000 basis points; ties retain question order. */
     public List<BigDecimal> percentages(List<Integer> weights) {
+        return percentages(weights, 10_000);
+    }
+
+    public List<BigDecimal> percentages(List<Integer> weights, int budgetBasisPoints) {
+        if (budgetBasisPoints <= 0 || budgetBasisPoints > 10_000) throw new IllegalArgumentException("权重预算无效");
         if (weights == null || weights.isEmpty()) throw new IllegalArgumentException("权重不能为空");
         long total = 0;
         for (Integer weight : weights) {
@@ -60,7 +65,7 @@ public final class InterviewScoringPolicy {
         List<Integer> order = new ArrayList<>(weights.size());
         long allocated = 0;
         for (int i = 0; i < weights.size(); i++) {
-            long scaled = (long) weights.get(i) * 10_000;
+            long scaled = (long) weights.get(i) * budgetBasisPoints;
             basisPoints[i] = scaled / total;
             remainders[i] = scaled % total;
             allocated += basisPoints[i];
@@ -68,7 +73,7 @@ public final class InterviewScoringPolicy {
         }
         order.sort(Comparator.<Integer>comparingLong(i -> remainders[i]).reversed()
                 .thenComparingInt(Integer::intValue));
-        for (int i = 0; i < 10_000 - allocated; i++) basisPoints[order.get(i)]++;
+        for (int i = 0; i < budgetBasisPoints - allocated; i++) basisPoints[order.get(i)]++;
         List<BigDecimal> result = new ArrayList<>(weights.size());
         for (long value : basisPoints) result.add(BigDecimal.valueOf(value, 2));
         return List.copyOf(result);

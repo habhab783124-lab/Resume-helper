@@ -70,7 +70,7 @@ public class InterviewController {
                             + "请改用「粘贴文本」，或换一份可以直接复制文字的简历。");
 
         return ApiResponse.ok(interviews.start(owner, body.materialId(), resume, body.targetRole(),
-                body.questionCount() == null ? 5 : body.questionCount(), clients.resolve(request)));
+                InterviewService.QUESTION_COUNT, clients.resolve(request)));
     }
 
     @GetMapping("/interviews/{id}")

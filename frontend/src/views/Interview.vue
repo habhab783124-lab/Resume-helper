@@ -4,6 +4,7 @@ import { useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
 import { getAiSettings, setAiSettings } from '../api/requestContext.js'
 import { useInterviewVoice } from '../interview/useInterviewVoice.js'
+import { algorithmUrl } from '../interview/algorithmSource.js'
 
 const router = useRouter()
 const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || '' })
@@ -12,7 +13,6 @@ const material = ref(null)
 const session = ref(null)
 const paste = ref('')
 const targetRole = ref('')
-const questionCount = ref(5)
 const settings = getAiSettings()
 const apiKey = ref(settings.apiKey)
 const model = ref(settings.model)
@@ -27,7 +27,15 @@ const uncertainAnswer = ref(null)
 const finishChoice = ref(false)
 const recordingAudio = ref(null)
 const completed = computed(() => session.value?.turns.filter(turn => turn.answer != null) || [])
+const completedRoots = computed(() => completed.value.filter(turn => session.value?.questionMetadata?.[turn.questionId]?.kind !== 'FOLLOW_UP'))
 const current = computed(() => session.value?.currentQuestion)
+const currentMetadata = computed(() => session.value?.questionMetadata?.[current.value?.questionId] || {})
+function questionLabel(turn, index = 0) {
+  const metadata = session.value?.questionMetadata?.[turn?.questionId] || {}
+  if (metadata.kind === 'ALGORITHM') return '算法题 · Hot 100 · 固定权重 20%'
+  const ordinal = String(metadata.mainQuestionIndex || index + 1).padStart(2, '0')
+  return `主问题 ${ordinal}${metadata.kind === 'FOLLOW_UP' ? ' · 追问（不计题数）' : ' / 12'}`
+}
 const pending = computed(() => session.value?.pendingAnswer ?? uncertainAnswer.value)
 const active = computed(() => session.value?.status === 'ACTIVE')
 const finishAlternativeLabel = computed(() => session.value?.pendingAnswer != null ? '保留已提交回答并结束' : uncertainAnswer.value != null ? '结束并保留已收到的回答' : '放弃草稿并结束')
@@ -111,7 +119,7 @@ function uploadPaste() {
 function start() {
   if (!material.value?.text?.trim()) { error.value = '请先上传有效简历或粘贴简历文本。'; return }
   return run('正在生成第一题…', async () => {
-    applySession(await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: Number(questionCount.value) }, saveModelSettings()))
+    applySession(await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: 13 }, saveModelSettings()))
   })
 }
 function submitAnswer() {
@@ -221,17 +229,25 @@ onUnmounted(() => voice.dispose())
           <label class="field">上传简历 <span>PDF / DOCX / TXT · 最大 10 MiB</span><input type="file" accept=".pdf,.docx,.txt" :disabled="locked" @change="upload($event.target.files[0]); $event.target.value = ''" /></label>
           <details class="paste-panel"><summary>或粘贴简历文本</summary><label class="field" for="resume-paste">简历内容</label><textarea id="resume-paste" v-model="paste" rows="6" maxlength="20000" :disabled="locked" placeholder="粘贴简历内容（最多 20,000 字）"></textarea><button class="button button-ghost" :disabled="locked || !paste.trim()" @click="uploadPaste">使用这份文本</button></details>
           <div v-if="material" class="resume-preview"><h3>已解析 · {{ material.fileName }}</h3><p>请确认文字完整；扫描版 PDF 可改用粘贴文本。</p><pre>{{ material.text }}</pre></div>
-          <div class="setup-grid"><label class="field">目标岗位（可选）<input v-model="targetRole" maxlength="200" :disabled="locked" placeholder="例如：Java 后端开发工程师" /></label><label class="field">问题数量<input v-model="questionCount" type="number" min="1" max="10" :disabled="locked" /></label></div>
+          <div class="setup-grid"><label class="field">目标岗位（可选）<input v-model="targetRole" maxlength="200" :disabled="locked" placeholder="例如：Java 后端开发工程师" /></label><div class="interview-plan"><strong>12 道主问题 + 1 道 Hot 100 算法题</strong><p>主问题合计 80%，算法题固定 20%。追问不计入总题数，并入对应主问题评分。</p></div></div>
         </template>
         <details v-if="!session || active" class="model-panel"><summary>模型设置（可选）</summary><p>留空使用服务端配置。密钥保存在当前浏览器标签页，面试与报告共用；Base URL 仅在填了自己的密钥时生效。</p><label class="field">API Key<input v-model="apiKey" @input="aiCheck = ''" type="password" autocomplete="off" :disabled="locked" placeholder="使用自己的模型密钥（可选）" /></label><label class="field">Base URL<input v-model="modelBaseUrl" @input="aiCheck = ''" autocomplete="off" spellcheck="false" :disabled="locked" placeholder="例如 https://api.deepseek.com/v1" /></label><label class="field">模型名称<input v-model="model" @input="aiCheck = ''" autocomplete="off" :disabled="locked" placeholder="留空使用服务端默认模型" /></label><button class="button button-ghost" :disabled="locked" @click="checkAi">测试连接</button><p v-if="aiCheck" class="notice" :class="{ error: !aiCheckOk }">{{ aiCheck }}</p></details>
-        <template v-if="!session && !restoreId"><p class="consent">开始面试后，简历文本和回答将发送至配置的大模型服务</p><button class="button button-primary" :disabled="locked || !material || !Number.isInteger(Number(questionCount)) || Number(questionCount) < 1 || Number(questionCount) > 10" @click="start">开始面试 <span aria-hidden="true">→</span></button></template>
+        <template v-if="!session && !restoreId"><p class="consent">开始面试后，简历文本和回答将发送至配置的大模型服务</p><button class="button button-primary" :disabled="locked || !material" @click="start">开始面试 <span aria-hidden="true">→</span></button></template>
         <template v-if="session">
           <div class="interview-session-top"><div><span class="session-overline">{{ active ? 'IN CONVERSATION' : 'SESSION COMPLETE' }}</span><h2>{{ session.targetRole || '简历模拟面试' }}</h2><span class="session-company">{{ active ? '结合简历与回答进行提问' : '本次面试已结束，可回顾下方问答' }}</span></div></div>
-          <div class="interview-progress"><div><span>已完成</span><b>{{ completed.length }} <i>/</i> {{ session.questionCount }}</b></div><div class="interview-progress-track"><i :style="{ width: `${completed.length / session.questionCount * 100}%` }"></i></div></div>
-          <ol v-if="completed.length" class="history" aria-label="面试问答记录"><li v-for="(turn, index) in completed" :key="turn.questionId"><div class="session-overline">QUESTION {{ String(index + 1).padStart(2, '0') }}</div><h3>{{ turn.question }}</h3><div class="past-answer"><span>你的回答</span><p>{{ turn.answer }}</p></div></li></ol>
+          <div class="interview-progress"><div><span>已答题目 · 追问不计入</span><b>{{ completedRoots.length }} <i>/</i> {{ session.questionCount }}</b></div><div class="interview-progress-track"><i :style="{ width: `${completedRoots.length / session.questionCount * 100}%` }"></i></div></div>
+          <ol v-if="completed.length" class="history" aria-label="面试问答记录">
+            <li v-for="(turn, index) in completed" :key="turn.questionId">
+              <div class="session-overline">{{ questionLabel(turn, index) }}</div>
+              <p v-if="session.questionMetadata?.[turn.questionId]?.kind === 'ALGORITHM'" class="algorithm-source">LeetCode Hot 100 · {{ session.questionMetadata[turn.questionId].algorithm?.title }} <a v-if="algorithmUrl(session.questionMetadata[turn.questionId].algorithm)" :href="algorithmUrl(session.questionMetadata[turn.questionId].algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p>
+              <h3>{{ turn.question }}</h3>
+              <div class="past-answer"><span>你的回答</span><p>{{ turn.answer }}</p></div>
+            </li>
+          </ol>
           <template v-if="active && current">
             <div class="question-card">
-              <div class="question-number">QUESTION {{ String(completed.length + 1).padStart(2, '0') }}</div>
+              <div class="question-number">{{ questionLabel(current, completedRoots.length) }}</div>
+              <p v-if="currentMetadata.kind === 'ALGORITHM'" class="algorithm-source">LeetCode Hot 100 · {{ currentMetadata.algorithm?.title }} <a v-if="algorithmUrl(currentMetadata.algorithm)" :href="algorithmUrl(currentMetadata.algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p>
               <h3>{{ current.question }}</h3>
               <div class="voice-actions">
                 <button data-testid="question-play" class="button button-ghost" :disabled="locked || !voice.ttsEnabled" @click="voice.playQuestion">{{ voice.speechState === 'loading' ? '正在生成语音…' : voice.speechState === 'stopped' ? '重播题目' : '播放题目' }}</button>
@@ -241,7 +257,7 @@ onUnmounted(() => voice.dispose())
               <p v-if="voice.speechError" class="notice error" role="alert">{{ voice.speechError }}</p>
             </div>
             <div class="answer-editor">
-              <label for="interview-answer">你的回答 <span>围绕背景、行动与结果组织表达</span></label>
+              <label for="interview-answer">你的回答 <span>{{ currentMetadata.kind === 'ALGORITHM' ? '写出思路、代码或伪代码、复杂度与边界情况' : '围绕背景、行动与结果组织表达' }}</span></label>
               <p v-if="pending != null" class="notice">回答已保留。重试会提交同一份回答；结束时会保留服务端已收到的回答。录音和转写不能覆盖待提交回答。</p>
               <div class="voice-panel">
                 <p class="voice-note">可选语音作答：点击后才会申请麦克风。录音由你主动识别时发送至火山引擎；转写先预览，确认后再写入草稿，不会自动提交回答。</p>
@@ -275,7 +291,7 @@ onUnmounted(() => voice.dispose())
                   </div>
                 </div>
               </div>
-              <textarea id="interview-answer" v-model="answer" rows="7" maxlength="5000" :disabled="locked || pending != null" placeholder="说说你的思路、采取的行动，以及最终结果…"></textarea>
+              <textarea id="interview-answer" v-model="answer" :class="{ 'algorithm-answer': currentMetadata.kind === 'ALGORITHM' }" rows="7" maxlength="5000" :disabled="locked || pending != null" :placeholder="currentMetadata.kind === 'ALGORITHM' ? '可自由选择语言，分行输入解题思路、代码或伪代码，并说明时间和空间复杂度…' : '说说你的思路、采取的行动，以及最终结果…'"></textarea>
               <p v-if="answer.length > 5000" class="notice error">回答超过 5000 字，请精简后提交；完整内容已保留。</p>
               <div class="answer-tools"><span>{{ answer.length }} / 5000 字</span><button class="button button-primary" :disabled="locked || !(pending ?? answer.trim()) || (pending ?? answer).length > 5000" @click="submitAnswer">{{ pending != null ? '重试提交' : '提交回答' }} →</button></div>
             </div>
@@ -304,6 +320,11 @@ onUnmounted(() => voice.dispose())
 </template>
 
 <style scoped>
+.interview-plan { align-self: center; font-size: 13px; line-height: 1.8; padding: 12px 0; }
+.interview-plan p { margin: 6px 0 0; color: #79766e; }
+.algorithm-source { font-size: 13px; line-height: 1.8; }
+.algorithm-source a { color: #566e40; margin-left: 8px; }
+.algorithm-answer { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 4; }
 .text-interview .interview-main { min-width: 0; }
 .field { display: flex; flex-direction: column; gap: 9px; font-size: 13px; margin: 18px 0; }
 .field span, .model-panel p, .resume-preview p, .consent { color: #79766e; font-size: 12px; line-height: 1.8; }

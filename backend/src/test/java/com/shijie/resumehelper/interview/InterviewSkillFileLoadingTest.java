@@ -112,7 +112,9 @@ class InterviewSkillFileLoadingTest {
         var service = new InterviewService(new InterviewAgent());
         var session = service.start("owner", "mat", "简历", "后端", 1, (system, prompt) ->
                 question("缓存失效怎么办？").replace("结合本题说明真实实现、依据与局限", "提问时锁定的通过标准"));
-        service.answer("owner", session.sessionId(), session.currentQuestion().questionId(), "我实现缓存", null);
+        assertThrows(InterviewException.class, () -> service.answer("owner", session.sessionId(),
+                session.currentQuestion().questionId(), "我实现缓存", null));
+        service.finish("owner", session.sessionId());
         write("references/project-scoring-and-feedback.md", "updated-project-feedback");
         var report = service.report("owner", session.sessionId(), (system, prompt) -> {
             assertTrue(system.contains("updated-project-feedback"));

@@ -17,11 +17,45 @@ class InterviewReportAssemblerTest {
     @Test void calculatesWeightedScoreAndUsesCanonicalQuestionOrder() {
         var report = new InterviewReportAssembler().assemble(3, turns, contracts,
                 Map.of("q3", assessed("q3", 70), "q1", assessed("q1", 80), "q2", assessed("q2", 90)));
-        assertEquals(new BigDecimal("80.0"), report.overallScore());
+        assertNull(report.overallScore());
         assertEquals("COMPLETE", report.reportStatus());
         assertEquals(List.of("q1", "q2", "q3"), report.turnFeedbacks().stream().map(InterviewAgent.TurnFeedback::questionId).toList());
-        assertEquals(new BigDecimal("25.00"), report.turnFeedbacks().get(0).weightPercent());
+        assertEquals(new BigDecimal("20.00"), report.turnFeedbacks().get(0).weightPercent());
         assertEquals("第一题", report.turnFeedbacks().get(0).question());
+    }
+    @Test void fullThirteenUsesUnroundedMainUnitsAndFixedAlgorithmShare() {
+        int[] units = {12, 5, 15, 18, 5, 4, 6, 12, 10, 18, 10, 15};
+        int[] scores = {20, 80, 0, 30, 5, 25, 40, 100, 70, 25, 60, 40};
+        var history = new ArrayList<InterviewService.Turn>();
+        var frozen = new LinkedHashMap<String, InterviewQuestion>();
+        var results = new LinkedHashMap<String, InterviewAssessment>();
+        var contexts = new LinkedHashMap<String, InterviewService.Context>();
+        var policy = new InterviewScoringPolicy();
+        for (int i = 0; i < 13; i++) {
+            String id = "q" + i;
+            InterviewQuestion q = contract("CORE", "BASIC");
+            if (i < 12) {
+                for (var importance : InterviewQuestion.Importance.values())
+                    for (var difficulty : InterviewQuestion.Difficulty.values())
+                        if (policy.weightUnits(importance, difficulty) == units[i]) q = contract(importance.name(), difficulty.name());
+            }
+            history.add(new InterviewService.Turn(id, "原题" + i, "我的回答"));
+            frozen.put(id, q);
+            results.put(id, assessed(id, i < 12 ? scores[i] : 55));
+            contexts.put(id, new InterviewService.Context(i < 12 ? InterviewService.Kind.MAIN : InterviewService.Kind.ALGORITHM,
+                    null, i + 1, i < 12 ? null : Hot100Catalog.problems().get(0).overview()));
+        }
+        var report = new InterviewReportAssembler().assemble(13, history, frozen, results, contexts);
+        assertEquals(new BigDecimal("42.4"), report.overallScore());
+        assertEquals(new BigDecimal("80.00"), report.turnFeedbacks().subList(0, 12).stream()
+                .map(InterviewAgent.TurnFeedback::weightPercent).reduce(BigDecimal.ZERO, BigDecimal::add));
+        assertEquals(new BigDecimal("20.00"), report.turnFeedbacks().get(12).weightPercent());
+        var prioritized = new LinkedHashMap<String, InterviewAssessment>();
+        results.forEach((id, assessment) -> prioritized.put(id, new InterviewAssessment(id,
+                assessed(id, id.equals("q12") ? 70 : 50).dimensionScores(), List.of("我的回答"), List.of(),
+                "亮点" + id, "改进" + id, "组织回答", "test-model")));
+        var ranked = new InterviewReportAssembler().assemble(13, history, frozen, prioritized, contexts);
+        assertEquals("改进q12", ranked.suggestions().get(0));
     }
     @Test void missingAssessmentKeepsKnownScoresButWithholdsOverall() {
         var report = new InterviewReportAssembler().assemble(5, turns, contracts,
@@ -36,12 +70,12 @@ class InterviewReportAssemblerTest {
     @Test void earlyFinishAndUnansweredQuestionAreClearlySeparated() {
         var partial = List.of(turns.get(0), new InterviewService.Turn("q2", "第二题", null));
         var report = new InterviewReportAssembler().assemble(5, partial, contracts, Map.of("q1", assessed("q1", 0)));
-        assertEquals(new BigDecimal("0.0"), report.overallScore());
+        assertNull(report.overallScore());
         assertTrue(report.overallSummary().contains("提前结束"));
         assertEquals("UNANSWERED", report.turnFeedbacks().get(1).status());
         assertNull(report.turnFeedbacks().get(1).score());
-        assertNull(report.turnFeedbacks().get(1).weightPercent());
-        assertEquals(new BigDecimal("100.00"), report.turnFeedbacks().get(0).weightPercent());
+        assertEquals(new BigDecimal("48.00"), report.turnFeedbacks().get(1).weightPercent());
+        assertEquals(new BigDecimal("32.00"), report.turnFeedbacks().get(0).weightPercent());
     }
     @Test void noAnswerAndUnavailableScoringNeverProduceDefaultNumbers() {
         var empty = new InterviewReportAssembler().assemble(3,
