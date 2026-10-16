@@ -1,17 +1,18 @@
 import axios from 'axios'
-import { getAiSettings, setAiSettings, getUserId } from './requestContext.js'
+import { getAiSettings, setAiSettings, getLocalApiBaseUrl, getUserId } from './requestContext.js'
 
 /**
  * 岗位模块的 HTTP 客户端。
  *
  * 后端地址怎么定：
- *  - **本地开发**：不配 `VITE_API_BASE_URL`，baseURL 留空，请求走相对路径 `/api/xxx`，
- *    由 vite 的 proxy 转发到本地后端（见 vite.config.js）。这样开发时没有跨域问题。
- *  - **部署到 Vercel 等公网**：必须配 `VITE_API_BASE_URL` 指向公网后端。
- *    因为 Vercel 上的页面访问不到你电脑的 localhost，而且 HTTPS 页面不能请求 HTTP 接口
- *    （浏览器会按「混合内容」拦掉）。
+ *  - **本地开发**：不配 `VITE_API_BASE_URL` 时，请求走相对路径 `/api/xxx`，由 Vite proxy 转发。
+ *  - **部署到 Vercel**：用户可在「本地服务设置」里配置自己电脑上的 Java 服务；浏览器中的
+ *    `localhost` 指向当前访问者的电脑。需要多人共用时，再通过 `VITE_API_BASE_URL` 配公网后端。
  */
-const baseURL = import.meta.env.VITE_API_BASE_URL || ''
+const configuredBaseURL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '')
+function getEffectiveBaseURL() {
+  return getLocalApiBaseUrl() || configuredBaseURL
+}
 
 /** 统一的接口错误：带上后端返回的 message 和 HTTP 状态码，方便页面直接展示。 */
 export class ApiError extends Error {
@@ -24,7 +25,7 @@ export class ApiError extends Error {
 }
 
 const http = axios.create({
-  baseURL,
+  baseURL: getEffectiveBaseURL(),
   // 智能体多轮检索 + 大模型生成解释可能要几十秒，超时给宽一点
   timeout: 90000,
   headers: { 'Content-Type': 'application/json' }
@@ -46,6 +47,7 @@ export function setAiKey(key) {
 export function hasAiKey() { return getAiKey().length > 0 }
 
 http.interceptors.request.use((config) => {
+  config.baseURL = getEffectiveBaseURL()
   config.headers['X-User-Id'] = getUserId()
   const settings = getAiSettings()
   for (const [field, header] of Object.entries({ apiKey: 'X-AI-Api-Key', model: 'X-AI-Model', baseUrl: 'X-AI-Base-Url' })) {
@@ -98,11 +100,7 @@ function toApiError(error) {
     return new ApiError('请求超时。智能体多轮检索接大模型时会比较慢，请重试', 0, error)
   }
 
-  return new ApiError(
-    '连不上后端服务。请确认后端已启动（默认 http://localhost:8080），或检查 vite.config.js 里的代理目标',
-    0,
-    error
-  )
+  return new ApiError('连接不到后端服务。请确认本地 Java 服务已启动，或前往“本地服务设置”检查地址和连接。', 0, error)
 }
 
 export default http

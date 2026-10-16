@@ -35,7 +35,7 @@ public class SpaForwardController {
      * <p>注意：这里必须写成字面量数组，不能引用 {@code static final String[]} 常量——
      * 注解的数组值要求编译期常量，用变量会直接编译失败。
      */
-    @GetMapping({"/", "/login", "/dashboard", "/profile", "/materials", "/resume", "/jobs", "/interview", "/report"})
+    @GetMapping({"/", "/login", "/dashboard", "/profile", "/materials", "/resume", "/jobs", "/interview", "/report", "/settings"})
     public String forwardToIndex() {
         // forward 会再走一次 DispatcherServlet，由静态资源处理器把 index.html 返回给浏览器；
         // 之后的页面跳转交给前端路由，不再经过后端。

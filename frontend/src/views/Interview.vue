@@ -7,7 +7,7 @@ import { useInterviewVoice } from '../interview/useInterviewVoice.js'
 import { algorithmUrl } from '../interview/algorithmSource.js'
 
 const router = useRouter()
-const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || '' })
+const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '') })
 const storageKey = 'career-studio-interview-id'
 const material = ref(null)
 const session = ref(null)

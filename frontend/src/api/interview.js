@@ -1,7 +1,7 @@
-import { getAiSettings, getUserId as sharedUserId } from './requestContext.js'
+import { getAiSettings, getLocalApiBaseUrl, getUserId as sharedUserId } from './requestContext.js'
 
 export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch, getUserId = sharedUserId } = {}) {
-  const root = `${baseUrl.replace(/\/$/, '')}/api`
+  const root = () => `${(getLocalApiBaseUrl() || baseUrl).replace(/\/$/, '')}/api`
   async function request(path, { method = 'GET', body, ai, textModel = false, signal } = {}) {
     const headers = { 'X-User-Id': getUserId() }
     ai = textModel ? (ai ?? getAiSettings()) : {}
@@ -13,7 +13,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
       headers['Content-Type'] = 'application/json'
       body = JSON.stringify(body)
     }
-    const reply = await fetchImpl(`${root}${path}`, { method, headers, body, credentials: 'include', signal })
+    const reply = await fetchImpl(`${root()}${path}`, { method, headers, body, credentials: 'include', signal })
     let envelope
     try { envelope = await reply.json() } catch {
       throw Object.assign(new Error(`服务返回了无效响应（HTTP ${reply.status}）`), { status: reply.status })
@@ -72,7 +72,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
     },
     // 三个语音接口里只有这个是成功返回二进制、失败才返回 JSON，所以不复用 request。
     async questionSpeech(id, questionId, signal) {
-      const reply = await fetchImpl(`${root}${sessionPath(id)}/questions/${encodeURIComponent(questionId)}/speech`, {
+      const reply = await fetchImpl(`${root()}${sessionPath(id)}/questions/${encodeURIComponent(questionId)}/speech`, {
         method: 'POST',
         headers: { 'X-User-Id': getUserId() },
         credentials: 'include',

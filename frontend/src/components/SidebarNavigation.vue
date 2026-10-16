@@ -42,6 +42,7 @@ const toolItems = [
   { path: '/resume', label: '简历工作台', icon: 'i-file' },
   { path: '/jobs', label: '岗位匹配', icon: 'i-briefcase', count: '8' },
   { path: '/interview', label: '模拟面试', icon: 'i-mic' },
-  { path: '/report', label: '面试报告', icon: 'i-chart' }
+  { path: '/report', label: '面试报告', icon: 'i-chart' },
+  { path: '/settings', label: '本地服务设置', icon: 'i-settings' }
 ]
 </script>

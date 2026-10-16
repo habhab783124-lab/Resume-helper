@@ -152,13 +152,9 @@ $env:VITE_PROXY_TARGET = 'http://localhost:8081'   # 后端跑在 8081
 npm run dev
 ```
 
-#### 部署到 Vercel 后代理不生效（重要）
+#### 从 Vercel 页面连接本机 Java 服务
 
-Vercel 上的代理不会转发到你本机，而且它是 **HTTPS**，浏览器不允许 HTTPS 页面请求
-`http://` 接口（混合内容拦截）。所以公网演示必须：
-
-1. **前端**配 `VITE_API_BASE_URL=https://你的后端域名`（见 `frontend/.env.example`）；
-2. **后端**把前端域名加进 CORS 白名单——改配置即可，不用改代码：
+Vercel 负责提供前端页面；浏览器可以尝试请求当前设备上的 `http://localhost:8080`。使用网页的「本地服务设置」之前，先在本机运行 Java 服务，并将 Vercel 页面来源加入 CORS 白名单。当前正式域名已配置；如果域名变更，请按需调整：
 
 ```yaml
 app:
@@ -167,12 +163,13 @@ app:
       allowed-origin-patterns:
         - http://localhost:*
         - https://resume-helper-two.vercel.app
-        # 或者用通配符一次放行所有 Vercel 预览域名：
-        # - https://*.vercel.app
 ```
 
-公网后端也必须是 HTTPS。如果暂时没有公网后端，就本地演示：
-前端 `npm run dev` + 后端本机跑，走代理，最省事也最不容易翻车。
+本机可在 `backend` 目录执行 `mvn spring-boot:run`。保持终端窗口打开，再回 Vercel 网页检测连接。每个访问者的 `localhost` 都指向其自己的设备，因此本地运行方式只对启动服务的那台电脑可用。
+
+若要让多人共用公网后端，可在 Vercel 配置 `VITE_API_BASE_URL=https://你的后端域名`，并将网页正式域名加入 CORS 白名单。
+
+多人共用的公网后端必须是 HTTPS。如果只在自己的电脑演示，也可直接使用 Vercel 页面连接本机服务；浏览器的本机网络和 CORS 策略仍需允许该连接。若本地开发前端，则继续使用 `npm run dev` 与 Vite 代理。
 
 ### 3.2 接口清单
 

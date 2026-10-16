@@ -6,7 +6,7 @@ import { algorithmUrl } from '../interview/algorithmSource.js'
 
 const route = useRoute()
 const router = useRouter()
-const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || '' })
+const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '') })
 
 const loading = ref(true)
 const retryBusy = ref(false)

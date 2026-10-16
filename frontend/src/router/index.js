@@ -8,6 +8,7 @@ import Materials from '../views/Materials.vue'
 import Profile from '../views/Profile.vue'
 import Report from '../views/Report.vue'
 import Resume from '../views/Resume.vue'
+import Settings from '../views/Settings.vue'
 import { getDemoSession } from '../utils/demoAuth'
 
 const routes = [
@@ -24,7 +25,8 @@ const routes = [
       { path: 'resume', name: 'Resume', component: Resume, meta: { title: '简历工作台' } },
       { path: 'jobs', name: 'Jobs', component: Jobs, meta: { title: '岗位匹配' } },
       { path: 'interview', name: 'Interview', component: Interview, meta: { title: '模拟面试' } },
-      { path: 'report', name: 'Report', component: Report, meta: { title: '面试报告' } }
+      { path: 'report', name: 'Report', component: Report, meta: { title: '面试报告' } },
+      { path: 'settings', name: 'Settings', component: Settings, meta: { title: '本地服务设置' } }
     ]
   },
   { path: '/:pathMatch(.*)*', redirect: '/login' }

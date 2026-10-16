@@ -110,13 +110,8 @@ src/
 
 成功部署后，Vercel 会分配一个以项目名为基础的 `*.vercel.app` 网址。连接 GitHub 后，后续推送到生产分支会自动重新部署。
 
-> ⚠️ **部署版本连不上本地后端，这是必然的**，不是 bug：
-> Vercel 的服务器和访问者的浏览器都到不了你电脑的 `localhost`，
-> 而且 Vercel 是 HTTPS，浏览器不允许它请求 `http://` 接口（混合内容拦截）。
+> 部署版默认尝试连接访问者当前设备的 `http://localhost:8080`。浏览器中的 `localhost` 指向打开网页的那台设备；访问者需要在该设备运行 Java 后端。可在网页的「本地服务设置」中修改地址并检测连接。
 >
-> 要在 Vercel 上用真实数据，需要：
-> 1. 后端也部署到公网（且必须是 HTTPS）；
-> 2. 前端配环境变量 `VITE_API_BASE_URL=https://你的后端域名`；
-> 3. 后端把前端域名加进 CORS 白名单（见 `backend/README.md` 3.1 节）。
+> 本地服务地址保存在当前浏览器中，不会自动启动 Java 进程。用户要先在项目的 `backend` 目录运行 `mvn spring-boot:run`，并保持服务运行；网页的连接设置会负责检测服务状态。Java 端需要允许正式 Vercel 域名进行 CORS 跨域访问。
 >
-> 课程演示用本地运行（`npm run dev`）最省事，也最不容易在演示当天翻车。
+> 需要多人共用同一个后端时，可设置 `VITE_API_BASE_URL=https://你的后端域名`，并将这个域名加入 `backend/src/main/resources/application.yml` 的 CORS 白名单。
