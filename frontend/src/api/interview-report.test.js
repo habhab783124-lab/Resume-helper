@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { ref, computed } from 'vue'
 import { algorithmUrl } from '../interview/algorithmSource.js'
+import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specialtyPresentation.js'
 
 const source = readFileSync(new URL('../views/Report.vue', import.meta.url), 'utf8')
 const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
@@ -10,8 +11,8 @@ const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   + '\nreturn { report, session, loading, retryBusy, error, hasOverallScore, needsScoring, scoreLevel, scoreColor, statusLabel, scopeLabel, reviewedTurns, loadReport, retryScoring, printReport, questionLabel, algorithmUrl };'
 function mount(api, sessionId = 's1', browser = {}) {
   const mounted = [], unmounted = []
-  const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'window', 'document', 'algorithmUrl', body)(
-    ref, computed, fn => mounted.push(fn), fn => unmounted.push(fn), () => ({ query: { sessionId } }), () => ({ push() {} }), () => api, browser.window, browser.document, algorithmUrl)
+  const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'window', 'document', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
+    ref, computed, fn => mounted.push(fn), fn => unmounted.push(fn), () => ({ query: { sessionId } }), () => ({ push() {} }), () => api, browser.window, browser.document, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance)
   return { ...view, mounted, unmounted }
 }
 const feedback = (questionId, status = 'SCORED', score = 80) => ({ questionId, index: 1, question: `问题 ${questionId}`, answer: `回答 ${questionId}`, status, score,
@@ -88,7 +89,7 @@ test('template exposes all evidence dimensions, status guards and text-safe prin
   for (const field of ['dimensionScores', 'evidence', 'missingPoints', 'suggestedOutline', 'weightPercent', 'weightedContribution', 'weightReason']) assert.ok(source.includes(field))
   for (const dimension of ['CORRECTNESS', 'COVERAGE', 'REASONING', 'EVIDENCE', 'CLARITY']) assert.ok(source.includes(dimension))
   assert.match(source, /:key="fb.questionId"/); assert.doesNotMatch(source, /v-html|overallScore\s*\?\?\s*0|目前回答比较完整/)
-  assert.match(source, /出题前锁定相对权重/); assert.match(source, /主问题合计 80%/); assert.match(source, /算法题固定 20%/)
+  assert.match(source, /出题前锁定相对权重/); assert.match(source, /主问题合计 80%/); assert.match(source, /专项题固定 20%/)
   assert.match(source, /fb.followUps/); assert.match(source, /追问.*并入/)
   assert.match(source, /@media print/); assert.match(source, /beforeprint/); assert.match(source, /afterprint/)
 })
@@ -106,6 +107,17 @@ test('algorithm row retains fixed weight, source identity and nested follow-up a
   assert.equal(view.algorithmUrl(value.turnFeedbacks[1].algorithm), 'https://leetcode.cn/problems/two-sum/')
   assert.equal(view.algorithmUrl({ url: 'javascript:alert(1)' }), '')
   assert.equal(view.algorithmUrl({ url: 'https://leetcode.cn.evil.test/problems/two-sum/' }), '')
+})
+
+test('a professional case keeps the specialty20 percent and never receives an algorithm label', async () => {
+  const value = result()
+  value.turnFeedbacks = [{ ...feedback('case'), kind: 'CASE_STUDY', mainQuestionIndex: 13, weightPercent: 20,
+    competency: '运营增长分析', algorithm: null, question: '给定转化数据，提出改进和验证方案。', followUps: [] }]
+  const view = mount(api(value)); await view.loadReport()
+  assert.match(view.questionLabel(view.reviewedTurns.value[0]), /专业案例题.*20%/)
+  assert.doesNotMatch(view.questionLabel(view.reviewedTurns.value[0]), /算法|Hot 100|主问题/)
+  assert.equal(view.reviewedTurns.value[0].weightPercent, 20)
+  assert.equal(view.hasOverallScore.value, true)
 })
 
 

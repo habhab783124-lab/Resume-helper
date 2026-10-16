@@ -36,7 +36,7 @@ public final class InterviewReportAssembler {
             Integer score = assessment == null ? null : policy.questionScore(assessment.dimensionScores());
             if (score != null) { scored.add(score); models.add(assessment.aiModel()); }
             var context = contexts.get(turn.questionId());
-            BigDecimal contribution = score == null ? null : context.kind() == InterviewService.Kind.ALGORITHM
+            BigDecimal contribution = score == null ? null : context.kind().isSpecialty()
                     ? BigDecimal.valueOf(score).multiply(new BigDecimal("0.2"))
                     : BigDecimal.valueOf((long) score * weight(contract) * 4)
                         .divide(BigDecimal.valueOf(mainUnits * 5), 10, RoundingMode.HALF_UP);
@@ -56,15 +56,15 @@ public final class InterviewReportAssembler {
                 : scored.size() == answered.size() ? "COMPLETE" : "PARTIAL";
         boolean fullyCovered = plannedCount == InterviewService.QUESTION_COUNT && answered.size() == InterviewService.QUESTION_COUNT
                 && turns.stream().filter(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.MAIN).count() == InterviewService.MAIN_COUNT
-                && turns.stream().filter(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.ALGORITHM).count() == 1;
+                && turns.stream().filter(t -> contexts.get(t.questionId()).kind().isSpecialty()).count() == 1;
         BigDecimal overall = status.equals("COMPLETE") && fullyCovered
                 ? fullScore(feedbacks) : null;
         String scope = (answered.size() < plannedCount ? "本次提前结束，" : "本次")
                 + "已答 " + answered.size() + "/" + plannedCount + " 题，已评分 " + scored.size() + " 题。";
         long answeredMain = answered.stream().filter(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.MAIN).count();
-        boolean answeredAlgorithm = answered.stream().anyMatch(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.ALGORITHM);
+        boolean answeredSpecialty = answered.stream().anyMatch(t -> contexts.get(t.questionId()).kind().isSpecialty());
         if (!fullyCovered) scope += "未完成主问题 " + Math.max(0, InterviewService.MAIN_COUNT - answeredMain)
-                + " 道；" + (answeredAlgorithm ? "算法题已回答。" : "算法题未作答（固定20%未计入，不转移给主问题）。");
+                + " 道；" + (answeredSpecialty ? "专项题已回答。" : "专项题未作答（固定20%未计入，不转移给主问题）。");
         String summary = scope + (overall != null ? "加权训练参考评分 " + overall + "，仅反映本轮已回答内容。"
                 : answered.isEmpty() ? "还没有回答，暂无可评分内容。" : status.equals("COMPLETE") ? "已答题目的逐题反馈已完成；范围未齐全，暂无综合评分。" : "评分暂未齐全，可重试待评分题目；暂无综合评分。");
         List<String> strengths = feedbacks.stream().filter(f -> f.score() != null).map(InterviewAgent.TurnFeedback::highlight)
@@ -85,13 +85,13 @@ public final class InterviewReportAssembler {
 
     private BigDecimal fullScore(List<InterviewAgent.TurnFeedback> feedbacks) {
         long units = 0, weighted = 0;
-        int algorithmScore = 0;
+        int specialtyScore = 0;
         for (var row : feedbacks) {
-            if (row.kind() == InterviewService.Kind.ALGORITHM) algorithmScore = row.score();
+            if (row.kind().isSpecialty()) specialtyScore = row.score();
             else { units += row.weightUnits(); weighted += (long) row.score() * row.weightUnits(); }
         }
         // One final rounding step; display percentages must never feed score arithmetic.
-        return BigDecimal.valueOf(weighted * 4 + (long) algorithmScore * units)
+        return BigDecimal.valueOf(weighted * 4 + (long) specialtyScore * units)
                 .divide(BigDecimal.valueOf(units * 5), 1, RoundingMode.HALF_UP);
     }
 }

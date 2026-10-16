@@ -9,7 +9,9 @@ import java.util.function.Supplier;
 @Service
 public class InterviewService {
     public static final int MAIN_COUNT = 12, QUESTION_COUNT = 13;
-    public enum Kind { MAIN, FOLLOW_UP, ALGORITHM }
+    public enum Kind { MAIN, FOLLOW_UP, ALGORITHM, CASE_STUDY;
+        public boolean isSpecialty() { return this == ALGORITHM || this == CASE_STUDY; }
+    }
     public record Context(Kind kind, String parentQuestionId, int mainQuestionIndex,
                           Hot100Catalog.Algorithm algorithm) {}
     private final InterviewAgent agent;
@@ -18,11 +20,12 @@ public class InterviewService {
     public record Turn(String questionId, String question, String answer) {}
     public record Session(String sessionId, String materialId, String targetRole, int questionCount,
                           String status, List<Turn> turns, Turn currentQuestion, String pendingAnswer,
-                          Map<String, InterviewQuestion.Overview> questionMetadata) {}
+                          Map<String, InterviewQuestion.Overview> questionMetadata, InterviewSpecialty specialty) {}
     private static final class State {
         final String id = UUID.randomUUID().toString(), owner, materialId, resume, role;
         final int count = QUESTION_COUNT;
-        final Hot100Catalog.Problem selectedAlgorithm = Hot100Catalog.select();
+        Hot100Catalog.Problem selectedAlgorithm;
+        InterviewSpecialty specialty;
         final Map<String, Context> contexts = new LinkedHashMap<>();
         final Instant expires = Instant.now().plusSeconds(86400);
         final List<Turn> turns = new ArrayList<>();
@@ -45,7 +48,7 @@ public class InterviewService {
                         context.kind() == Kind.FOLLOW_UP ? 0 : policy.weightUnits(q.importance(), q.difficulty()), q.weightReason(),
                         context.kind(), context.parentQuestionId(), context.mainQuestionIndex(), context.algorithm(), shares.get(id)));
             });
-            return new Session(id, materialId, role, count, status, List.copyOf(turns), current, pending, Map.copyOf(metadata));
+            return new Session(id, materialId, role, count, status, List.copyOf(turns), current, pending, Map.copyOf(metadata), specialty);
         }
     }
     /**
@@ -76,7 +79,10 @@ public class InterviewService {
         }
         synchronized (state) {
             try {
-                InterviewQuestion question = agent.prepareQuestion(state.resume, role, List.of(), QUESTION_COUNT, ai);
+                var opening = agent.prepareOpening(state.resume, role, ai);
+                state.specialty = opening.specialty();
+                if (state.specialty.kind() == InterviewSpecialty.Kind.ALGORITHM) state.selectedAlgorithm = Hot100Catalog.select();
+                InterviewQuestion question = opening.question();
                 String questionId = UUID.randomUUID().toString();
                 state.questionContracts.put(questionId, question);
                 state.contexts.put(questionId, new Context(Kind.MAIN, null, 1, null));
@@ -111,7 +117,7 @@ public class InterviewService {
             state.pending = value;
             Turn answered = new Turn(requested.questionId(), requested.question(), value);
             var context = state.contexts.get(questionId);
-            if (context.kind() == Kind.ALGORITHM) {
+            if (context.kind().isSpecialty()) {
                 state.turns.set(last, answered); state.pending = null; state.status = "FINISHED";
             } else {
                 List<Turn> history = new ArrayList<>(state.turns); history.set(last, answered);
@@ -131,8 +137,13 @@ public class InterviewService {
                             parent.difficulty(), parent.weightReason(), parent.criteria(), parent.rubricVersion());
                     nextContext = new Context(Kind.FOLLOW_UP, parentId, context.mainQuestionIndex(), null);
                 } else if (nextIndex == QUESTION_COUNT) {
-                    question = agent.prepareAlgorithm(state.selectedAlgorithm, ai);
-                    nextContext = new Context(Kind.ALGORITHM, null, QUESTION_COUNT, state.selectedAlgorithm.overview());
+                    if (state.specialty.kind() == InterviewSpecialty.Kind.ALGORITHM) {
+                        question = agent.prepareAlgorithm(state.selectedAlgorithm, ai);
+                        nextContext = new Context(Kind.ALGORITHM, null, QUESTION_COUNT, state.selectedAlgorithm.overview());
+                    } else {
+                        question = agent.prepareCase(state.specialty, state.role, ai);
+                        nextContext = new Context(Kind.CASE_STUDY, null, QUESTION_COUNT, null);
+                    }
                 } else {
                     question = proposal.question();
                     nextContext = new Context(Kind.MAIN, null, nextIndex, null);
@@ -209,7 +220,7 @@ public class InterviewService {
         var percentages = units.isEmpty() ? List.<java.math.BigDecimal>of() : policy.percentages(units, 8000);
         Map<String, java.math.BigDecimal> result = new LinkedHashMap<>();
         for (int i = 0; i < mains.size(); i++) result.put(mains.get(i).questionId(), percentages.get(i));
-        contexts.forEach((id, context) -> { if (context.kind() == Kind.ALGORITHM) result.put(id, new java.math.BigDecimal("20.00")); });
+        contexts.forEach((id, context) -> { if (context.kind().isSpecialty()) result.put(id, new java.math.BigDecimal("20.00")); });
         return result;
     }
 

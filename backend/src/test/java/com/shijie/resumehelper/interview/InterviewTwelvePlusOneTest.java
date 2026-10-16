@@ -171,7 +171,7 @@ class InterviewTwelvePlusOneTest {
         var r = service.report("a", s.sessionId(), (sys, p) -> assessmentsFromPrompt(p, 100));
         assertNull(r.overallScore());
         assertEquals(13, r.plannedCount());
-        assertTrue(r.overallSummary().contains("算法"));
+        assertTrue(r.overallSummary().contains("专项题"));
         assertTrue(r.overallSummary().contains("主问题"));
         assertEquals(new BigDecimal("80.00"), r.turnFeedbacks().stream().map(InterviewAgent.TurnFeedback::weightPercent).reduce(BigDecimal.ZERO,
                  BigDecimal::add));
@@ -238,7 +238,7 @@ class InterviewTwelvePlusOneTest {
 
     @Test
     void nextQuestionRejectsUnknownAndPrematureAlgorithmKinds() {
-        for (String kind : List.of("INVALID", "ALGORITHM")) {
+        for (String kind : List.of("INVALID", "ALGORITHM", "CASE_STUDY", "SPECIALTY")) {
             var session = start();
             String invalid = question("下一题").replace("\"question\":", "\"kind\":\""+kind+"\",\"question\":");
             assertThrows(InterviewException.class, () -> answer(session, "保留原回答", (sys, p) -> invalid));

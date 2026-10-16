@@ -22,24 +22,24 @@ INTERVIEW_SKILL_DIR=/path/to/skills/interview java -jar backend/target/resume-he
 
 - **Grill 出题**：读取主文档、面试契约、问题与评分契约、场景题参考，以及[项目提问前契约](references/project-question-contract.md)。同一次调用返回一道问题、能力分类、难度及五维标准；后端校验并在展示问题前冻结相对权重和标准。界面及 TTS 只显示/朗读问题正文，活跃会话不暴露完整评分标准。
 - **Review 报告**：读取主文档、问题与评分契约、复盘与弱项复练参考，以及[项目评分与反馈](references/project-scoring-and-feedback.md)。输入冻结契约及原回答，只评估本次请求中的待评分题，返回逐题档位、原文证据和具体反馈。出题参考不在评分阶段重新定义标准，评分参考不在出题阶段加载。
-- 固定12道主问题+1道算法题（13道根题），每道主问题最多两次追问，追问不占配额。简历、岗位和回答作为不可信候选人数据处理，连通性检查保持短提示词。
+- 固定12道主问题+1道岗位专项题（13道根题），每道主问题最多两次追问，追问不占配额。简历、岗位和回答作为不可信候选人数据处理，连通性检查保持短提示词。
 
 上游不提供未经校准的精确总分；原文件保留这一约定。本地扩展仅为本项目启用“训练参考评分”：五维为切题与正确性、关键要点覆盖、推理与取舍、证据与具体性、表达结构，各取服务端允许的 0/5/10/15/20 档位。模型不计算题分、总分或数字权重。分类系数、合法档位、精度和算术以 `InterviewScoringPolicy` 为唯一数学策略来源，并随请求注入；参考文件描述判断方式，不维护第二套数字权重配置。
 
-出题前锁定分类与标准；已发出的主问题（含未答题）按原始权重点数分享80.00%，算法题固定20.00%。显示百分比采用稳定的两位余数分配，综合分按未取整的原始系数计算。算法从随服务端发布的官方Hot100目录随机选取，在会话创建时固定，生成失败不重选；题目显示官方标题、链接以及原创题意、示例和约束。无目标岗位时根据简历方向推断并说明依据。回答措辞、表现和后续规则更新不能改变已有契约。当前冻结标准优先于评分文件后来的默认指导。
+出题前锁定分类与标准；已发出的主问题（含未答题）按原始权重点数分享80.00%，专项题固定20.00%。显示百分比采用稳定的两位余数分配，综合分按未取整的原始系数计算。开场同一次模型调用返回首题及专项计划 specialty:{kind,focus,reason}，服务端校验后冻结，并在Session中展示。优先按目标岗位匹配：软件开发等编码岗位选ALGORITHM，从官方Hot100目录固定选一题；其他岗位选CASE_STUDY，按冻结方向生成含事实、任务与边界的专业案例。未填岗位时参考简历职责，方向不明确时选案例；不按专业或Python等关键词一刀切。算法保留官方标题和链接，案例没有伪造算法来源，也不要求代码。无目标岗位时根据简历方向推断并说明依据。回答措辞、表现和后续规则更新不能改变已有契约。当前冻结标准优先于评分文件后来的默认指导。
 
-成功评估按 `questionId` 缓存，普通刷新复用；报告页“重试评分”只评估未成功题。部分题失败时保留成功题，全部13道根题作答且评估成功前综合分为 null。提前结束会说明未完成主问题和算法范围，算法20%不转移。无回答、模型不可用或格式错误均不回退 75 分，不编造优缺点；原问答始终可供回顾。引用必须来自本组主回答或某一条自己的追问回答，不能跨回答边界拼接或引用别组，没有有效支持时证据可为空，负面但诚实的反馈有效。
+成功评估按 `questionId` 缓存，普通刷新复用；报告页“重试评分”只评估未成功题。部分题失败时保留成功题，全部13道根题作答且评估成功前综合分为 null。提前结束会说明未完成主问题和专项范围，专项20%不转移。无回答、模型不可用或格式错误均不回退 75 分，不编造优缺点；原问答始终可供回顾。引用必须来自本组主回答或某一条自己的追问回答，不能跨回答边界拼接或引用别组，没有有效支持时证据可为空，负面但诚实的反馈有效。
 
 评分没有外部校准，不代表招聘结论、录用概率或整份简历掌握程度。当前没有独立的 Predict、跨会话复练队列或持久化 Claim 账本；报告评分重试不同于上游 Retry 复练模式。复练以报告建议和真实事实框架呈现，skill 中提到的其他 skills 和文件工具不会执行。
 
-结构化出题使用独立的 2,400-token 输出预算，批量评分每次最多五组根题，使用 8,192-token 预算，并要求反馈简洁。通过请求级客户端副本设置，不修改材料、岗位等其他业务的默认 800-token 配置。预算是输出上限，不代表实际用量；仍需所选模型支持相应输出长度。模型返回不完整 JSON 时保留待评分状态。
+开场首题与专项计划使用独立的2,800-token输出预算，后续结构化出题使用2,400-token输出预算，批量评分每次最多五组根题，使用 8,192-token 预算，并要求反馈简洁。通过请求级客户端副本设置，不修改材料、岗位等其他业务的默认 800-token 配置。预算是输出上限，不代表实际用量；仍需所选模型支持相应输出长度。模型返回不完整 JSON 时保留待评分状态。
 
 ## 验证与更新
 
 使用 JDK 17，在 `backend/` 执行：
 
 ```sh
-mvn -Dtest=InterviewTwelvePlusOneTest,InterviewSkillFileLoadingTest,InterviewSkillIntegrationTest,InterviewModelTransportTest,InterviewOutputBudgetTest,InterviewQuestionContractTest,InterviewAssessmentTest,InterviewScoringPolicyTest,InterviewReportAssemblerTest,InterviewFlowTest,InterviewReportApiTest test
+mvn -Dtest=InterviewSpecialtyTest,InterviewTwelvePlusOneTest,InterviewSkillFileLoadingTest,InterviewSkillIntegrationTest,InterviewModelTransportTest,InterviewOutputBudgetTest,InterviewQuestionContractTest,InterviewAssessmentTest,InterviewScoringPolicyTest,InterviewReportAssemblerTest,InterviewFlowTest,InterviewReportApiTest test
 mvn clean package
 ```
 

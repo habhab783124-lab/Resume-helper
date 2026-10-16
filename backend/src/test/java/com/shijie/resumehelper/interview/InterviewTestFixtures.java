@@ -12,6 +12,7 @@ final class InterviewTestFixtures {
     static String question(String text, String importance, String difficulty) {
         return json(Map.of("question", text, "competency", "缓存可靠性", "importance", importance,
                 "difficulty", difficulty, "weightReason", "岗位核心能力，需要验证实现与取舍",
+                "specialty", Map.of("kind", "ALGORITHM", "focus", "软件开发", "reason", "测试中的目标岗位需要编码考察"),
                 "criteria", List.of("CORRECTNESS", "COVERAGE", "REASONING", "EVIDENCE", "CLARITY")
                         .stream().map(d -> Map.of("dimension", d, "expectation", "结合本题说明真实实现、依据与局限")).toList()));
     }

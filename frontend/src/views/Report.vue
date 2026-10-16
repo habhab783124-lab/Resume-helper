@@ -3,6 +3,7 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
 import { algorithmUrl } from '../interview/algorithmSource.js'
+import { isSpecialty, specialtyLabel } from '../interview/specialtyPresentation.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -44,7 +45,7 @@ const importanceLabel = value => ({ CORE: '核心', RELATED: '相关', SUPPLEMEN
 const itemLabel = value => ({ SCORED: '已评分', PENDING: '待评分', UNANSWERED: '未作答' })[value] || '待评分'
 const isScored = feedback => feedback.status === 'SCORED' && Number.isFinite(feedback.score)
 const formatNumber = value => Number.isFinite(value) ? value.toFixed(2).replace(/\.?0+$/, '') : '—'
-const questionLabel = feedback => feedback.kind === 'ALGORITHM' ? '算法题 · Hot 100 · 固定权重 20%' : `主问题 ${String(feedback.mainQuestionIndex || feedback.index).padStart(2, '0')}`
+const questionLabel = feedback => isSpecialty(feedback.kind) ? `${specialtyLabel(feedback.kind)} · 固定权重 20%` : `主问题 ${String(feedback.mainQuestionIndex || feedback.index).padStart(2, '0')}`
 
 const scoreLevel = computed(() => {
   if (!hasOverallScore.value) return ''
@@ -180,7 +181,7 @@ onUnmounted(() => {
       <span class="report-complete"><i></i>{{ statusLabel }}</span>
     </div>
 
-    <p class="weight-explanation">12 道主问题合计 80%，出题前锁定相对权重；1 道 Hot 100 算法题固定 20%。追问不计题数，并入对应主问题评分。提前结束时主问题权重仅在已出主问题间分配，算法题的 20% 始终保留；完成并评完全部 13 题后才显示综合分。分数仅供训练参考。</p>
+    <p class="weight-explanation">12 道主问题合计 80%，出题前锁定相对权重；1 道岗位专项题固定 20%，按目标岗位或简历职业方向选择算法题或专业案例题。追问不计题数，并入对应主问题评分。提前结束时主问题权重仅在已出主问题间分配，专项题的 20% 始终保留；完成并评完全部 13 题后才显示综合分。分数仅供训练参考。</p>
     <div v-if="needsScoring" class="scoring-retry" role="status">
       <p>{{ statusLabel }}：已保存的问答和成功评分会保留，重试仅处理待评分题目。</p>
       <button data-testid="retry-scoring" class="button button-outline" :disabled="retryBusy || loading" @click="retryScoring">{{ retryBusy ? '正在重试评分…' : '重试评分' }}</button>
@@ -285,7 +286,7 @@ onUnmounted(() => {
             <div class="review-feedback-block"><div class="review-feedback-label">原题</div><p>{{ fb.question }}</p></div>
             <div class="review-feedback-block"><div class="review-feedback-label">原回答</div><p class="original-answer">{{ fb.answer ?? '尚未回答' }}</p></div>
             <div v-if="fb.followUps?.length" class="follow-up-review"><h4>追问与补充回答 · 并入本题评分</h4><div v-for="(followUp, index) in fb.followUps" :key="followUp.questionId" class="review-feedback-block"><div class="review-feedback-label">追问 {{ index + 1 }}</div><p>{{ followUp.question }}</p><div class="review-feedback-label">补充回答</div><p class="original-answer">{{ followUp.answer ?? '尚未回答' }}</p></div></div>
-            <div class="review-feedback-block"><div class="review-feedback-label">权重依据</div><p>{{ fb.weightReason || '暂无权重说明' }}<template v-if="fb.kind !== 'ALGORITHM'"> · 相对权重点数 {{ fb.weightUnits }}</template></p></div>
+            <div class="review-feedback-block"><div class="review-feedback-label">权重依据</div><p>{{ fb.weightReason || '暂无权重说明' }}<template v-if="!isSpecialty(fb.kind)"> · 相对权重点数 {{ fb.weightUnits }}</template></p></div>
             <template v-if="isScored(fb)">
               <div class="review-feedback-block dimension-block">
                 <div class="review-feedback-label">五维得分</div>

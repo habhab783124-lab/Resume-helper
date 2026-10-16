@@ -9,7 +9,7 @@ import java.util.Map;
 
 /** Deterministic arithmetic for training scores, independent of model output. */
 public final class InterviewScoringPolicy {
-    public static final String VERSION = "weighted-evidence-12-plus-1-v2";
+    public static final String VERSION = "weighted-evidence-role-specialty-v3";
 
     public int weightUnits(InterviewQuestion.Importance importance, InterviewQuestion.Difficulty difficulty) {
         if (importance == null || difficulty == null)

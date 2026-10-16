@@ -3,15 +3,16 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { ref, computed, reactive, watch } from 'vue'
 import { algorithmUrl } from '../interview/algorithmSource.js'
+import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specialtyPresentation.js'
 
 const source = readFileSync(new URL('../views/Interview.vue', import.meta.url), 'utf8')
 const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import\s.*$/gm, '').replace(/import\.meta\.env/g, '({})')
   + '\nreturn { applySession, start, material, completed, completedRoots, currentMetadata, questionLabel, algorithmUrl };'
 function mount(api = {}) {
-  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRouter', 'createInterviewApi', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', body)(
+  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRouter', 'createInterviewApi', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
     ref, computed, reactive, watch, () => {}, () => {}, () => ({ push() {} }), () => api,
-    () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl)
+    () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance)
 }
 const turn = (id, answer = '已回答') => ({ questionId: id, question: id, answer })
 const metadata = {
@@ -46,8 +47,23 @@ test('starting uses fixed 13-question configuration and setup explains 12+1 and 
   await view.start()
   assert.equal(sent[0].questionCount, 13)
   assert.match(source, /12 道主问题/)
-  assert.match(source, /1 道 Hot 100 算法题/)
+  assert.match(source, /1 道岗位专项题/)
   assert.match(source, /80%/)
   assert.match(source, /追问不计入/)
   assert.doesNotMatch(source, /v-model="questionCount"/)
+})
+
+test('non-coding sessions retain the case plan and label question13 without algorithm wording', () => {
+  const view = mount()
+  const specialty = { kind: 'CASE_STUDY', focus: '用户增长分析', reason: '目标岗位为运营，采用专业案例考察' }
+  const current = turn('case', null)
+  view.applySession({ sessionId: 'operations', status: 'ACTIVE', questionCount: 13, specialty,
+    turns: [turn('q1'), current], currentQuestion: current,
+    questionMetadata: { q1: metadata.q1, case: { kind: 'CASE_STUDY', mainQuestionIndex: 13 } } })
+  assert.deepEqual(view.currentMetadata.value, { kind: 'CASE_STUDY', mainQuestionIndex: 13 })
+  assert.match(view.questionLabel(current), /专业案例题.*20%/)
+  assert.doesNotMatch(view.questionLabel(current), /算法|Hot 100|主问题/)
+  assert.equal(view.completedRoots.value.length, 1)
+  assert.match(source, /session.specialty.focus/)
+  assert.match(source, /session.specialty.reason/)
 })
