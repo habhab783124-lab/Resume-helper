@@ -618,3 +618,9 @@ node tools/check-resume.mjs                          # 浏览器端到端 19 项
 | 不做多模板市场 | 同上 |
 | PDF 不用服务端渲染 | 走浏览器打印（共享样式里已有 A4 纸面规则）。服务端渲染要引排版引擎或 headless 浏览器，对课程项目过重 |
 | 版本存储是文件系统 | 一版一个 JSON，排查"用户说保存后内容变了"时可以直接打开看 |
+
+### 浏览器模型与语音设置
+
+统一「设置」页可分别配置 Java 服务地址、文本模型和火山语音凭据。服务地址存于 localStorage；两类密钥存于 sessionStorage，清空凭据不重置后端地址。
+
+语音请求通过 X-Speech-Api-Key 提供本次调用的密钥，未填写时使用 VOLC_SPEECH_API_KEY。POST /api/interview-speech/check 真实合成固定短文本，仅验证 TTS；ASR 需通过面试录音验证，资源授权可能不同。普通岗位、简历及文本模型接口不发送语音密钥。

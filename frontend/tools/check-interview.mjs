@@ -114,12 +114,19 @@ async function main() {
   const audio = await readFile(audioFile)
   server = createServer(async (req, res) => {
     try {
+      res.setHeader('Access-Control-Allow-Origin', req.headers.origin || '*')
+      res.setHeader('Access-Control-Allow-Credentials', 'true')
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-User-Id, X-AI-Api-Key, X-AI-Model, X-AI-Base-Url, X-Speech-Api-Key')
+      res.setHeader('Access-Control-Allow-Methods', 'GET, POST, OPTIONS')
+      if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
       const chunks = []
       for await (const chunk of req) chunks.push(chunk)
       const buffer = Buffer.concat(chunks), path = req.url.split('?')[0]
       const call = { method: req.method, path, headers: req.headers, bytes: buffer.length }
       calls.push(call)
       if (path === '/api/interview-speech/capabilities') return json(res, caps)
+      if (path === '/api/jobs/sources') return json(res, [])
+      if (path === '/api/interview-speech/check') return json(res, { audioBytes: audio.length, speaker: 'local-speaker' })
       if (path === '/api/ai/check') return json(res, { model: 'local-model' })
       if (/^\/api\/materials(?:\/[^/]+)?$/.test(path)) return json(res, material)
       if (path === '/api/interviews' && req.method === 'POST') return json(res, newSession(JSON.parse(buffer).targetRole?.includes('运营') ? 'CASE_STUDY' : 'ALGORITHM'))
@@ -277,9 +284,36 @@ async function main() {
     await fill('input[placeholder="例如 https://api.deepseek.com/v1"]', 'http://local.invalid/v1')
   } else {
     await navigate(`${base}/settings`)
-    await fill('.settings-panel input[type="password"]', 'local-browser-test')
+    await fill('[data-testid="model-key"]', 'local-browser-test')
     await fill('input[placeholder="例如 deepseek-chat"]', 'local-model')
     await fill('input[placeholder="例如 https://api.deepseek.com/v1"]', 'http://local.invalid/v1')
+    await fill('[data-testid="speech-key"]', 'local-speech-test')
+    await check('unified settings saves and detects backend independently from model and speech', async () => {
+      await fill('#backend-url', `http://127.0.0.1:${mockPort}`)
+      await testid('backend-save')
+      await waitFor(async () => (await text()).includes('Java 服务已连接'), 'backend probe')
+      assert.equal(await evaluate(`localStorage.getItem('resume-helper-local-api-base-url')`), `http://127.0.0.1:${mockPort}`)
+      const probe = calls.find(c => c.path === '/api/jobs/sources')
+      assert.ok(probe && !probe.headers['x-ai-api-key'] && !probe.headers['x-speech-api-key'])
+    })
+    await check('model and speech checks use separate credentials at the selected backend', async () => {
+      await testid('model-check')
+      await waitFor(async () => (await text()).includes('连接成功，模型：local-model'), 'model check')
+      await testid('speech-check')
+      await waitFor(async () => (await text()).includes('已合成一段测试音频'), 'speech check')
+      const model = calls.find(c => c.path === '/api/ai/check'), speech = calls.find(c => c.path === '/api/interview-speech/check')
+      assert.equal(model.headers['x-ai-api-key'], 'local-browser-test'); assert.equal(model.headers['x-speech-api-key'], undefined)
+      assert.equal(speech.headers['x-speech-api-key'], 'local-speech-test'); assert.equal(speech.headers['x-ai-api-key'], undefined)
+    })
+    await check('settings survives reload and remains usable at390px without horizontal overflow', async () => {
+      await navigate(`${base}/settings`)
+      assert.equal(await evaluate(`document.querySelector('#backend-url').value`), `http://127.0.0.1:${mockPort}`)
+      assert.equal(await evaluate(`document.querySelector('[data-testid="model-key"]').value`), 'local-browser-test')
+      assert.equal(await evaluate(`document.querySelector('[data-testid="speech-key"]').value`), 'local-speech-test')
+      await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
+      assert.equal((await snapshot()).overflow, false)
+      await send('Emulation.clearDeviceMetricsOverride')
+    })
     await navigate(`${base}/interview`)
   }
   await check('no microphone or TTS request before explicit click', async () => { assert.equal(await evaluate('__media.mic'), 0); assert.equal(calls.filter(c => c.path.endsWith('/speech')).length, 0) })
@@ -557,12 +591,13 @@ async function main() {
     assert.ok((await text()).includes('专项题的 20% 始终保留'))
   })
   await check('question speech sends only question ID route without answers or contracts', async () => { const speech = calls.filter(call=>call.path.includes('/questions/') && call.path.endsWith('/speech')); assert.ok(speech.length); assert.ok(speech.every(call=>call.bytes === 0 && /^\/api\/interviews\/[^/]+\/questions\/[^/]+\/speech$/.test(call.path))) })
-  await check('every local API call carries common demo identity', async () => assert.ok(calls.length > 20 && calls.every(c => c.headers['x-user-id'] === 'demo-user')))
+  await check('application API calls carry common demo identity; backend probe sends no credentials', async () => assert.ok(calls.length > 20 && calls.filter(c => c.path !== '/api/jobs/sources').every(c => c.headers['x-user-id'] === 'demo-user')))
   await check('text settings shared into report; speech carries no model/provider credentials', async () => {
     const reports = calls.filter(c => /\/report(?:\/retry)?$/.test(c.path))
     assert.ok(reports.length > 0 && reports.every(c => c.headers['x-ai-api-key'] === 'local-browser-test' && c.headers['x-ai-model'] === 'local-model'))
     const speech = calls.filter(c => c.path.includes('/interview-speech/') || c.path.endsWith('/speech') || c.path.endsWith('/transcriptions'))
     assert.ok(speech.length > 0 && speech.every(c => !Object.keys(c.headers).some(k => k.startsWith('x-ai-') || k.startsWith('x-api-key'))))
+    assert.ok(calls.filter(c => !c.path.includes('/interview-speech/') && !c.path.endsWith('/speech') && !c.path.endsWith('/transcriptions')).every(c => !c.headers['x-speech-api-key']))
     assert.ok(!await evaluate('location.href.includes("local-browser-test")'))
   })
   await check('no uncaught browser or mock-server errors', async () => assert.deepEqual(errors, []))

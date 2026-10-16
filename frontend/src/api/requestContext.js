@@ -5,8 +5,8 @@ const storageKeys = {
   baseUrl: 'resume-helper-ai-base-url',
 }
 const localApiBaseUrlKey = 'resume-helper-local-api-base-url'
-let memory = null
 let localApiBaseUrlMemory = null
+let memory = null
 
 export function getAiSettings() {
   if (memory) return { ...memory }
@@ -27,6 +27,31 @@ export function setAiSettings(settings = {}) {
       else globalThis.sessionStorage?.removeItem(key)
     } catch { /* Storage is optional; the current tab still retains its settings. */ }
   }
+}
+
+// ---------------------------------------------------------------------------
+// 语音密钥单独一组，不塞进上面的大模型设置里。
+//
+// 两套凭据走的是不同的后端配置和不同的请求头，混在同一个对象里会让
+// 「设置页改的是哪个」变成靠字段名猜。这里复用同一套 memory 优先的写法。
+// ------------------------------------------------------------------------- */
+const speechStorageKey = 'resume-helper-speech-key'
+let speechMemory = null
+
+export function getSpeechSettings() {
+  if (speechMemory) return { ...speechMemory }
+  let key = ''
+  try { key = globalThis.sessionStorage?.getItem(speechStorageKey) || '' }
+  catch { /* Storage is optional; the current tab still retains its key. */ }
+  return { speechKey: key.trim() }
+}
+
+export function setSpeechSettings(settings = {}) {
+  speechMemory = { speechKey: String(settings.speechKey || '').trim() }
+  try {
+    if (speechMemory.speechKey) globalThis.sessionStorage?.setItem(speechStorageKey, speechMemory.speechKey)
+    else globalThis.sessionStorage?.removeItem(speechStorageKey)
+  } catch { /* Storage is optional; the current tab still retains its key. */ }
 }
 
 /** The local Java service address is a browser preference, separate from AI credentials. */

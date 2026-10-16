@@ -34,6 +34,9 @@ public class InterviewSpeechService {
     private static final String STATE_CHANGED = "面试状态已变化，请同步当前题目后继续";
     private static final String UNKNOWN_QUESTION = "题目不存在，请刷新面试记录";
 
+    /** 连通性检查的合成文本。短，避免一次测试花掉明显的额度。 */
+    private static final String CHECK_TEXT = "语音配置测试";
+
     /** 本机语音能力开关与本项目限制。只代表配置完整和转码工具可执行，不宣称账户额度可用。 */
     public record Capabilities(boolean asrEnabled, boolean ttsEnabled,
                                int maxRecordingSeconds, int maxAudioBytes) {}
@@ -44,25 +47,32 @@ public class InterviewSpeechService {
 
     private final InterviewService interviews;
     private final AudioNormalizer normalizer;
-    private final SpeechClient speech;
     private final SpeechProperties properties;
 
     /** 全局语音并发闸门；同一个 owner 的「最多 1 个」由 {@link #busyOwners} 单独限制。 */
     private final Semaphore permits;
     private final Set<String> busyOwners = ConcurrentHashMap.newKeySet();
 
+    /** 连通性检查结果：能返回这个对象就说明本次实际发出的合成请求拿到了音频。 */
+    public record SpeechCheck(String speaker, long audioBytes) {}
+
     public InterviewSpeechService(InterviewService interviews, AudioNormalizer normalizer,
-                                  SpeechClient speech, SpeechProperties properties) {
+                                  SpeechProperties properties) {
         this.interviews = interviews;
         this.normalizer = normalizer;
-        this.speech = speech;
         this.properties = properties;
         // 配成 0 或负数会让 tryAcquire 永远失败，语音变成永久 429，不如退回 1。
         this.permits = new Semaphore(Math.max(1, properties.getMaxConcurrentRequests()));
     }
 
-    public Capabilities capabilities() {
-        boolean keyReady = notBlank(properties.getApiKey());
+    /**
+     * 能力判断必须按<b>本次调用实际使用的密钥</b>算，而不是服务端配置。
+     *
+     * <p>前端填了自己的 key 之后，这里如果还只看服务端配置，就会出现
+     * 「设置页测试连接成功，面试页却显示语音不可用」这种自相矛盾的反馈。
+     */
+    public Capabilities capabilities(String apiKey) {
+        boolean keyReady = notBlank(apiKey);
         boolean toolsReady = toolAvailable(properties.getFfmpegPath()) && toolAvailable(properties.getFfprobePath());
         return new Capabilities(
                 keyReady && toolsReady && notBlank(properties.getAsrResourceId()),
@@ -72,7 +82,7 @@ public class InterviewSpeechService {
     }
 
     public Transcription transcribe(String owner, String sessionId, String questionId,
-                                    String requestId, MultipartFile file) {
+                                    String requestId, MultipartFile file, SpeechClient speech) {
         requireUuid(requestId);
         requireAnswerable(owner, sessionId, questionId);
         return withPermit(owner, () -> {
@@ -84,7 +94,8 @@ public class InterviewSpeechService {
         });
     }
 
-    public SpeechClient.SpeechAudio synthesize(String owner, String sessionId, String questionId) {
+    public SpeechClient.SpeechAudio synthesize(String owner, String sessionId, String questionId,
+                                               SpeechClient speech) {
         // 只朗读服务器已经生成的题目文字，题目列表里没有就拒绝，
         // 这样浏览器没法借这个接口朗读任意文本。答过或结束后的题仍可重播，方便回看。
         InterviewService.Session session = interviews.get(owner, sessionId);
@@ -93,6 +104,24 @@ public class InterviewSpeechService {
                 .findFirst()
                 .orElseThrow(() -> new InterviewException(409, UNKNOWN_QUESTION));
         return withPermit(owner, () -> speech.synthesize(turn.question(), UUID.randomUUID().toString()));
+    }
+
+    /**
+     * 设置页的「测试连接」用：真实合成一句固定短文本。
+     *
+     * <p>为什么用 TTS 而不是 ASR：ASR 需要一段真实录音才能验证，
+     * 空载调用只会得到「无有效语音」的假失败。TTS 和 ASR 共用同一把 key、
+     * 走同一套鉴权；此检测只确认 TTS 资源授权，ASR 资源仍需真实录音验证。
+     *
+     * <p>不复用 {@link #synthesize}：那个接口朗读的是面试题目文字，
+     * 连通性检查不需要会话上下文，也不该为了让它成功而要求用户先开一场面试。
+     * 走 {@link #withPermit} 是为了同样受并发闸门约束——测试也花钱。
+     */
+    public SpeechCheck check(String owner, SpeechClient speech) {
+        Supplier<SpeechClient.SpeechAudio> synthesize =
+                () -> speech.synthesize(CHECK_TEXT, UUID.randomUUID().toString());
+        SpeechClient.SpeechAudio audio = withPermit(owner, synthesize);
+        return new SpeechCheck(properties.getTtsSpeaker(), audio.bytes().length);
     }
 
     /** 只有本人、ACTIVE、题目就是当前题、且没有待重试回答时才允许转写。 */

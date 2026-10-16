@@ -29,9 +29,11 @@ import org.springframework.web.multipart.MultipartFile;
 @RequestMapping("/api")
 public class InterviewSpeechController {
     private final InterviewSpeechService speechService;
+    private final SpeechClientResolver speechClients;
 
-    public InterviewSpeechController(InterviewSpeechService speechService) {
+    public InterviewSpeechController(InterviewSpeechService speechService, SpeechClientResolver speechClients) {
         this.speechService = speechService;
+        this.speechClients = speechClients;
     }
 
     private String owner(HttpServletRequest request) {
@@ -39,14 +41,21 @@ public class InterviewSpeechController {
     }
 
     @GetMapping("/interview-speech/capabilities")
-    public ApiResponse<InterviewSpeechService.Capabilities> capabilities() {
-        return ApiResponse.ok(speechService.capabilities());
+    public ApiResponse<InterviewSpeechService.Capabilities> capabilities(HttpServletRequest request) {
+        // 能力判断必须跟着本次请求实际使用的 key 走，否则「设置页说可用、面试页说不可用」。
+        return ApiResponse.ok(speechService.capabilities(speechClients.apiKey(request)));
+    }
+
+    @PostMapping("/interview-speech/check")
+    public ApiResponse<InterviewSpeechService.SpeechCheck> check(HttpServletRequest request) {
+        return ApiResponse.ok(speechService.check(owner(request), speechClients.resolve(request)));
     }
 
     @PostMapping("/interviews/{id}/questions/{questionId}/speech")
     public ResponseEntity<byte[]> speech(@PathVariable String id, @PathVariable String questionId,
                                          HttpServletRequest request) {
-        SpeechClient.SpeechAudio audio = speechService.synthesize(owner(request), id, questionId);
+        SpeechClient.SpeechAudio audio = speechService.synthesize(owner(request), id, questionId,
+                speechClients.resolve(request));
         return ResponseEntity.ok()
                 .header("Cache-Control", "no-store")
                 .contentType(MediaType.parseMediaType(audio.contentType()))
@@ -60,6 +69,7 @@ public class InterviewSpeechController {
             @RequestParam String requestId,
             @RequestParam("file") MultipartFile file,
             HttpServletRequest request) {
-        return ApiResponse.ok(speechService.transcribe(owner(request), id, questionId, requestId, file));
+        return ApiResponse.ok(speechService.transcribe(owner(request), id, questionId, requestId, file,
+                speechClients.resolve(request)));
     }
 }

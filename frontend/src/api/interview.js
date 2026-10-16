@@ -1,9 +1,16 @@
-import { getAiSettings, getLocalApiBaseUrl, getUserId as sharedUserId } from './requestContext.js'
+import { getAiSettings, getSpeechSettings, getLocalApiBaseUrl, getUserId as sharedUserId } from './requestContext.js'
 
 export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch, getUserId = sharedUserId } = {}) {
   const root = () => `${(getLocalApiBaseUrl() || baseUrl).replace(/\/$/, '')}/api`
-  async function request(path, { method = 'GET', body, ai, textModel = false, signal } = {}) {
-    const headers = { 'X-User-Id': getUserId() }
+
+  // 语音 key 只对语音接口生效：后端按请求解析它，服务端配置兜底。
+  function speechHeaders() {
+    const { speechKey } = getSpeechSettings()
+    return speechKey ? { 'X-Speech-Api-Key': speechKey } : {}
+  }
+
+  async function request(path, { method = 'GET', body, ai, textModel = false, signal, speech = false } = {}) {
+    const headers = { 'X-User-Id': getUserId(), ...(speech ? speechHeaders() : {}) }
     ai = textModel ? (ai ?? getAiSettings()) : {}
     if (ai.apiKey?.trim()) headers['X-AI-Api-Key'] = ai.apiKey.trim()
     if (ai.model?.trim()) headers['X-AI-Model'] = ai.model.trim()
@@ -50,6 +57,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
 
   return {
     checkAi: ai => request('/ai/check', { method: 'POST', ai, textModel: true }),
+    checkSpeech: () => request('/interview-speech/check', { method: 'POST', speech: true }),
     upload(file, fileName = file.name, ai) {
       const body = new FormData()
       body.append('file', file, fileName)
@@ -62,19 +70,19 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
     finish: id => request(`${sessionPath(id)}/finish`, { method: 'POST' }),
     report: (id, ai) => request(`${sessionPath(id)}/report`, { ai, textModel: true }),
     retryReport: (id, ai) => request(`${sessionPath(id)}/report/retry`, { method: 'POST', ai, textModel: true }),
-    getSpeechCapabilities: () => request('/interview-speech/capabilities'),
+    getSpeechCapabilities: () => request('/interview-speech/capabilities', { speech: true }),
     transcribe: (id, { questionId, requestId, file }, signal) => {
       const body = new FormData()
       body.append('questionId', questionId)
       body.append('requestId', requestId)
       body.append('file', file, file.name || 'answer.webm')
-      return request(`${sessionPath(id)}/transcriptions`, { method: 'POST', body, signal })
+      return request(`${sessionPath(id)}/transcriptions`, { method: 'POST', body, signal, speech: true })
     },
     // 三个语音接口里只有这个是成功返回二进制、失败才返回 JSON，所以不复用 request。
     async questionSpeech(id, questionId, signal) {
       const reply = await fetchImpl(`${root()}${sessionPath(id)}/questions/${encodeURIComponent(questionId)}/speech`, {
         method: 'POST',
-        headers: { 'X-User-Id': getUserId() },
+        headers: { 'X-User-Id': getUserId(), ...speechHeaders() },
         credentials: 'include',
         signal,
       })

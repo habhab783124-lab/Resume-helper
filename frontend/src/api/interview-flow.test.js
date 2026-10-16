@@ -11,19 +11,21 @@ const setupBody = /<script setup>([\s\S]*?)<\/script>/.exec(viewSource)[1]
   .replace(/^import\s.*$/gm, '')
   .replace(/import\.meta\.env/g, '({})')
   .trimEnd()
-  + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, checkAi, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, material, apiKey, model, modelBaseUrl };'
+  + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, material };'
 
 function mount(apiStub) {
-  const mounted = [], unmounted = [], pushes = [], events = [], settings = []
+  const mounted = [], unmounted = [], pushes = [], events = []
   const fakeVoice = { busy: ref(false), preview: ref(null),
     syncContext() { events.push('sync') }, dispose() { events.push('dispose') }, loadCapabilities() { events.push('capabilities') },
     acceptPreview() { return false }, cancelRecording() { events.push('cancel-recording') } }
+  // 模型凭据改由 Settings 页写入共享存储、api 层读取，面试页不再持有它们，
+  // 所以这里也不再注入 getAiSettings / setAiSettings。
   const view = new Function(
-    'ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRouter', 'getAiSettings', 'setAiSettings', 'useInterviewVoice', setupBody)(
+    'ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRouter', 'useInterviewVoice', setupBody)(
     ref, computed, reactive, watch, callback => mounted.push(callback), callback => unmounted.push(callback), () => apiStub,
     () => ({ push: route => { events.push('route'); pushes.push(route) } }),
-    () => ({ apiKey: 'own-key', model: 'own-model', baseUrl: 'https://model.example/v1' }), value => settings.push(value), () => fakeVoice)
-  Object.assign(view, { pushes, events, settings, mounted, unmounted })
+    () => fakeVoice)
+  Object.assign(view, { pushes, events, mounted, unmounted })
   return view
 }
 
@@ -139,10 +141,10 @@ test('discard then finish sends no answer; automatic/restored FINISHED provide r
   assert.equal(answers, 0); assert.equal(view.pushes.length, 1)
   const restored = mount({}); restored.applySession(finishedSession); restored.viewReport(); assert.equal(restored.pushes.length, 1)
 })
-test('voice busy blocks submit, finish and model check while cancellation remains outside page lock', async () => {
-  let calls = 0; const view = mount({ answer: async () => { calls += 1 }, finish: async () => { calls += 1 }, checkAi: async () => { calls += 1 } })
+test('voice busy blocks submit and finish while cancellation remains outside page lock', async () => {
+  let calls = 0; const view = mount({ answer: async () => { calls += 1 }, finish: async () => { calls += 1 } })
   view.applySession(firstQuestion); view.answer.value = '草稿'; view.voice.busy = true
-  await view.submitAnswer(); await view.finish(); await view.checkAi(); assert.equal(calls, 0); assert.equal(view.finishChoice.value, false)
+  await view.submitAnswer(); await view.finish(); assert.equal(calls, 0); assert.equal(view.finishChoice.value, false)
 })
 test('same-question recovery preserves text; voice conflict sync cannot apply to a newer question', async () => {
   const view = mount({ getSession: async () => firstQuestion })
@@ -170,8 +172,10 @@ test('material accepts 10 MiB boundary and rejects empty extraction without losi
   const other = mount({ upload: async () => { throw Object.assign(new Error('材料不存在'), { status: 404 }) } }); other.applySession(firstQuestion)
   await other.upload({ name: 'resume.pdf', size: 1 }); assert.equal(other.session.value.sessionId, 's1')
 })
-test('model defaults come from shared settings and mount/unmount manage voice lifecycle', () => {
-  const view = mount({}); assert.equal(view.apiKey.value, 'own-key'); assert.equal(view.model.value, 'own-model'); assert.equal(view.modelBaseUrl.value, 'https://model.example/v1')
+test('mount/unmount manage voice lifecycle and model settings no longer live on this page', () => {
+  const view = mount({})
+  // 凭据移到了设置页：这里既不该有本地状态，也不该写入共享存储。
+  assert.equal(view.apiKey, undefined)
   view.mounted.forEach(callback => callback()); assert.ok(view.events.includes('capabilities'))
   view.unmounted.forEach(callback => callback()); assert.ok(view.events.includes('dispose'))
 })

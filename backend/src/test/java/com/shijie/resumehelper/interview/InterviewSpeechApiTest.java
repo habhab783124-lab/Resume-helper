@@ -4,6 +4,7 @@ import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shijie.resumehelper.common.ai.AiClient;
 import com.shijie.resumehelper.common.ai.AiClientResolver;
 import jakarta.servlet.http.HttpServletRequest;
+import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.mockito.ArgumentCaptor;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -52,8 +53,11 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 /**
  * 语音接口的会话归属与状态边界。
  *
- * <p>{@link AudioNormalizer} 与 {@link SpeechClient} 都是 mock：本类只验证编排——
- * 归属校验、当前题校验、并发闸门、调用前后重校验，以及「转写不推进轮次」。
+ * <p>{@link AudioNormalizer}、{@link SpeechClient} 与 {@link SpeechClientResolver} 都是 mock：
+ * 本类只验证编排——归属校验、当前题校验、并发闸门、调用前后重校验，以及「转写不推进轮次」。
+ * 客户端改由 {@link SpeechClientResolver} 按请求构造后（密钥请求头优先），
+ * 这里 mock 的是 resolver：让它把请求都交给同一个 mock client，
+ * 原有的 stub 与 verify 语句一条都不用改。
  *
  * <p><b>统一材料模块后适配的两处</b>：身份从 HTTP session 改成 {@code X-User-Id} 请求头
  * （原来面试用 session id、材料用请求头，两边对不上号）；上传响应从 {@code /data/materialId}
@@ -107,7 +111,15 @@ class InterviewSpeechApiTest {
     @Autowired ObjectMapper json;
     @MockBean AiClientResolver resolver;
     @MockBean AudioNormalizer normalizer;
+    @MockBean SpeechClientResolver speechClients;
     @MockBean SpeechClient speech;
+
+    @BeforeEach
+    void stubSpeechClients() {
+        // resolver 是真实逻辑，这里换成 mock，这样每个用例都能控制自己拿到的 key 与客户端。
+        when(speechClients.resolve(any(HttpServletRequest.class))).thenReturn(speech);
+        when(speechClients.apiKey(any(HttpServletRequest.class))).thenReturn("speech-test-key");
+    }
 
     private record Ref(String sessionId, String questionId) {}
 

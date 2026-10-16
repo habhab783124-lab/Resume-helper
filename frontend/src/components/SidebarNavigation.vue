@@ -15,6 +15,11 @@
       <RouterLink v-for="item in toolItems" :key="item.path" :to="item.path" class="nav-item" :class="{ active: route.path === item.path }">
         <svg><use :href="`#${item.icon}`" /></svg><span>{{ item.label }}</span><em v-if="item.count">{{ item.count }}</em>
       </RouterLink>
+
+      <div class="nav-caption nav-caption-spaced">系统</div>
+      <RouterLink v-for="item in systemItems" :key="item.path" :to="item.path" class="nav-item" :class="{ active: route.path === item.path }">
+        <svg><use :href="`#${item.icon}`" /></svg><span>{{ item.label }}</span>
+      </RouterLink>
     </nav>
 
     <div class="sidebar-bottom">
@@ -42,7 +47,10 @@ const toolItems = [
   { path: '/resume', label: '简历工作台', icon: 'i-file' },
   { path: '/jobs', label: '岗位匹配', icon: 'i-briefcase', count: '8' },
   { path: '/interview', label: '模拟面试', icon: 'i-mic' },
-  { path: '/report', label: '面试报告', icon: 'i-chart' },
-  { path: '/settings', label: '本地服务设置', icon: 'i-settings' }
+  { path: '/report', label: '面试报告', icon: 'i-chart' }
+]
+// 凭据与服务配置不属于求职流程，单独成组。
+const systemItems = [
+  { path: '/settings', label: '设置', icon: 'i-settings' }
 ]
 </script>

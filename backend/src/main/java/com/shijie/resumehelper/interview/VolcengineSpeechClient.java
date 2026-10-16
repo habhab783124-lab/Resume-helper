@@ -5,10 +5,9 @@ import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.MappingIterator;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.fasterxml.jackson.databind.node.ObjectNode;
+import com.shijie.resumehelper.common.util.TextKit;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Autowired;
-import org.springframework.stereotype.Service;
 
 import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
@@ -43,8 +42,12 @@ import java.util.concurrent.TimeoutException;
  * <p>端点是代码常量，不接受浏览器或环境变量传入任意 URL——
  * 那里一旦开放就成了 SSRF 入口（岗位模块的模型端点踩过这个坑）。
  * 日志只留业务码、requestId 和 logid，不回传上游错误全文、不记录密钥。
+ *
+ * <p>该类是<b>一次性</b>的：每次请求由 {@link SpeechClientResolver} 新建，
+ * 持有的是本次请求解析出的密钥（请求头优先，服务端配置兜底）。
+ * 因此<b>不能注册成 Spring Bean</b>——带密钥的单例会让不同用户的请求共用同一把 key。
+ * 内部复用的是静态 {@link #FIXED_HTTP}，所以频繁新建没有连接池开销。
  */
-@Service
 public class VolcengineSpeechClient implements SpeechClient {
 
     private static final Logger log = LoggerFactory.getLogger(VolcengineSpeechClient.class);
@@ -73,19 +76,30 @@ public class VolcengineSpeechClient implements SpeechClient {
 
     private final SpeechProperties properties;
     private final ObjectMapper mapper;
+    private final String apiKey;
     private final String baseUrl;
     private final HttpClient http;
 
-    @Autowired
     public VolcengineSpeechClient(SpeechProperties properties, ObjectMapper mapper) {
-        this(properties, mapper, DEFAULT_BASE_URL, FIXED_HTTP);
+        this(properties, mapper, properties.getApiKey(), DEFAULT_BASE_URL, FIXED_HTTP);
+    }
+
+    /** 按请求注入密钥：密钥来源由 {@link SpeechClientResolver} 决定，客户端本身不做优先级判断。 */
+    public VolcengineSpeechClient(SpeechProperties properties, ObjectMapper mapper, String apiKey) {
+        this(properties, mapper, apiKey, DEFAULT_BASE_URL, FIXED_HTTP);
     }
 
     /** 测试专用：换成本机 stub 的 base URL 与自建 HttpClient。 */
     VolcengineSpeechClient(SpeechProperties properties, ObjectMapper mapper,
                            String baseUrl, HttpClient http) {
+        this(properties, mapper, properties.getApiKey(), baseUrl, http);
+    }
+
+    VolcengineSpeechClient(SpeechProperties properties, ObjectMapper mapper, String apiKey,
+                           String baseUrl, HttpClient http) {
         this.properties = properties;
         this.mapper = mapper;
+        this.apiKey = TextKit.trim(apiKey);
         this.baseUrl = baseUrl;
         this.http = http;
     }
@@ -101,7 +115,7 @@ public class VolcengineSpeechClient implements SpeechClient {
                 .uri(URI.create(baseUrl + ASR_PATH))
                 .timeout(Duration.ofSeconds(properties.getAsrTimeoutSeconds()))
                 .header("Content-Type", "application/json")
-                .header("X-Api-Key", properties.getApiKey())
+                .header("X-Api-Key", apiKey)
                 .header("X-Api-Resource-Id", properties.getAsrResourceId())
                 .header("X-Api-Request-Id", requestId)
                 .header("X-Api-Sequence", "-1")
@@ -169,7 +183,7 @@ public class VolcengineSpeechClient implements SpeechClient {
                 .uri(URI.create(baseUrl + TTS_PATH))
                 .timeout(Duration.ofSeconds(properties.getTtsTimeoutSeconds()))
                 .header("Content-Type", "application/json")
-                .header("X-Api-Key", properties.getApiKey())
+                .header("X-Api-Key", apiKey)
                 .header("X-Api-Resource-Id", properties.getTtsResourceId())
                 .header("X-Api-Request-Id", requestId)
                 .POST(HttpRequest.BodyPublishers.ofByteArray(toJson(ttsBody(text))))
@@ -299,9 +313,12 @@ public class VolcengineSpeechClient implements SpeechClient {
     /**
      * key 留空即语音能力关闭。不能拿空凭据发真实请求——那样用户会一直收到
      * 一个改不了的 502，而问题其实要靠部署者配环境变量。
+     *
+     * <p>检查的是本次调用实际使用的密钥（请求头优先，服务端配置兜底），
+     * 不是服务端配置本身：用户填了自己的 key 就必须按它判断。
      */
     private void requireConfigured(String requestId) {
-        if (properties.getApiKey() == null || properties.getApiKey().isBlank()) {
+        if (apiKey == null || apiKey.isBlank()) {
             log.warn("{}：未配置语音服务密钥，本次调用未发出", requestId);
             throw new InterviewException(503, NOT_CONFIGURED);
         }

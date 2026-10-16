@@ -72,6 +72,7 @@ app:
       - https://api.deepseek.com
       - https://dashscope.aliyuncs.com
       - https://ark.cn-beijing.volces.com
+      - https://token.sensenova.cn
     timeout-seconds: 60
     max-tokens: 800
     temperature: 0.2
@@ -146,6 +147,8 @@ app:
       # 火山豆包语音，独立于上面的文本模型配置：两套密钥体系不通，
       # 实测方舟 ark- 前缀的 key 调语音接口直接 401，不能借用 AI_API_KEY。
       # 留空表示语音能力关闭，文字面试不受影响。
+      # 前端「设置」页填的语音 key 走 X-Speech-Api-Key 请求头，优先于这里；
+      # 这里只作服务端兜底（没人填 key 时仍然能用语音）。
       api-key: ${VOLC_SPEECH_API_KEY:}
       # ASR 资源按账号实际开通情况填。计划原定 volc.bigasr.auc_turbo，
       # 实测本账号未授权（45000030）；换用 sauc.duration 调同一端点可完整识别。

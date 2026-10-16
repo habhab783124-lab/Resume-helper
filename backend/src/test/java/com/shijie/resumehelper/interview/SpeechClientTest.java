@@ -183,6 +183,35 @@ class SpeechClientTest {
     }
 
     @Test
+    void ttsSendsTheKeyResolvedForThisRequest() {
+        // 服务端配置的是另一把 key：本次调用实际发出的必须是按请求注入的那把。
+        properties.setApiKey("server-key");
+        var wireKey = new AtomicReference<String>();
+        server.createContext(TTS_PATH, exchange -> {
+            wireKey.set(exchange.getRequestHeaders().getFirst("X-Api-Key"));
+            sendJson(exchange, "{\"code\":0,\"data\":\"AQI=\"}\n{\"code\":20000000}\n");
+        });
+
+        clientWithKey("user-key").synthesize("题目", "req-tts-key");
+
+        assertEquals("user-key", wireKey.get());
+        // 空密钥不发真实请求，也不回退到服务端密钥——能力开关得跟实际用的 key 一致。
+        var empty = assertThrows(InterviewException.class,
+                () -> clientWithKey("   ").synthesize("题目", "req-tts-empty"));
+        assertEquals(503, empty.status());
+    }
+
+    /** 构造一个按请求注入密钥的客户端，base URL 与 HttpClient 与 {@link #startServer()} 保持一致。 */
+    private VolcengineSpeechClient clientWithKey(String apiKey) {
+        return new VolcengineSpeechClient(properties, mapper, apiKey,
+                "http://127.0.0.1:" + server.getAddress().getPort(),
+                HttpClient.newBuilder()
+                        .followRedirects(HttpClient.Redirect.NEVER)
+                        .connectTimeout(Duration.ofSeconds(2))
+                        .build());
+    }
+
+    @Test
     void ttsMapsStalledStreamToTimeout() {
         // 只给一个音频片段就卡住，验证消费阶段有独立的 deadline。
         properties.setTtsTimeoutSeconds(1);

@@ -26,7 +26,7 @@ const routes = [
       { path: 'jobs', name: 'Jobs', component: Jobs, meta: { title: '岗位匹配' } },
       { path: 'interview', name: 'Interview', component: Interview, meta: { title: '模拟面试' } },
       { path: 'report', name: 'Report', component: Report, meta: { title: '面试报告' } },
-      { path: 'settings', name: 'Settings', component: Settings, meta: { title: '本地服务设置' } }
+      { path: 'settings', name: 'Settings', component: Settings, meta: { title: '设置' } }
     ]
   },
   { path: '/:pathMatch(.*)*', redirect: '/login' }

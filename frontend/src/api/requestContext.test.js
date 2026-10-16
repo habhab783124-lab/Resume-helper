@@ -36,3 +36,25 @@ test('clears stored settings without resurrecting previous values', async () => 
   assert.deepEqual(ctx.getAiSettings(), { apiKey: '', model: '', baseUrl: '' })
   assert.deepEqual(values, {})
 })
+
+ test('backend preference persists independently of tab credentials and clears safely', async () => {
+  const addresses = {}; globalThis.localStorage = store(addresses)
+  const values = {}; const ctx = await context(store(values))
+  ctx.setLocalApiBaseUrl(' http://localhost:8081 ')
+  ctx.setSpeechSettings({ speechKey: ' speech-key ' }); ctx.setAiSettings({ apiKey: 'model-key' })
+  assert.deepEqual(addresses, { 'resume-helper-local-api-base-url': 'http://localhost:8081' })
+  assert.equal(values['resume-helper-speech-key'], 'speech-key')
+  const fresh = await context(store(values)); assert.equal(fresh.getLocalApiBaseUrl(), 'http://localhost:8081')
+  fresh.setAiSettings({}); fresh.setSpeechSettings({}); assert.equal(fresh.getLocalApiBaseUrl(), 'http://localhost:8081')
+  fresh.setLocalApiBaseUrl(''); assert.equal(fresh.getLocalApiBaseUrl(), ''); assert.deepEqual(addresses, {})
+})
+ test('backend and speech memory survive blocked storage and do not resurrect cleared values', async () => {
+  const blocked = { getItem() { throw Error('blocked') }, setItem() { throw Error('blocked') }, removeItem() { throw Error('blocked') } }
+  globalThis.localStorage = blocked
+  const ctx = await context(blocked)
+  ctx.setLocalApiBaseUrl('http://localhost:8082'); ctx.setSpeechSettings({ speechKey: 'key' })
+  assert.equal(ctx.getLocalApiBaseUrl(), 'http://localhost:8082'); assert.equal(ctx.getSpeechSettings().speechKey, 'key')
+  ctx.setLocalApiBaseUrl(''); ctx.setSpeechSettings({})
+  globalThis.localStorage = store({ 'resume-helper-local-api-base-url': 'stale' }); globalThis.sessionStorage = store({ 'resume-helper-speech-key': 'stale' })
+  assert.equal(ctx.getLocalApiBaseUrl(), ''); assert.equal(ctx.getSpeechSettings().speechKey, '')
+})

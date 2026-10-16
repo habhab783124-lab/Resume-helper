@@ -1,6 +1,7 @@
 import test from 'node:test'
 import assert from 'node:assert/strict'
 import { createInterviewApi } from './interview.js'
+import { setSpeechSettings } from './requestContext.js'
 
 const json = (value, status = 200) => new Response(JSON.stringify(value), { status })
 
@@ -112,4 +113,43 @@ test('accepts only nonempty MPEG audio no larger than 5 MiB', async () => {
   }
   const api = createInterviewApi({ fetchImpl: async () => new Response(new Uint8Array(5 * 1024 * 1024), { headers: { 'Content-Type': 'audio/mpeg; charset=binary' } }) })
   assert.equal((await api.questionSpeech('s', 'q')).size, 5 * 1024 * 1024)
+})
+
+test('every speech call forwards the settings key, and omits it when unset', async () => {
+  const seen = []
+  const capture = args => { seen.push(args) }
+  const api = createInterviewApi({
+    fetchImpl: async (...args) => {
+      capture(args)
+      // questionSpeech 返回二进制音频，其余三个语音接口返回 JSON 包装。
+      return /questions\/[^/]+\/speech$/.test(args[0])
+        ? new Response(new Uint8Array(3), { status: 200, headers: { 'Content-Type': 'audio/mpeg' } })
+        : json({ success: true, data: {} })
+    }
+  })
+
+  // 设置页填了语音 key：四个语音接口都要带上它。
+  setSpeechSettings({ speechKey: 'speech-key' })
+  await api.getSpeechCapabilities()
+  await api.transcribe('s1', { questionId: 'q1', requestId: 'r1', file: new File([], 'answer.webm') })
+  await api.questionSpeech('s1', 'q1')
+  await api.checkSpeech()
+
+  assert.deepEqual(seen.map(([url]) => url), [
+    '/api/interview-speech/capabilities',
+    '/api/interviews/s1/transcriptions',
+    '/api/interviews/s1/questions/q1/speech',
+    '/api/interview-speech/check',
+  ])
+  for (const [, init] of seen) {
+    assert.equal(init.headers['X-Speech-Api-Key'], 'speech-key', '每个语音接口都要带设置页的 key')
+    assert.equal(init.headers['X-AI-Api-Key'], undefined, '语音接口不夹带大模型凭据')
+  }
+  assert.equal(seen[3][1].method, 'POST')
+
+  // 没填 key：不带头，而不是带空值。
+  setSpeechSettings({ speechKey: '' })
+  seen.length = 0
+  await api.getSpeechCapabilities()
+  assert.equal(seen[0][1].headers['X-Speech-Api-Key'], undefined)
 })

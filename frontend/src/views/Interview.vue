@@ -2,7 +2,6 @@
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
-import { getAiSettings, setAiSettings } from '../api/requestContext.js'
 import { useInterviewVoice } from '../interview/useInterviewVoice.js'
 import { algorithmUrl } from '../interview/algorithmSource.js'
 import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specialtyPresentation.js'
@@ -14,15 +13,9 @@ const material = ref(null)
 const session = ref(null)
 const paste = ref('')
 const targetRole = ref('')
-const settings = getAiSettings()
-const apiKey = ref(settings.apiKey)
-const model = ref(settings.model)
-const modelBaseUrl = ref(settings.baseUrl)
 const answer = ref('')
 const busy = ref('')
 const error = ref('')
-const aiCheck = ref('')
-const aiCheckOk = ref(false)
 const restoreId = ref('')
 const uncertainAnswer = ref(null)
 const finishChoice = ref(false)
@@ -55,12 +48,6 @@ const voice = reactive(useInterviewVoice({ api, getContext: voiceContext,
   getDraft: () => answer.value, setDraft: text => { answer.value = text },
   syncSession: syncVoiceSession, pauseReplay: pauseRecordingReplay }))
 const locked = computed(() => !!busy.value || voice.busy)
-function saveModelSettings() {
-  const value = { apiKey: apiKey.value, model: model.value, baseUrl: modelBaseUrl.value }
-  setAiSettings(value)
-  return value
-}
-watch([apiKey, model, modelBaseUrl], saveModelSettings, { flush: 'sync' })
 watch(pending, () => voice.syncContext(), { flush: 'sync' })
 function remember(id) {
   try { id ? sessionStorage.setItem(storageKey, id) : sessionStorage.removeItem(storageKey) } catch { /* Storage is optional. */ }
@@ -106,7 +93,6 @@ async function upload(file) {
   if (!file.size || file.size > 10 * 1024 * 1024) { error.value = '文件不能为空，且不能超过 10 MiB。'; return }
   await run('正在解析简历…', async () => {
     material.value = null
-    saveModelSettings()
     const value = await api.upload(file)
     if (!value?.materialId || typeof value.text !== 'string') throw new Error('简历解析结果异常，请重试上传。')
     if (!value.text.trim()) throw new Error('简历未提取到文字，请粘贴简历文本后开始。')
@@ -120,7 +106,7 @@ function uploadPaste() {
 function start() {
   if (!material.value?.text?.trim()) { error.value = '请先上传有效简历或粘贴简历文本。'; return }
   return run('正在生成第一题…', async () => {
-    applySession(await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: 13 }, saveModelSettings()))
+    applySession(await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: 13 }))
   })
 }
 function submitAnswer() {
@@ -133,7 +119,7 @@ function submitAnswer() {
   return run('正在处理回答并生成后续问题…', async () => {
     uncertainAnswer.value = text
     try {
-      applySession(await api.answer(sessionId, { questionId, answer: text }, saveModelSettings()))
+      applySession(await api.answer(sessionId, { questionId, answer: text }))
       if (session.value.turns.find(turn => turn.questionId === questionId)?.answer !== text) throw new Error('尚未确认回答保存成功，请重试恢复后继续。')
     } catch (cause) {
       let recovered = false
@@ -149,7 +135,6 @@ function submitAnswer() {
 }
 function viewReport() {
   if (locked.value || session.value?.status !== 'FINISHED') return
-  saveModelSettings()
   voice.dispose()
   router.push({ name: 'Report', query: { sessionId: session.value.sessionId } })
 }
@@ -183,17 +168,6 @@ async function chooseFinish(choice) {
     return endSession()
   }
 }
-function checkAi() {
-  return run('正在测试连接…', async () => {
-    aiCheck.value = ''
-    aiCheckOk.value = false
-    try {
-      const result = await api.checkAi(saveModelSettings())
-      aiCheckOk.value = true
-      aiCheck.value = `连接成功，模型：${result.model || '默认模型'}`
-    } catch (cause) { aiCheck.value = cause.message || '无法连接模型服务，请检查密钥、Base URL 和模型名称。' }
-  })
-}
 function restore() { return run('正在恢复上次练习…', async () => { applySession(await api.getSession(restoreId.value)); restoreId.value = '' }, true) }
 function reset() {
   voice.cancelRecording()
@@ -205,7 +179,6 @@ function reset() {
   error.value = ''
   restoreId.value = ''
   uncertainAnswer.value = null
-  aiCheck.value = ''
   finishChoice.value = false
   voice.syncContext()
 }
@@ -232,7 +205,6 @@ onUnmounted(() => voice.dispose())
           <div v-if="material" class="resume-preview"><h3>已解析 · {{ material.fileName }}</h3><p>请确认文字完整；扫描版 PDF 可改用粘贴文本。</p><pre>{{ material.text }}</pre></div>
           <div class="setup-grid"><label class="field">目标岗位（可选）<input v-model="targetRole" maxlength="200" :disabled="locked" placeholder="例如：运营、产品经理、Java 开发工程师" /></label><div class="interview-plan"><strong>12 道主问题 + 1 道岗位专项题</strong><p>主问题合计 80%，专项题固定 20%。软件开发等编码岗位出 Hot 100 算法题，其他岗位出专业案例题。追问不计入总题数，并入对应主问题评分。</p><p>优先按目标岗位匹配；未填写时参考简历职业方向。</p></div></div>
         </template>
-        <details v-if="!session || active" class="model-panel"><summary>模型设置（可选）</summary><p>留空使用服务端配置。密钥保存在当前浏览器标签页，面试与报告共用；Base URL 仅在填了自己的密钥时生效。</p><label class="field">API Key<input v-model="apiKey" @input="aiCheck = ''" type="password" autocomplete="off" :disabled="locked" placeholder="使用自己的模型密钥（可选）" /></label><label class="field">Base URL<input v-model="modelBaseUrl" @input="aiCheck = ''" autocomplete="off" spellcheck="false" :disabled="locked" placeholder="例如 https://api.deepseek.com/v1" /></label><label class="field">模型名称<input v-model="model" @input="aiCheck = ''" autocomplete="off" :disabled="locked" placeholder="留空使用服务端默认模型" /></label><button class="button button-ghost" :disabled="locked" @click="checkAi">测试连接</button><p v-if="aiCheck" class="notice" :class="{ error: !aiCheckOk }">{{ aiCheck }}</p></details>
         <template v-if="!session && !restoreId"><p class="consent">开始面试后，简历文本和回答将发送至配置的大模型服务</p><button class="button button-primary" :disabled="locked || !material" @click="start">开始面试 <span aria-hidden="true">→</span></button></template>
         <template v-if="session">
           <div class="interview-session-top"><div><span class="session-overline">{{ active ? 'IN CONVERSATION' : 'SESSION COMPLETE' }}</span><h2>{{ session.targetRole || '简历模拟面试' }}</h2><span class="session-company">{{ active ? '结合简历与回答进行提问' : '本次面试已结束，可回顾下方问答' }}</span></div></div>
@@ -268,6 +240,7 @@ onUnmounted(() => voice.dispose())
                 <p v-else-if="voice.capabilityError" class="voice-note">{{ voice.capabilityError }}</p>
                 <p v-else-if="!voice.asrEnabled" class="voice-note">语音识别暂不可用，请用文字回答。</p>
                 <button v-if="voice.capabilityState !== 'loading' && (!voice.asrEnabled || !voice.ttsEnabled)" class="text-button" :disabled="locked" @click="voice.loadCapabilities">重试语音能力</button>
+              <RouterLink to="/settings" class="text-button config-link" aria-label="去设置页配置大模型与语音">去配置 AI →</RouterLink>
                 <div class="voice-actions">
                   <button data-testid="recording-start" class="button button-ghost" :disabled="locked || pending != null || !voice.asrEnabled" @click="voice.startRecording">{{ voice.blob ? '重新录音' : '开始录音' }}</button>
                   <button data-testid="recording-stop" class="button button-ghost" :disabled="voice.recorderState !== 'recording'" @click="voice.stopRecording">停止录音</button>
@@ -330,15 +303,15 @@ onUnmounted(() => voice.dispose())
 .specialty-plan p { margin: 6px 0 0; font-size: 13px; line-height: 1.8; }
 .text-interview .interview-main { min-width: 0; }
 .field { display: flex; flex-direction: column; gap: 9px; font-size: 13px; margin: 18px 0; }
-.field span, .model-panel p, .resume-preview p, .consent { color: #79766e; font-size: 12px; line-height: 1.8; }
+.field span, .resume-preview p, .consent { color: #79766e; font-size: 12px; line-height: 1.8; }
 input, textarea { width: 100%; box-sizing: border-box; font: inherit; color: #353831; background: #fafaf7; border: 1px solid #e2e4dc; border-radius: 7px; padding: 12px; }
 input:focus, textarea:focus { outline: 2px solid #91a77c; outline-offset: 2px; }
 input[type=file] { padding: 18px; border-style: dashed; }
 button:disabled { opacity: .5; cursor: not-allowed; }
 .setup-grid { display: grid; grid-template-columns: 2fr 1fr; gap: 18px; }
-.paste-panel, .model-panel { border-top: 1px solid #e7e8e1; padding: 18px 0; }
+.paste-panel { border-top: 1px solid #e7e8e1; padding: 18px 0; }
 summary { cursor: pointer; font-size: 13px; }
-.paste-panel button, .model-panel button { margin-top: 12px; }
+.paste-panel button { margin-top: 12px; }
 .resume-preview { margin: 20px 0; padding: 18px; background: #f4f5ed; border-radius: 8px; }
 .resume-preview h3 { font-size: 14px; }
 .resume-preview pre { white-space: pre-wrap; overflow-wrap: anywhere; max-height: 260px; overflow-y: auto; font: inherit; font-size: 12px; line-height: 1.8; }
@@ -356,6 +329,7 @@ summary { cursor: pointer; font-size: 13px; }
 .restore-actions p { width: 100%; }
 .voice-panel { margin: 18px 0; padding: 18px; border: 1px solid #e2e4dc; border-radius: 8px; background: #fafaf7; }
 .voice-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }
+.config-link { text-decoration: none; margin-left: 12px; }
 .voice-note { color: #79766e; font-size: 12px; line-height: 1.8; }
 .voice-panel audio { display: block; width: 100%; max-width: 460px; margin: 16px 0; }
 .replay-locked { pointer-events: none; opacity: .5; }
