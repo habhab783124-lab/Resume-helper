@@ -66,6 +66,9 @@ public interface AiClient {
     /** AI 调用失败。业务层据此降级到规则逻辑，而不是把异常抛给前端。 */
     class AiException extends RuntimeException {
         private final boolean retryable;
+        private final Code code;
+        private final Long retryAfterMs;
+        private final long elapsedMs;
 
         public AiException(String message) {
             this(message, true, null);
@@ -76,8 +79,20 @@ public interface AiClient {
         }
 
         public AiException(String message, boolean retryable, Throwable cause) {
+            this(message, retryable, cause, Code.UNKNOWN, null, 0L);
+        }
+
+        public AiException(String message, boolean retryable, Code code, Long retryAfterMs, long elapsedMs) {
+            this(message, retryable, null, code, retryAfterMs, elapsedMs);
+        }
+
+        public AiException(String message, boolean retryable, Throwable cause,
+                           Code code, Long retryAfterMs, long elapsedMs) {
             super(message, cause);
             this.retryable = retryable;
+            this.code = code;
+            this.retryAfterMs = retryAfterMs;
+            this.elapsedMs = elapsedMs;
         }
 
         /**
@@ -87,6 +102,28 @@ public interface AiClient {
          */
         public boolean retryable() {
             return retryable;
+        }
+
+        /** 机器可读的错误来源分类；旧构造器降级为 {@link Code#UNKNOWN}。 */
+        public Code code() {
+            return code;
+        }
+
+        /** 上游 {@code Retry-After}（毫秒），无法解析或没有时为 {@code null}。 */
+        public Long retryAfterMs() {
+            return retryAfterMs;
+        }
+
+        /** 本次调用从发起到失败/成功的墙钟耗时（毫秒），用于可追踪日志。 */
+        public long elapsedMs() {
+            return elapsedMs;
+        }
+
+        /** 错误来源分类，与面试层 {@code InterviewFailure.Code} 同义。 */
+        public enum Code {
+            TIMEOUT, NETWORK, RATE_LIMITED, UPSTREAM_UNAVAILABLE,
+            INVALID_OUTPUT, AUTH, CONFIG, QUOTA,
+            INPUT, STORAGE, INTERRUPTED, UNKNOWN
         }
     }
 }

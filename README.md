@@ -79,8 +79,8 @@ ASR/TTS 资源和音色按账号实际权限配置。能力接口只检查本机
 - 材料与简历版本使用**本机文件系统**，面试记录使用内存（一天有效，重启丢失）；迁移文件或持久化后才可跨机器恢复。存储层都是接口
   （`MaterialStore` / `ResumeVersionStore`），换 MySQL 只要加一个实现类。
 - 语音面试依赖外部服务；没有密钥时相关能力自动关闭。
-- 本地录音、转写预览和未提交草稿刷新后丢失；已提交记录可恢复。当前真人权限/设备、Safari/Edge、
-  实际 Windows 部署和真实厂商音质/用量验收仍见[剩余计划](docs/superpowers/plans/2026-10-13-interview-voice-volcengine.md)。
+- 原始录音刷新后无法恢复；回答草稿与转写预览按题保存在本机，保留 7 天。已提交记录当前暂存在后端内存中，创建后一天内可恢复，后端重启后失效。当前真人权限/设备、Safari/Edge、
+  实际 Windows 部署和真实厂商音质/用量验收仍见[剩余计划](docs/superpowers/plans/2026-10-17-interview-unified-plan.md)。
 
 ## 验证方式
 

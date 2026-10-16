@@ -1,3 +1,6 @@
+import { createDraftStore } from '../interview/draftStore.js'
+import { getLocalApiBaseUrl, getUserId } from '../api/requestContext.js'
+
 export const DEMO_CREDENTIALS = Object.freeze({
   email: 'demo@resume-helper.cn',
   password: 'ResumeDemo2026!'
@@ -58,6 +61,8 @@ export function clearDemoSession() {
   try {
     window.localStorage.removeItem(SESSION_KEY)
     window.sessionStorage.removeItem(SESSION_KEY)
+    // 退出登录时清掉当前服务地址与用户的本机草稿，避免换账号看到别人草稿。
+    createDraftStore({ storage: window.localStorage, scope: { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() } }).clearScope()
   } catch {
     // The browser may block storage; clearing it must not prevent navigation.
   }

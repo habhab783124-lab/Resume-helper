@@ -176,6 +176,16 @@ export function useInterviewVoice({
       if (request === operation) { request = null; transcribing.value = false }
     }
   }
+  function restorePreview(text) {
+    if (typeof text !== 'string' || !text.trim() || disposed) return false
+    const context = getContext()
+    // A restored preview is inert until explicitly accepted, so it only needs a
+    // live question — not an idle page. acceptPreview still enforces the busy lock.
+    if (!context || context.status !== 'ACTIVE' || !context.sessionId || !context.questionId || context.pending != null) return false
+    // Re-enters at the current generation so acceptPreview still matches.
+    preview.value = { ...context, requestId: '', generation, text }
+    return true
+  }
   function acceptPreview(mode) {
     const value = preview.value
     if (!value || busy.value || !matches(value, value.generation)) return false
@@ -197,5 +207,5 @@ export function useInterviewVoice({
   return { capabilities, capabilityState, capabilityError, asrEnabled, ttsEnabled, maxSeconds, maxBytes,
     recorderState, blob, durationSeconds, recorderError, speechState: speech.state, speechError: speech.error,
     preview, error, transcribing, busy, recordingUrl, loadCapabilities, syncContext, startRecording, stopRecording,
-    cancelRecording, cancelTranscription, transcribe, acceptPreview, playQuestion, stopQuestion: speech.stop, replayRecording, dispose }
+    cancelRecording, cancelTranscription, transcribe, acceptPreview, restorePreview, playQuestion, stopQuestion: speech.stop, replayRecording, dispose }
 }

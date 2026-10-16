@@ -31,6 +31,21 @@ test('transcription creates a preview without submitting or overwriting; confirm
   await f.voice.transcribe(); f.voice.acceptPreview('replace'); assert.equal(f.draft.value, '转写全文')
   await f.voice.transcribe(); f.voice.acceptPreview('keep'); assert.equal(f.draft.value, '转写全文'); assert.equal(f.voice.preview.value, null)
 })
+test('restorePreview reseeds an acceptable preview; a busy page can see it but not accept it', () => {
+  const f = setup()
+  f.voice.cancelTranscription()
+  assert.equal(f.voice.restorePreview(''), false)
+  assert.equal(f.voice.restorePreview('刷新前留下的转写'), true)
+  assert.equal(f.voice.preview.value.text, '刷新前留下的转写')
+  assert.equal(f.draft.value, '原草稿', '取消识别不擦除已有文字')
+  f.context.value.blocked = true
+  assert.equal(f.voice.acceptPreview('replace'), false, 'busy 时不能接受转写')
+  f.context.value.blocked = false
+  f.voice.acceptPreview('replace')
+  assert.equal(f.draft.value, '刷新前留下的转写')
+  f.context.value.pending = '已提交'
+  assert.equal(f.voice.restorePreview('待提交时不应恢复'), false)
+})
 test('canceled results are dropped; recording remains available for retry', async () => {
   const delayed = deferred(); const f = setup({ api: { transcribe: () => delayed.promise } }); await recording(f)
   const request = f.voice.transcribe(); f.voice.cancelTranscription(); delayed.resolve({ sessionId: 's1', questionId: 'q1', requestId: 'uuid-1', text: '迟到' }); await request

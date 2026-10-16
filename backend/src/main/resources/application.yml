@@ -143,6 +143,21 @@ app:
       csv-location: classpath:jobs/sample-jobs.csv
 
   interview:
+    # 面试会话快照存放目录（相对 JVM 工作目录），重启后据此恢复。
+    storage-dir: ${INTERVIEW_STORAGE_DIR:./data/interviews}
+    # 阶段 A 新快照保留期：创建起 24 小时；历史功能交付后新会话默认 30 天。
+    retention-days: 1
+    # 首题/后续出题：最多额外自动重试 5 次（总计最多 6 次模型请求）。
+    max-retries: 5
+    # 一次生成操作的总预算，含排队、每次调用与重试间隔。
+    generation-deadline-seconds: 120
+    # 单次模型调用的超时上限。
+    attempt-timeout-seconds: 60
+    # 各次重试前的基础等待（毫秒），实际叠加小幅抖动并尊重 Retry-After。
+    retry-delays-ms: [1000, 2000, 4000, 8000, 16000]
+    # 后台生成的有界线程池与排队上限；拒绝排队时操作写为明确 FAILED。
+    generation-workers: 4
+    generation-queue-capacity: 32
     speech:
       # 火山豆包语音，独立于上面的文本模型配置：两套密钥体系不通，
       # 实测方舟 ark- 前缀的 key 调语音接口直接 401，不能借用 AI_API_KEY。

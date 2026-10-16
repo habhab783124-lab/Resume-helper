@@ -8,7 +8,7 @@ import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specia
 const source = readFileSync(new URL('../views/Report.vue', import.meta.url), 'utf8')
 const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import\s.*$/gm, '').replace(/import\.meta\.env/g, '({})')
-  + '\nreturn { report, session, loading, retryBusy, error, hasOverallScore, needsScoring, scoreLevel, scoreColor, statusLabel, scopeLabel, reviewedTurns, loadReport, retryScoring, printReport, questionLabel, algorithmUrl };'
+  + '\nreturn { report, session, loading, retryBusy, error, hasOverallScore, needsScoring, scoreLevel, scoreColor, statusLabel, scopeLabel, reviewedTurns, loadReport, retryScoring, expandPrintDetails, restorePrintDetails, onExportMarkdown, onExportPdf, questionLabel, algorithmUrl };'
 function mount(api, sessionId = 's1', browser = {}) {
   const mounted = [], unmounted = []
   const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'window', 'document', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
@@ -91,7 +91,7 @@ test('template exposes all evidence dimensions, status guards and text-safe prin
   assert.match(source, /:key="fb.questionId"/); assert.doesNotMatch(source, /v-html|overallScore\s*\?\?\s*0|目前回答比较完整/)
   assert.match(source, /出题前锁定相对权重/); assert.match(source, /主问题合计 80%/); assert.match(source, /专项题固定 20%/)
   assert.match(source, /fb.followUps/); assert.match(source, /追问.*并入/)
-  assert.match(source, /@media print/); assert.match(source, /beforeprint/); assert.match(source, /afterprint/)
+  assert.match(source, /@media print/); assert.match(source, /export-menu/); assert.match(source, /onExportPdf/)
 })
 
 test('algorithm row retains fixed weight, source identity and nested follow-up answers', async () => {
@@ -121,17 +121,18 @@ test('a professional case keeps the specialty20 percent and never receives an al
 })
 
 
-test('print expands all question details for both button and native print, then restores open state and event listeners', async () => {
-  const details = [{ open: false }, { open: true }], listeners = new Map()
-  let prints = 0
-  const window = { addEventListener: (name, fn) => listeners.set(name, fn), removeEventListener: name => listeners.delete(name),
-    print: () => { prints++; assert.ok(details.every(detail => detail.open)) } }
+test('PDF export helpers expand all question details then restore prior open state', () => {
+  const details = [{ open: false }, { open: true }]
   const document = { querySelectorAll: selector => { assert.equal(selector, '#page-report details'); return details } }
-  const view = mount(api(result()), 's1', { window, document })
-  view.mounted.forEach(fn => fn())
-  view.printReport(); assert.equal(prints, 1); assert.deepEqual(details.map(detail => detail.open), [false, true])
-  listeners.get('beforeprint')(); assert.ok(details.every(detail => detail.open))
-  listeners.get('beforeprint')(); listeners.get('afterprint')(); assert.deepEqual(details.map(detail => detail.open), [false, true])
-  listeners.get('beforeprint')(); view.unmounted.forEach(fn => fn())
-  assert.equal(listeners.size, 0); assert.deepEqual(details.map(detail => detail.open), [false, true])
+  const view = mount(api(result()), 's1', { document })
+  view.expandPrintDetails()
+  assert.ok(details.every(detail => detail.open))
+  view.restorePrintDetails()
+  assert.deepEqual(details.map(detail => detail.open), [false, true])
+  // 可重入：再次展开并恢复仍回到原始状态
+  view.expandPrintDetails(); view.restorePrintDetails()
+  assert.deepEqual(details.map(detail => detail.open), [false, true])
+  // 导出 handler 已绑定（实际 DOM/依赖在 node 下不可用，仅校验契约）
+  assert.equal(typeof view.onExportMarkdown, 'function')
+  assert.equal(typeof view.onExportPdf, 'function')
 })

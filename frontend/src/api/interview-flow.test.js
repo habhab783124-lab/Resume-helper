@@ -3,6 +3,7 @@ import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { ref, computed, reactive, watch } from 'vue'
+import { isNewInterviewRoute } from '../interview/interviewNavigation.js'
 
 // 直接执行 Interview.vue 的 <script setup> 源码，注入最小 Vue 替身与 API stub。
 // 不依赖真实浏览器，就能断言提交恢复这条链路上的边界行为。
@@ -14,18 +15,29 @@ const setupBody = /<script setup>([\s\S]*?)<\/script>/.exec(viewSource)[1]
   + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, material };'
 
 function mount(apiStub) {
-  const mounted = [], unmounted = [], pushes = [], events = []
+  const mounted = [], unmounted = [], pushes = [], events = [], storeCalls = []
   const fakeVoice = { busy: ref(false), preview: ref(null),
     syncContext() { events.push('sync') }, dispose() { events.push('dispose') }, loadCapabilities() { events.push('capabilities') },
-    acceptPreview() { return false }, cancelRecording() { events.push('cancel-recording') } }
+    acceptPreview() { return false }, restorePreview() { return false }, cancelRecording() { events.push('cancel-recording') } }
+  // 草稿存储用记录型替身：不碰真实 localStorage，又能断言「提交成功才清理」。
+  const drafts = () => ({
+    save: (sessionId, questionId, payload) => { storeCalls.push(['save', sessionId, questionId, payload]); return { saved: true } },
+    load: () => null,
+    remove: (sessionId, questionId) => { storeCalls.push(['remove', sessionId, questionId]); return true },
+    clearScope: () => 0,
+    keyFor: (sessionId, questionId) => `${sessionId}|${questionId}`,
+  })
   // 模型凭据改由 Settings 页写入共享存储、api 层读取，面试页不再持有它们，
   // 所以这里也不再注入 getAiSettings / setAiSettings。
   const view = new Function(
-    'ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRouter', 'useInterviewVoice', setupBody)(
+    'ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', setupBody)(
     ref, computed, reactive, watch, callback => mounted.push(callback), callback => unmounted.push(callback), () => apiStub,
+    drafts, () => '', () => 'demo-user',
+    () => ({ query: {} }),
     () => ({ push: route => { events.push('route'); pushes.push(route) } }),
+    isNewInterviewRoute,
     () => fakeVoice)
-  Object.assign(view, { pushes, events, mounted, unmounted })
+  Object.assign(view, { pushes, events, mounted, unmounted, storeCalls })
   return view
 }
 
@@ -86,6 +98,21 @@ test('unknown outcome locks the original answer for a safe retry', async () => {
   assert.equal(view.uncertainAnswer.value, '一段回答', '结果不明时锁定原回答，避免重复提交')
   assert.equal(view.answer.value, '一段回答')
   assert.equal(view.error.value, '网络中断')
+})
+
+test('a confirmed submit clears that question\'s draft, a failed submit keeps it', async () => {
+  const ok = mount({
+    answer: async (_id, body) => session([{ questionId: 'q1', question: '介绍项目', answer: body.answer }], { questionId: 'q2', question: '后续追问' }),
+  })
+  ok.applySession(firstQuestion); ok.answer.value = '我的回答'
+  await ok.submitAnswer()
+  assert.deepEqual(ok.storeCalls.filter(([op]) => op === 'remove'), [['remove', 's1', 'q1']], '服务端已确认提交，应清掉该题草稿')
+
+  const failed = mount({ answer: async () => { throw Object.assign(new Error('网络中断'), { status: 400 }) } })
+  failed.applySession(firstQuestion); failed.answer.value = '待重传'
+  await failed.submitAnswer()
+  assert.equal(failed.storeCalls.filter(([op]) => op === 'remove').length, 0, '提交失败必须保留草稿')
+  assert.ok(failed.storeCalls.some(([op, , question]) => op === 'save' && question === 'q1'), '失败前的草稿仍落在本机')
 })
 
 test('rejects an overlong draft before submitting', () => {

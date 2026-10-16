@@ -7,7 +7,7 @@ import { setAiSettings } from './requestContext.js'
 const source = readFileSync(new URL('../views/Report.vue', import.meta.url), 'utf8')
 const setup = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import .*$/gm, '').replace(/import\.meta\.env/g, '({})')
-  + '\nreturn { loadReport, report, error, loading, sessionRole, session: typeof session === "undefined" ? null : session, printReport: typeof printReport === "undefined" ? null : printReport, warning: typeof warning === "undefined" ? null : warning }'
+  + '\nreturn { loadReport, report, error, loading, sessionRole, session: typeof session === "undefined" ? null : session, onExportMarkdown: typeof onExportMarkdown === "undefined" ? null : onExportMarkdown, onExportPdf: typeof onExportPdf === "undefined" ? null : onExportPdf, warning: typeof warning === "undefined" ? null : warning }'
 function mount(api, query = { sessionId: 's1' }) {
   const printed = []
   const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRoute', 'useRouter', 'window', setup)(
@@ -61,13 +61,15 @@ test('role fetch failure leaves a valid report visible with an explanation', asy
   assert.match(source, /warning/)
 })
 
-test('expired session gives a restart message and safe print invokes the browser', async () => {
+test('expired session gives a restart message and export handlers are wired', async () => {
   const view = mount({ report: async () => { throw Object.assign(Error('expired'), { status: 404 }) }, getSession: async () => { throw Error('gone') } })
   await view.loadReport()
   assert.match(view.error.value, /过期.*重新/)
-  assert.equal(typeof view.printReport, 'function')
-  view.printReport()
-  assert.deepEqual(view.printed, [true])
-  assert.match(source, /@click="printReport"/)
-  assert.ok(!source.includes('@click="window.print()"'))
+  // 导出 handler 已就位（实际 DOM/依赖在 node 下不可用，仅校验契约存在且模板已绑定）
+  assert.equal(typeof view.onExportMarkdown, 'function')
+  assert.equal(typeof view.onExportPdf, 'function')
+  assert.match(source, /@click="onExportMarkdown"/)
+  assert.match(source, /@click="onExportPdf"/)
+  assert.ok(!source.includes('printReport'))
+  assert.ok(!source.includes('window.print'))
 })

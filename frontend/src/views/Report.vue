@@ -3,7 +3,9 @@ import { computed, onMounted, onUnmounted, ref } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
 import { algorithmUrl } from '../interview/algorithmSource.js'
+import { newInterviewRoute } from '../interview/interviewNavigation.js'
 import { isSpecialty, specialtyLabel } from '../interview/specialtyPresentation.js'
+import { downloadReportMarkdown, exportReportToPdf } from '../utils/reportExport.js'
 
 const route = useRoute()
 const router = useRouter()
@@ -119,22 +121,40 @@ function restorePrintDetails() {
   printDetails?.forEach(([element, open]) => { element.open = open })
   printDetails = null
 }
-function printReport() {
-  if (typeof window === 'undefined' || typeof window.print !== 'function') return
-  expandPrintDetails()
-  try { window.print() } finally { restorePrintDetails() }
+
+const exporting = ref(false)
+const exportMenuRef = ref(null)
+function closeExportMenu() {
+  const el = exportMenuRef.value
+  if (el && typeof el.open !== 'undefined') el.open = false
+}
+async function onExportMarkdown() {
+  if (exporting.value || !report.value) return
+  closeExportMenu()
+  try { downloadReportMarkdown(report.value, { session: session.value, role: sessionRole.value }) }
+  catch (cause) { error.value = cause.message || '导出 Markdown 失败，请稍后再试。' }
+}
+async function onExportPdf() {
+  if (exporting.value || !report.value) return
+  closeExportMenu()
+  exporting.value = true
+  error.value = ''
+  try {
+    const el = document.querySelector('#page-report')
+    await exportReportToPdf(el, {
+      role: sessionRole.value,
+      expandDetails: expandPrintDetails,
+      restoreDetails: restorePrintDetails,
+    })
+  } catch (cause) {
+    error.value = cause.message || '导出 PDF 失败，请稍后再试。'
+  } finally {
+    exporting.value = false
+  }
 }
 
-onMounted(() => {
-  loadReport()
-  window.addEventListener('beforeprint', expandPrintDetails)
-  window.addEventListener('afterprint', restorePrintDetails)
-})
-onUnmounted(() => {
-  window.removeEventListener('beforeprint', expandPrintDetails)
-  window.removeEventListener('afterprint', restorePrintDetails)
-  restorePrintDetails()
-})
+onMounted(() => { loadReport() })
+onUnmounted(() => { restorePrintDetails() })
 </script>
 
 <template>
@@ -167,9 +187,15 @@ onUnmounted(() => {
         <h1>一次练习，一点进步<span class="greeting-dot">。</span></h1>
         <p>把反馈变成下一次表达的起点。</p>
       </div>
-      <button class="button button-outline" @click="printReport">
-        <svg><use href="#i-download"/></svg>导出练习报告
-      </button>
+      <details class="export-menu" ref="exportMenuRef">
+        <summary class="button button-outline">
+          <svg><use href="#i-download"/></svg>{{ exporting ? '正在生成 PDF…' : '导出报告' }}
+        </summary>
+        <div class="export-menu-list" v-if="!exporting">
+          <button type="button" @click="onExportMarkdown">导出 Markdown (.md)</button>
+          <button type="button" @click="onExportPdf">导出 PDF (.pdf)</button>
+        </div>
+      </details>
     </div>
 
     <div class="report-meta">
@@ -218,7 +244,7 @@ onUnmounted(() => {
           <li v-for="(s, i) in (report.suggestions || []).slice(0, 3)" :key="i">{{ s }}</li>
           <li v-if="!report.suggestions?.length">暂无有效反馈。</li>
         </ul>
-        <button class="button button-dark" @click="router.push({ name: 'Interview' })">
+        <button data-testid="practice-again" class="button button-dark" @click="router.push(newInterviewRoute(sessionId))">
           再练习一次 <svg><use href="#i-arrow"/></svg>
         </button>
       </section>
@@ -463,4 +489,36 @@ onUnmounted(() => {
     display: none;
   }
 }
+.export-menu { position: relative; display: inline-block; }
+.export-menu summary { list-style: none; cursor: pointer; }
+.export-menu summary::-webkit-details-marker { display: none; }
+.export-menu-list {
+  position: absolute;
+  right: 0;
+  top: 100%;
+  margin-top: 6px;
+  background: #fff;
+  border: 1px solid #e6e9e1;
+  border-radius: 5px;
+  box-shadow: 0 6px 20px rgba(0, 0, 0, 0.08);
+  display: flex;
+  flex-direction: column;
+  min-width: 168px;
+  z-index: 20;
+}
+.export-menu-list button {
+  border: 0;
+  background: transparent;
+  padding: 9px 14px;
+  text-align: left;
+  font: inherit;
+  font-size: 12px;
+  color: #405246;
+  cursor: pointer;
+}
+.export-menu-list button:hover { background: #f4f7f0; }
+#page-report.is-exporting { width: 794px; background: #fff; }
+#page-report.is-exporting .export-menu,
+#page-report.is-exporting .scoring-retry,
+#page-report.is-exporting [data-testid="practice-again"] { display: none !important; }
 </style>

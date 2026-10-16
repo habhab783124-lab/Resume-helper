@@ -7,14 +7,16 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "node --test src/api/*.test.js src/interview/*.test.js"
+    "test": "node --test src/api/*.test.js src/interview/*.test.js src/utils/*.test.js"
   },
   "dependencies": {
-    "vue": "^3.5.12",
-    "vue-router": "^4.4.5",
-    "element-plus": "^2.8.5",
     "@element-plus/icons-vue": "^2.3.1",
-    "axios": "^1.7.7"
+    "axios": "^1.7.7",
+    "element-plus": "^2.8.5",
+    "html2canvas": "^1.4.1",
+    "jspdf": "^4.2.1",
+    "vue": "^3.5.12",
+    "vue-router": "^4.4.5"
   },
   "devDependencies": {
     "@vitejs/plugin-vue": "^5.1.4",

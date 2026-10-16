@@ -6,6 +6,8 @@ import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shijie.resumehelper.common.ai.AiClient;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Component;
 
 import java.io.IOException;
@@ -19,6 +21,7 @@ public class InterviewAgent {
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
     private static final String POLICY = policyDescription();
+    private static final Logger LOG = LoggerFactory.getLogger(InterviewAgent.class);
 
     public record AiCheck(String model) {}
     public record AssessmentInput(InterviewService.Turn turn, InterviewQuestion contract,
@@ -62,7 +65,8 @@ public class InterviewAgent {
             ai.chat("连通性检查工具。无论收到什么内容，只回复两个字：正常。", "请确认连通性", 10);
             return new AiCheck(ai.name());
         } catch (AiClient.AiException e) {
-            throw new InterviewException(e.retryable() ? 502 : 400, e.getMessage());
+            recordFailure("CHECK", ai, e);
+            throw new InterviewException(e.retryable() ? 502 : 400, e.getMessage(), InterviewFailure.from(e));
         }
     }
 
@@ -96,8 +100,10 @@ public class InterviewAgent {
             return new Opening(parseQuestion(node), new InterviewSpecialty(
                     InterviewSpecialty.Kind.valueOf(text(plan, "kind", 20)), text(plan, "focus", 200), text(plan, "reason", 500)));
         } catch (AiClient.AiException e) {
+            recordFailure("OPENING", ai, e);
             throw new InterviewException(e.retryable() ? 502 : 400, e.retryable()
-                    ? "模型调用失败，请稍后重试" : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试");
+                    ? "模型调用失败，请稍后重试" : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试",
+                    InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
             throw new InterviewException(502, "模型未返回有效首题与专项计划，请重试");
         }
@@ -133,8 +139,10 @@ public class InterviewAgent {
             if (nextMainIndex == 13 && !followUp) return new Proposal(null, false);
             return new Proposal(parseQuestion(node), followUp);
         } catch (AiClient.AiException e) {
+            recordFailure("NEXT", ai, e);
             throw new InterviewException(e.retryable() ? 502 : 400,
-                    e.retryable() ? "模型调用失败，请稍后重试；当前回答已保留" : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试");
+                    e.retryable() ? "模型调用失败，请稍后重试；当前回答已保留" : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试",
+                    InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
             throw new InterviewException(502, "模型未返回有效问题与评分标准，请重试");
         }
@@ -172,9 +180,11 @@ public class InterviewAgent {
             return new InterviewQuestion(question.text(), question.competency(), question.importance(), question.difficulty(),
                     "专业案例题固定占本轮综合评分20%", question.criteria(), question.rubricVersion());
         } catch (AiClient.AiException e) {
+            recordFailure("CASE", ai, e);
             throw new InterviewException(e.retryable() ? 502 : 400, e.retryable()
                     ? "专业案例生成失败，请重试；专项计划和当前回答已保留"
-                    : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试；专项计划和当前回答已保留");
+                    : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试；专项计划和当前回答已保留",
+                    InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
             throw new InterviewException(502, "专业案例生成失败，请重试；专项计划和当前回答已保留");
         }
@@ -205,9 +215,11 @@ public class InterviewAgent {
                     "算法题固定占本轮综合评分20%", Arrays.stream(InterviewQuestion.Dimension.values()).map(d -> new InterviewQuestion.Criterion(d,
                         switch(d) { case CORRECTNESS -> "算法与代码或伪代码能正确完成本题目标"; case COVERAGE -> "覆盖题目约束、边界和必要异常情况"; case REASONING -> "解释思路、关键推导和时间空间复杂度"; case EVIDENCE -> "用具体示例或过程支持正确性与复杂度判断"; case CLARITY -> "表达有序且实现可理解"; })).toList(), InterviewScoringPolicy.VERSION);
         } catch (AiClient.AiException e) {
+            recordFailure("ALGORITHM", ai, e);
             throw new InterviewException(e.retryable() ? 502 : 400, e.retryable()
                     ? "算法题生成失败，请重试；已选题目和当前回答已保留"
-                    : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试；已选题目和当前回答已保留");
+                    : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试；已选题目和当前回答已保留",
+                    InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
             throw new InterviewException(502, "算法题生成失败，请重试；已选题目和当前回答已保留");
         }
@@ -269,9 +281,27 @@ public class InterviewAgent {
                 }
             }
             return Map.copyOf(results);
-        } catch (AiClient.AiException | IOException | IllegalArgumentException e) {
+        } catch (AiClient.AiException e) {
+            recordFailure("ASSESS", ai, e);
+            return Map.of();
+        } catch (IOException | IllegalArgumentException e) {
             return Map.of();
         }
+    }
+
+    /**
+     * 结构化记录一次模型调用失败。T01 只记录当前可得的关联字段：
+     * stage / model / elapsedMs / failureCode / retryable。
+     * requestId / sessionId / generationId / attempt 由后续任务在持有上下文时补入；
+     * 不输出简历、回答、Key 或上游原始响应。
+     */
+    private void recordFailure(String stage, AiClient ai, AiClient.AiException e) {
+        LOG.warn("模型调用失败 stage={} model={} elapsedMs={} failureCode={} retryable={}",
+                stage,
+                ai == null ? "?" : ai.name(),
+                e.elapsedMs(),
+                e.code(),
+                e.retryable());
     }
 
     private static JsonNode readObject(String raw, int limit) throws IOException {

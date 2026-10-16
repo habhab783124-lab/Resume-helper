@@ -1,11 +1,15 @@
 <script setup>
 import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
-import { useRouter } from 'vue-router'
+import { useRoute, useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
 import { useInterviewVoice } from '../interview/useInterviewVoice.js'
+import { createDraftStore } from '../interview/draftStore.js'
+import { getLocalApiBaseUrl, getUserId } from '../api/requestContext.js'
 import { algorithmUrl } from '../interview/algorithmSource.js'
 import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specialtyPresentation.js'
+import { isNewInterviewRoute, sourceSessionId } from '../interview/interviewNavigation.js'
 
+const route = useRoute()
 const router = useRouter()
 const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '') })
 const storageKey = 'career-studio-interview-id'
@@ -49,6 +53,68 @@ const voice = reactive(useInterviewVoice({ api, getContext: voiceContext,
   syncSession: syncVoiceSession, pauseReplay: pauseRecordingReplay }))
 const locked = computed(() => !!busy.value || voice.busy)
 watch(pending, () => voice.syncContext(), { flush: 'sync' })
+
+// 按题落在本机的草稿：300ms 防抖，离开页面或刷新立即落盘。
+// 存储不可用只提示，不影响作答。
+const DRAFT_DEBOUNCE_MS = 300
+const draftStatus = ref('')
+const draftConflict = ref(null)
+let draftKey = ''
+let draftStamp = 0
+let draftTimer = null
+function draftStore() {
+  return createDraftStore({ storage: globalThis.localStorage, scope: { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() } })
+}
+function draftTarget() {
+  const sessionId = session.value?.sessionId
+  const questionId = current.value?.questionId
+  return sessionId && questionId ? { sessionId, questionId } : null
+}
+function saveDraft() {
+  if (draftTimer) { clearTimeout(draftTimer); draftTimer = null }
+  const target = draftTarget()
+  if (!target) return { saved: false, reason: 'UNAVAILABLE' }
+  const store = draftStore()
+  const result = store.save(target.sessionId, target.questionId, { text: answer.value, previewText: voice.preview?.text || '' })
+  draftKey = store.keyFor(target.sessionId, target.questionId)
+  draftStamp = Date.now()
+  draftStatus.value = result.saved ? '' : result.reason === 'QUOTA' ? '本机存储空间已满，草稿暂无法自动保存。' : '本机自动保存不可用。'
+  return result
+}
+function scheduleDraftSave() {
+  if (draftTimer) clearTimeout(draftTimer)
+  draftTimer = setTimeout(() => { draftTimer = null; saveDraft() }, DRAFT_DEBOUNCE_MS)
+}
+function applyQuestionDraft() {
+  const target = draftTarget()
+  const key = target ? draftStore().keyFor(target.sessionId, target.questionId) : ''
+  // 换题时重置冲突状态，否则上一题的时间戳会误判新一题的草稿。
+  if (draftKey !== key) { draftKey = key; draftStamp = 0 }
+  if (!target || answer.value || pending.value != null) return
+  const draft = draftStore().load(target.sessionId, target.questionId)
+  if (!draft) return
+  answer.value = draft.text
+  draftStamp = draft.updatedAt || 0
+  if (draft.previewText) voice.restorePreview(draft.previewText)
+  draftStatus.value = ''
+}
+function chooseDraft(kind) {
+  const other = draftConflict.value
+  draftConflict.value = null
+  if (!other || kind === 'local') { draftStamp = Date.now(); return }
+  answer.value = other.text || ''
+  voice.restorePreview(other.previewText || '')
+  draftStamp = other.updatedAt || 0
+  draftStatus.value = ''
+}
+function onDraftStorage(event) {
+  if (!event.key || event.key !== draftKey) return
+  let other
+  try { other = JSON.parse(event.newValue) } catch { return }
+  if (!other || typeof other.updatedAt !== 'number' || other.updatedAt <= draftStamp) return
+  if (other.text === answer.value) return
+  draftConflict.value = other
+}
 function remember(id) {
   try { id ? sessionStorage.setItem(storageKey, id) : sessionStorage.removeItem(storageKey) } catch { /* Storage is optional. */ }
 }
@@ -62,6 +128,7 @@ function applySession(value) {
   uncertainAnswer.value = null
   answer.value = value.pendingAnswer ?? (sameQuestion ? draft : '')
   voice.syncContext()
+  applyQuestionDraft()
 }
 async function syncVoiceSession(context, canApply = () => true, signal) {
   try {
@@ -107,6 +174,8 @@ function start() {
   if (!material.value?.text?.trim()) { error.value = '请先上传有效简历或粘贴简历文本。'; return }
   return run('正在生成第一题…', async () => {
     applySession(await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: 13 }))
+    // 新场次已经建立，清掉 URL 上的「新一轮」意图，否则刷新会丢掉刚开始的练习。
+    if (route.query.intent === 'new') router.replace({ name: 'Interview' })
   })
 }
 function submitAnswer() {
@@ -116,15 +185,22 @@ function submitAnswer() {
   if (text.length > 5000) { error.value = '回答不能超过 5000 字，请精简后提交。'; return false }
   const questionId = current.value.questionId
   const sessionId = session.value.sessionId
+  saveDraft()
   return run('正在处理回答并生成后续问题…', async () => {
     uncertainAnswer.value = text
     try {
       applySession(await api.answer(sessionId, { questionId, answer: text }))
       if (session.value.turns.find(turn => turn.questionId === questionId)?.answer !== text) throw new Error('尚未确认回答保存成功，请重试恢复后继续。')
+      // 服务端已确认这道题，本机草稿不再需要；失败路径保留草稿供重试。
+      draftStore().remove(sessionId, questionId)
     } catch (cause) {
       let recovered = false
       try { applySession(await api.getSession(sessionId)); recovered = true } catch { /* Keep the original answer for a safe retry. */ }
-      if (recovered && session.value.turns.find(turn => turn.questionId === questionId)?.answer === text) return
+      if (recovered && session.value.turns.find(turn => turn.questionId === questionId)?.answer === text) {
+        // 恢复读取确认了服务端已收到同一份回答，草稿同样可以清掉。
+        draftStore().remove(sessionId, questionId)
+        return
+      }
       if (session.value?.currentQuestion?.questionId === questionId && session.value.pendingAnswer == null) {
         answer.value = text
         uncertainAnswer.value = recovered && cause.status === 400 ? null : text
@@ -169,6 +245,24 @@ async function chooseFinish(choice) {
   }
 }
 function restore() { return run('正在恢复上次练习…', async () => { applySession(await api.getSession(restoreId.value)); restoreId.value = '' }, true) }
+async function prepareNewRound() {
+  // 新一轮只复用上一轮的简历和岗位，不继承它的题目、进度或已结束状态。
+  const source = sourceSessionId(route)
+  remember('')
+  restoreId.value = ''
+  error.value = ''
+  if (!source) return
+  busy.value = '正在读取上一轮的简历与岗位…'
+  try {
+    const previous = await api.getSession(source)
+    targetRole.value = typeof previous.targetRole === 'string' ? previous.targetRole.slice(0, 200) : ''
+    if (previous.materialId) material.value = await api.getMaterial(previous.materialId)
+  } catch {
+    error.value = '上一轮的简历和岗位暂时无法读取，请重新上传简历或填写岗位。'
+  } finally {
+    busy.value = ''
+  }
+}
 function reset() {
   voice.cancelRecording()
   remember('')
@@ -182,12 +276,22 @@ function reset() {
   finishChoice.value = false
   voice.syncContext()
 }
+watch([answer, () => voice.preview?.text], scheduleDraftSave)
 onMounted(() => {
   voice.loadCapabilities()
+  // 离开页面（刷新、关标签）和切到别的后端都会触发，兜住防抖窗口里的最后几笔。
+  globalThis.window?.addEventListener('pagehide', saveDraft)
+  globalThis.window?.addEventListener('storage', onDraftStorage)
   try { restoreId.value = sessionStorage.getItem(storageKey) || '' } catch { /* Storage is optional. */ }
+  if (isNewInterviewRoute(route)) return prepareNewRound()
   if (restoreId.value) restore()
 })
-onUnmounted(() => voice.dispose())
+onUnmounted(() => {
+  saveDraft()
+  globalThis.window?.removeEventListener('pagehide', saveDraft)
+  globalThis.window?.removeEventListener('storage', onDraftStorage)
+  voice.dispose()
+})
 </script>
 
 <template>
@@ -197,6 +301,14 @@ onUnmounted(() => voice.dispose())
       <main class="interview-main" :aria-busy="locked">
         <div v-if="error" class="notice error" role="alert">{{ error }}</div>
         <div v-if="busy" class="notice" role="status">{{ busy }}</div>
+        <div v-if="draftStatus" class="notice" role="status">{{ draftStatus }}</div>
+        <div v-if="draftConflict" class="notice" role="status">
+          <p>另一个标签页保存了这道题更新的草稿，请选择要保留的版本。</p>
+          <div class="voice-actions">
+            <button data-testid="draft-load-other" class="button button-primary" :disabled="locked" @click="chooseDraft('other')">载入另一版本</button>
+            <button data-testid="draft-keep-local" class="button button-ghost" :disabled="locked" @click="chooseDraft('local')">保留当前版本</button>
+          </div>
+        </div>
         <div v-if="restoreId && !session" class="restore-actions"><p>发现上次练习，恢复后可继续回答或结束面试。</p><button class="button button-primary" :disabled="locked" @click="restore">重试恢复</button><button class="text-button" :disabled="locked" @click="reset">开始新的练习</button></div>
         <template v-else-if="!session">
           <div class="interview-session-top"><div><span class="session-overline">BEFORE WE BEGIN</span><h2>准备你的简历</h2><span class="session-company">上传、确认内容，再开始面试</span></div></div>
@@ -285,7 +397,7 @@ onUnmounted(() => voice.dispose())
             <button v-if="active" data-testid="finish-interview" class="text-button" :disabled="locked" @click="finish">结束本次面试</button>
             <template v-else><button data-testid="view-report" class="button button-primary" :disabled="locked" @click="viewReport">查看报告</button><button class="button button-ghost" :disabled="locked" @click="reset">开始新的练习</button></template>
           </div>
-          <p class="interview-footnote">本地录音、转写预览和未提交草稿在刷新后无法恢复。已提交面试记录可在一天内恢复，后端重启后失效。请勿在简历或回答中填写不必要的敏感信息。</p>
+          <p class="interview-footnote">本地录音在刷新后无法恢复，请重新录音；回答文字与转写预览按题保存在本机，保留 7 天。已提交面试记录可在一天内恢复，后端重启后失效。请勿在简历或回答中填写不必要的敏感信息。</p>
         </template>
       </main>
       <aside class="interview-aside"><div class="aside-quote-mark">“</div><div class="eyebrow">A THOUGHT BEFORE YOU BEGIN</div><h3>不必急着<br>给出完美答案。</h3><p>面试更像一次专业对话。讲清楚你的思路、选择和真实贡献，就已经很好。</p><div class="aside-divider"></div><div class="interview-aside-meta"><span>本次练习关注</span><ul><li><i>01</i> 项目表达</li><li><i>02</i> 技术理解</li><li><i>03</i> 逻辑结构</li></ul></div></aside>

@@ -14,8 +14,11 @@ import org.springframework.web.multipart.support.MissingServletRequestPartExcept
 @Order(-1)
 public class InterviewErrorHandler {
     @ExceptionHandler(InterviewException.class)
-    public ResponseEntity<ApiResponse<Void>> interview(InterviewException e) {
-        return ResponseEntity.status(e.status()).body(ApiResponse.fail(e.getMessage()));
+    public ResponseEntity<ApiResponse<Object>> interview(InterviewException e) {
+        // 失败 data 为 InterviewFailure（可机器读取的 code/retryable/retryAfterMs）；
+        // 无 failure 的纯人类可读错误仍保持 data 为 null。
+        return ResponseEntity.status(e.status())
+                .body(new ApiResponse<>(false, e.getMessage(), e.failure()));
     }
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ApiResponse<Void>> invalid(IllegalArgumentException e) {

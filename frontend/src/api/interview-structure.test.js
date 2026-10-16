@@ -10,8 +10,9 @@ const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import\s.*$/gm, '').replace(/import\.meta\.env/g, '({})')
   + '\nreturn { applySession, start, material, completed, completedRoots, currentMetadata, questionLabel, algorithmUrl };'
 function mount(api = {}) {
-  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRouter', 'createInterviewApi', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
-    ref, computed, reactive, watch, () => {}, () => {}, () => ({ push() {} }), () => api,
+  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
+    ref, computed, reactive, watch, () => {}, () => {}, () => ({ query: {} }), () => ({ push() {} }), () => api,
+    () => ({ save() { return { saved: true } }, load() { return null }, remove() { return true }, clearScope() { return 0 }, keyFor() { return '' } }), () => '', () => 'demo-user',
     () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance)
 }
 const turn = (id, answer = '已回答') => ({ questionId: id, question: id, answer })

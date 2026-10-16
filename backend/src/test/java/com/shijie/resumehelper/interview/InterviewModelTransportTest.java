@@ -132,4 +132,99 @@ class InterviewModelTransportTest {
             assertTrue(thrown.getMessage().contains("302"), "302 未被跟随而被当成异常状态返回：" + thrown.getMessage());
         } finally { server.stop(0); }
     }
+
+    // --- T01：错误分类与可追踪记录 ---
+    // 每类故障必须映射成可机器读取的 code，供后续重试策略和前端状态使用。
+    private static HttpServer statusServer(int status, String body, String... retryAfter) throws Exception {
+        var s = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        s.createContext("/v1/chat/completions", exchange -> {
+            exchange.getResponseHeaders().add("Content-Type", "application/json");
+            if (retryAfter.length > 0) exchange.getResponseHeaders().add("Retry-After", retryAfter[0]);
+            byte[] bytes = body.getBytes(StandardCharsets.UTF_8);
+            exchange.sendResponseHeaders(status, bytes.length);
+            exchange.getResponseBody().write(bytes);
+            exchange.close();
+        });
+        s.start();
+        return s;
+    }
+    private static AiClient clientAt(HttpServer server) {
+        return new OpenAiCompatibleAiClient(new AiCredentials("test-only-key",
+                "http://127.0.0.1:" + server.getAddress().getPort() + "/v1", "test-model"),
+                new AiProperties(), new ObjectMapper());
+    }
+
+    @Test void authError401MapsToAuthCode() throws Exception {
+        var server = statusServer(401, "{\"error\":{\"message\":\"unauthorized\"}}");
+        try {
+            var thrown = assertThrows(AiClient.AiException.class, () -> clientAt(server).chat("系统", "用户"));
+            assertEquals(AiClient.AiException.Code.AUTH, thrown.code());
+            assertFalse(thrown.retryable());
+            assertTrue(thrown.elapsedMs() >= 0);
+        } finally { server.stop(0); }
+    }
+
+    @Test void notFound404MapsToConfigCode() throws Exception {
+        var server = statusServer(404, "{\"error\":{\"message\":\"model not found\"}}");
+        try {
+            var thrown = assertThrows(AiClient.AiException.class, () -> clientAt(server).chat("系统", "用户"));
+            assertEquals(AiClient.AiException.Code.CONFIG, thrown.code());
+            assertFalse(thrown.retryable());
+        } finally { server.stop(0); }
+    }
+
+    @Test void temporary429MapsToRateLimitedWithRetryAfter() throws Exception {
+        // 没有明确额度信号时，429 视为临时限流，可重试，并尊重 Retry-After。
+        var server = statusServer(429, "{\"error\":{\"message\":\"Too many requests\"}}", "5");
+        try {
+            var thrown = assertThrows(AiClient.AiException.class, () -> clientAt(server).chat("系统", "用户"));
+            assertEquals(AiClient.AiException.Code.RATE_LIMITED, thrown.code());
+            assertTrue(thrown.retryable());
+            assertEquals(Long.valueOf(5000L), thrown.retryAfterMs());
+        } finally { server.stop(0); }
+    }
+
+    @Test void quota429MapsToQuotaCodeAndNotRetryable() throws Exception {
+        // 仅当上游明确给出额度耗尽信号时才判 QUOTA，不能只凭 429 就声称额度耗尽。
+        var server = statusServer(429, "{\"error\":{\"message\":\"insufficient_quota\"}}");
+        try {
+            var thrown = assertThrows(AiClient.AiException.class, () -> clientAt(server).chat("系统", "用户"));
+            assertEquals(AiClient.AiException.Code.QUOTA, thrown.code());
+            assertFalse(thrown.retryable());
+        } finally { server.stop(0); }
+    }
+
+    @Test void upstreamUnavailable503MapsToUpstreamUnavailable() throws Exception {
+        var server = statusServer(503, "");
+        try {
+            var thrown = assertThrows(AiClient.AiException.class, () -> clientAt(server).chat("系统", "用户"));
+            assertEquals(AiClient.AiException.Code.UPSTREAM_UNAVAILABLE, thrown.code());
+            assertTrue(thrown.retryable());
+        } finally { server.stop(0); }
+    }
+
+    @Test void readTimeoutMapsToTimeoutCode() throws Exception {
+        // 客户端最低 5 秒超时；服务端故意不返回，触发读取超时。
+        var server = HttpServer.create(new InetSocketAddress("127.0.0.1", 0), 0);
+        server.createContext("/v1/chat/completions", exchange -> {
+            try { Thread.sleep(15_000); } catch (InterruptedException ie) { Thread.currentThread().interrupt(); }
+            exchange.close();
+        });
+        server.start();
+        try {
+            var thrown = assertThrows(AiClient.AiException.class, () -> clientAt(server).chat("系统", "用户", 5));
+            assertEquals(AiClient.AiException.Code.TIMEOUT, thrown.code());
+            assertTrue(thrown.retryable());
+            assertTrue(thrown.elapsedMs() >= 4000, "应记录本次调用的耗时：" + thrown.elapsedMs());
+        } finally { server.stop(0); }
+    }
+
+    @Test void malformedJsonMapsToInvalidOutput() throws Exception {
+        var server = statusServer(200, "{not-json");
+        try {
+            var thrown = assertThrows(AiClient.AiException.class, () -> clientAt(server).chat("系统", "用户"));
+            assertEquals(AiClient.AiException.Code.INVALID_OUTPUT, thrown.code());
+            assertTrue(thrown.retryable());
+        } finally { server.stop(0); }
+    }
 }
