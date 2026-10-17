@@ -1,5 +1,12 @@
 # Resume-helper · 拾阶求职工作台
 
+![Java 17](https://img.shields.io/badge/Java-17-ED8B00?logo=openjdk&logoColor=white)
+![Spring Boot 3.2.5](https://img.shields.io/badge/Spring%20Boot-3.2.5-6DB33F?logo=springboot&logoColor=white)
+![Vue 3.5](https://img.shields.io/badge/Vue-3.5-42B883?logo=vuedotjs&logoColor=white)
+![Vite 5](https://img.shields.io/badge/Vite-5-646CFF?logo=vite&logoColor=white)
+![Maven](https://img.shields.io/badge/build-Maven-C71A36?logo=apachemaven&logoColor=white)
+![Node 24+](https://img.shields.io/badge/Node-24%2B-5FA04E?logo=nodedotjs&logoColor=white)
+
 面向应届毕业生的求职准备课程项目：从一份简历材料出发，整理成个人资料，生成定向简历，
 找到匹配的岗位，再练一遍模拟面试。
 
@@ -76,8 +83,10 @@ ASR/TTS 资源和音色按账号实际权限配置。能力接口只检查本机
 - **正式账号认证尚未接入**。当前登录是纯前端演示登录（写死演示账号、只在浏览器本地校验），
   后端的用户身份来自 `X-User-Id` 请求头，**客户端可伪造，只能用于数据分区，不能当权限控制**。
   接入 Spring Security + JWT 时只需改 `common/util/UserContext`，各模块不用动。
-- 材料与简历版本使用**本机文件系统**，面试记录使用内存（一天有效，重启丢失）；迁移文件或持久化后才可跨机器恢复。存储层都是接口
-  （`MaterialStore` / `ResumeVersionStore`），换 MySQL 只要加一个实现类。
+- 材料与简历版本使用**本机文件系统**，面试记录的运行态仍是内存（一天有效，重启丢失）；迁移文件或持久化后才可跨机器恢复。存储层都是接口
+  （`MaterialStore` / `ResumeVersionStore` / `InterviewStore`），换 MySQL 只要加一个实现类。
+  面试快照的文件存储（schemaVersion=2、临时文件原子替换、按用户隔离、默认 `./data/interviews`、创建起 24 小时）已就绪，
+  会话生命周期接入随[统一计划](docs/superpowers/plans/2026-10-17-interview-unified-plan.md)的 T03 完成。
 - 语音面试依赖外部服务；没有密钥时相关能力自动关闭。
 - 原始录音刷新后无法恢复；回答草稿与转写预览按题保存在本机，保留 7 天。已提交记录当前暂存在后端内存中，创建后一天内可恢复，后端重启后失效。当前真人权限/设备、Safari/Edge、
   实际 Windows 部署和真实厂商音质/用量验收仍见[剩余计划](docs/superpowers/plans/2026-10-17-interview-unified-plan.md)。

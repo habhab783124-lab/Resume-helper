@@ -1,31 +1,62 @@
 <script setup>
-import { computed, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
+import { computed, nextTick, onMounted, onUnmounted, reactive, ref, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { createInterviewApi } from '../api/interview.js'
 import { useInterviewVoice } from '../interview/useInterviewVoice.js'
+import { useInterviewPolling } from '../interview/useInterviewPolling.js'
+import { useInterviewConversation } from '../interview/useInterviewConversation.js'
 import { createDraftStore } from '../interview/draftStore.js'
 import { getLocalApiBaseUrl, getUserId } from '../api/requestContext.js'
 import { algorithmUrl } from '../interview/algorithmSource.js'
 import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specialtyPresentation.js'
 import { isNewInterviewRoute, sourceSessionId } from '../interview/interviewNavigation.js'
+import InterviewSetup from '../components/interview/InterviewSetup.vue'
+import InterviewHeader from '../components/interview/InterviewHeader.vue'
+import InterviewInfoDrawer from '../components/interview/InterviewInfoDrawer.vue'
+import InterviewMessages from '../components/interview/InterviewMessages.vue'
+import InterviewComposer from '../components/interview/InterviewComposer.vue'
+import InterviewFinishDialog from '../components/interview/InterviewFinishDialog.vue'
+import { toConversationMessages } from '../interview/conversationMessages.js'
+import { useInterviewFinish } from '../interview/useInterviewFinish.js'
 
 const route = useRoute()
 const router = useRouter()
 const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '') })
-const storageKey = 'career-studio-interview-id'
+let activeScope = { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() }
+let storageKey = `career-studio-interview-id-v2|${activeScope.apiBaseUrl}|${activeScope.userId}`
+const legacyStorageKey = 'career-studio-interview-id'
 const material = ref(null)
-const session = ref(null)
+const infoOpen = ref(false)
+const infoButton = ref(null)
+function openInfo(event) { infoButton.value = event?.currentTarget || null; infoOpen.value = true }
+function closeInfo() { infoOpen.value = false; nextTick(() => infoButton.value?.focus?.()) }
+let conversation
+const polling = useInterviewPolling({ api, onSession: value => applySession(value), onError: () => {
+  if (!error.value) error.value = '会话状态暂时无法读取，正在等待连接恢复。'
+} })
+conversation = useInterviewConversation({ api, polling, storage: globalThis.sessionStorage,
+  scope: { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() },
+  drafts: {
+    save: (...args) => draftStore().save(...args),
+    remove: (...args) => draftStore().remove(...args),
+  } })
+const session = conversation.session
+const phase = conversation.phase
 const paste = ref('')
 const targetRole = ref('')
-const answer = ref('')
+const answer = conversation.draft
 const busy = ref('')
-const error = ref('')
+const error = conversation.error
 const restoreId = ref('')
 const uncertainAnswer = ref(null)
 const finishChoice = ref(false)
+const finishRequestId = ref('')
+const finishRequestKey = ref('')
 const recordingAudio = ref(null)
 const completed = computed(() => session.value?.turns.filter(turn => turn.answer != null) || [])
 const completedRoots = computed(() => completed.value.filter(turn => session.value?.questionMetadata?.[turn.questionId]?.kind !== 'FOLLOW_UP'))
+const conversationMessages = computed(() => session.value
+  ? toConversationMessages({ ...session.value, currentQuestion: null }, conversation.submission.value, phase.value) : [])
 const current = computed(() => session.value?.currentQuestion)
 const currentMetadata = computed(() => session.value?.questionMetadata?.[current.value?.questionId] || {})
 function questionLabel(turn, index = 0) {
@@ -34,14 +65,22 @@ function questionLabel(turn, index = 0) {
   const ordinal = String(metadata.mainQuestionIndex || index + 1).padStart(2, '0')
   return `主问题 ${ordinal}${metadata.kind === 'FOLLOW_UP' ? ' · 追问（不计题数）' : ' / 12'}`
 }
-const pending = computed(() => session.value?.pendingAnswer ?? uncertainAnswer.value)
+const pending = computed(() => session.value?.pendingAnswer ?? uncertainAnswer.value ?? conversation.submission.value?.answer
+  ?? (phase.value === 'GENERATION_FAILED' ? [...(session.value?.turns || [])].reverse().find(turn => turn.answer != null)?.answer : null) ?? null)
 const active = computed(() => session.value?.status === 'ACTIVE')
-const finishAlternativeLabel = computed(() => session.value?.pendingAnswer != null ? '保留已提交回答并结束' : uncertainAnswer.value != null ? '结束并保留已收到的回答' : '放弃草稿并结束')
+const finishAlternativeLabel = computed(() => session.value?.pendingAnswer != null || phase.value === 'GENERATION_FAILED'
+  ? '保留已提交回答并结束' : uncertainAnswer.value != null || conversation.submission.value
+    ? '结束并保留已收到的回答' : answer.value.trim() || voice?.preview?.text || voice?.blob
+      ? '放弃未提交内容并结束' : '结束面试')
 const finishMessage = computed(() => session.value?.pendingAnswer != null
   ? '这份回答已提交并保留在服务端，结束时会计入面试报告。可以重试提交以生成下一题，或保留回答并结束。'
   : uncertainAnswer.value != null
     ? '上次提交结果尚未确认，回答可能已被服务端保留。结束会保留已收到的回答，无法撤回；也可继续作答后重试提交。'
-    : '还有未提交的草稿或转写预览。请选择如何结束。')
+    : phase.value === 'GENERATION_FAILED'
+      ? '回答已保存，但后续问题生成失败。可单独重试生成，或保留已保存回答并结束。'
+    : answer.value.trim() || voice?.preview?.text || voice?.blob
+      ? '还有未提交内容。可以提交当前回答，或放弃本机草稿并结束。'
+      : '结束将保留已提交的回答，并停止后续出题。')
 function voiceContext() {
   return { sessionId: session.value?.sessionId, questionId: current.value?.questionId, status: session.value?.status, pending: pending.value, blocked: !!busy.value }
 }
@@ -51,6 +90,10 @@ function pauseRecordingReplay() {
 const voice = reactive(useInterviewVoice({ api, getContext: voiceContext,
   getDraft: () => answer.value, setDraft: text => { answer.value = text },
   syncSession: syncVoiceSession, pauseReplay: pauseRecordingReplay }))
+const finishButton = ref(null)
+const finishFlow = useInterviewFinish({ isActive: () => active.value, voice, open: finishChoice })
+const { finishing: finishFinishing } = finishFlow
+watch(session, () => { voice.syncContext(); applyQuestionDraft() }, { flush: 'sync' })
 const locked = computed(() => !!busy.value || voice.busy)
 watch(pending, () => voice.syncContext(), { flush: 'sync' })
 
@@ -63,7 +106,7 @@ let draftKey = ''
 let draftStamp = 0
 let draftTimer = null
 function draftStore() {
-  return createDraftStore({ storage: globalThis.localStorage, scope: { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() } })
+  return createDraftStore({ storage: globalThis.localStorage, scope: activeScope })
 }
 function draftTarget() {
   const sessionId = session.value?.sessionId
@@ -108,6 +151,7 @@ function chooseDraft(kind) {
   draftStatus.value = ''
 }
 function onDraftStorage(event) {
+  if (event.key === 'resume-helper-local-api-base-url') { onRequestContextChange(); return }
   if (!event.key || event.key !== draftKey) return
   let other
   try { other = JSON.parse(event.newValue) } catch { return }
@@ -115,20 +159,37 @@ function onDraftStorage(event) {
   if (other.text === answer.value) return
   draftConflict.value = other
 }
+function onRequestContextChange() {
+  const nextScope = { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() }
+  if (nextScope.apiBaseUrl === activeScope.apiBaseUrl && nextScope.userId === activeScope.userId) return
+  saveDraft()
+  polling.stop()
+  voice.cancelRecording()
+  const nextRestoreId = conversation.switchScope(nextScope)
+  activeScope = nextScope
+  storageKey = `career-studio-interview-id-v2|${activeScope.apiBaseUrl}|${activeScope.userId}`
+  material.value = null
+  targetRole.value = ''
+  paste.value = ''
+  uncertainAnswer.value = null
+  finishChoice.value = false
+  restoreId.value = nextRestoreId
+  error.value = '服务地址或用户已切换。当前轮已暂停，草稿保存在原范围；请恢复此范围的练习或开始新练习。'
+}
 function remember(id) {
   try { id ? sessionStorage.setItem(storageKey, id) : sessionStorage.removeItem(storageKey) } catch { /* Storage is optional. */ }
 }
 function applySession(value) {
   if (!value?.sessionId || !Array.isArray(value.turns) || !['ACTIVE', 'FINISHED'].includes(value.status)) throw new Error('面试数据格式异常，请重试恢复。')
   const sameQuestion = session.value?.sessionId === value.sessionId && current.value?.questionId === value.currentQuestion?.questionId && value.status === 'ACTIVE'
-  const draft = answer.value
+  if (!sameQuestion && session.value) saveDraft()
   if (!sameQuestion) finishChoice.value = false
-  session.value = value
-  remember(value.sessionId)
+  if (!conversation.applySession(value)) return false
+  if (value.status === 'FINISHED') finishChoice.value = false
   uncertainAnswer.value = null
-  answer.value = value.pendingAnswer ?? (sameQuestion ? draft : '')
   voice.syncContext()
   applyQuestionDraft()
+  return true
 }
 async function syncVoiceSession(context, canApply = () => true, signal) {
   try {
@@ -173,7 +234,10 @@ function uploadPaste() {
 function start() {
   if (!material.value?.text?.trim()) { error.value = '请先上传有效简历或粘贴简历文本。'; return }
   return run('正在生成第一题…', async () => {
-    applySession(await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: 13 }))
+    const value = await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: 13,
+      requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`, async: true })
+    applySession(value)
+    if (value.generation) polling.start(value.sessionId)
     // 新场次已经建立，清掉 URL 上的「新一轮」意图，否则刷新会丢掉刚开始的练习。
     if (route.query.intent === 'new') router.replace({ name: 'Interview' })
   })
@@ -184,67 +248,93 @@ function submitAnswer() {
   if (!text || !current.value) return false
   if (text.length > 5000) { error.value = '回答不能超过 5000 字，请精简后提交。'; return false }
   const questionId = current.value.questionId
-  const sessionId = session.value.sessionId
   saveDraft()
-  return run('正在处理回答并生成后续问题…', async () => {
-    uncertainAnswer.value = text
-    try {
-      applySession(await api.answer(sessionId, { questionId, answer: text }))
-      if (session.value.turns.find(turn => turn.questionId === questionId)?.answer !== text) throw new Error('尚未确认回答保存成功，请重试恢复后继续。')
-      // 服务端已确认这道题，本机草稿不再需要；失败路径保留草稿供重试。
-      draftStore().remove(sessionId, questionId)
-    } catch (cause) {
-      let recovered = false
-      try { applySession(await api.getSession(sessionId)); recovered = true } catch { /* Keep the original answer for a safe retry. */ }
-      if (recovered && session.value.turns.find(turn => turn.questionId === questionId)?.answer === text) {
-        // 恢复读取确认了服务端已收到同一份回答，草稿同样可以清掉。
-        draftStore().remove(sessionId, questionId)
-        return
-      }
-      if (session.value?.currentQuestion?.questionId === questionId && session.value.pendingAnswer == null) {
-        answer.value = text
-        uncertainAnswer.value = recovered && cause.status === 400 ? null : text
-      }
-      throw cause
+  return run('正在保存回答并生成后续问题…', async () => {
+    const confirmed = await conversation.send()
+    if (session.value?.status === 'FINISHED') finishChoice.value = false
+    if (!confirmed) {
+      const turn = session.value?.turns.find(item => item.questionId === questionId)
+      if (conversation.submission.value || turn?.answer === text || session.value?.pendingAnswer === text) uncertainAnswer.value = text
+      throw new Error(error.value || '回答暂未确认，请读取会话状态后重试。')
     }
   })
 }
+function retryGeneration() { return run('正在继续生成后续问题…', () => conversation.retryGeneration()) }
 function viewReport() {
   if (locked.value || session.value?.status !== 'FINISHED') return
   voice.dispose()
   router.push({ name: 'Report', query: { sessionId: session.value.sessionId } })
 }
 function finish() {
-  if (locked.value || !active.value) return
-  if (answer.value.trim() || pending.value != null || voice.preview?.text) { finishChoice.value = true; return }
-  return endSession()
+  return finishFlow.requestFinish()
 }
-async function endSession() {
-  if (locked.value || !active.value) return false
-  const result = await run('正在结束面试…', async () => {
-    const value = await api.finish(session.value.sessionId)
+function requestFinish(event) { finishButton.value = event?.currentTarget || null; return finish() }
+function continueFinish() { finishFlow.continueInterview(); nextTick(() => finishButton.value?.focus?.()) }
+async function endSession(submission = null) {
+  if (!active.value || voice.busy) return false
+  const key = JSON.stringify([session.value.sessionId, submission])
+  if (key !== finishRequestKey.value) {
+    finishRequestKey.value = key
+    finishRequestId.value = globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
+  }
+  conversation.beginFinish()
+  busy.value = '正在结束面试…'
+  error.value = ''
+  let finished = false
+  try {
+    const body = { requestId: finishRequestId.value, ...(submission ? { submission } : {}) }
+    const value = await api.finish(session.value.sessionId, body)
     if (value?.status !== 'FINISHED') throw new Error('面试尚未结束，请重试。')
     applySession(value)
-  })
-  if (result) { finishChoice.value = false; viewReport() }
-  return result
+    finished = true
+  } catch (cause) {
+    if (active.value) conversation.cancelFinish()
+    error.value = cause?.message || '结束结果尚未确认，请读取会话状态后重试。'
+    try {
+      const snapshot = await api.getSession(session.value.sessionId)
+      if (snapshot?.status === 'FINISHED') { applySession(snapshot); finished = true }
+      else if (snapshot?.status === 'ACTIVE') applySession(snapshot)
+    } catch { /* Keep the draft and show the original outcome message. */ }
+  } finally { busy.value = '' }
+  if (finished) { finishChoice.value = false; viewReport(); return true }
+  return false
 }
 async function chooseFinish(choice) {
-  if (locked.value) return
-  if (choice === 'continue') { finishChoice.value = false; return }
+  if (choice === 'continue') { continueFinish(); return true }
+  return finishFlow.confirmFinish(choice, async choice => {
+  if (voice.busy) return false
   if (choice === 'submit') {
-    if (voice.preview?.text) { error.value = '请先确认转写预览，再提交后结束；或选择放弃草稿并结束。'; return }
-    if (!await submitAnswer()) return
-    if (session.value?.status === 'FINISHED') { finishChoice.value = false; viewReport(); return }
-    return endSession()
+    if (pending.value != null) return endSession()
+    if (voice.preview?.text) { error.value = '请先确认转写预览，再提交后结束；或选择放弃草稿并结束。'; return false }
+    const questionId = current.value?.questionId
+    const text = String(pending.value ?? answer.value).trim()
+    if (!questionId || !text || text.length > 5000) return false
+    const existing = conversation.submission.value
+    const submissionId = existing?.questionId === questionId && existing.answer === text
+      ? existing.submissionId : globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`
+    return endSession({ questionId, submissionId, answer: text })
   }
   if (choice === 'preserve' && pending.value != null) return endSession()
   if (choice === 'discard') {
-    if (pending.value != null) { error.value = '已提交的回答不能作为本地草稿丢弃，请选择保留回答并结束。'; return }
+    if (pending.value != null) { error.value = '已提交的回答不能作为本地草稿丢弃，请选择保留回答并结束。'; return false }
+    if (session.value && current.value?.questionId) draftStore().remove(session.value.sessionId, current.value.questionId)
+    answer.value = ''
+    uncertainAnswer.value = null
+    voice.cancelRecording()
+    if (voice.preview) voice.acceptPreview('keep')
     return endSession()
   }
+  return false
+  })
 }
-function restore() { return run('正在恢复上次练习…', async () => { applySession(await api.getSession(restoreId.value)); restoreId.value = '' }, true) }
+function restore() { return run('正在恢复上次练习…', async () => {
+  const restored = await conversation.restore(restoreId.value)
+  if (!restored) throw new Error(error.value || '恢复失败，请重试。')
+  applySession(session.value)
+  if (session.value.generation) polling.start(session.value.sessionId)
+  try { sessionStorage.removeItem(legacyStorageKey) } catch { /* Storage is optional. */ }
+  restoreId.value = ''
+}, true) }
 async function prepareNewRound() {
   // 新一轮只复用上一轮的简历和岗位，不继承它的题目、进度或已结束状态。
   const source = sourceSessionId(route)
@@ -282,14 +372,17 @@ onMounted(() => {
   // 离开页面（刷新、关标签）和切到别的后端都会触发，兜住防抖窗口里的最后几笔。
   globalThis.window?.addEventListener('pagehide', saveDraft)
   globalThis.window?.addEventListener('storage', onDraftStorage)
-  try { restoreId.value = sessionStorage.getItem(storageKey) || '' } catch { /* Storage is optional. */ }
+  globalThis.addEventListener?.('request-context-change', onRequestContextChange)
+  try { restoreId.value = sessionStorage.getItem(storageKey) || sessionStorage.getItem(legacyStorageKey) || '' } catch { /* Storage is optional. */ }
   if (isNewInterviewRoute(route)) return prepareNewRound()
   if (restoreId.value) restore()
 })
 onUnmounted(() => {
   saveDraft()
+  conversation.dispose()
   globalThis.window?.removeEventListener('pagehide', saveDraft)
   globalThis.window?.removeEventListener('storage', onDraftStorage)
+  globalThis.removeEventListener?.('request-context-change', onRequestContextChange)
   voice.dispose()
 })
 </script>
@@ -301,6 +394,13 @@ onUnmounted(() => {
       <main class="interview-main" :aria-busy="locked">
         <div v-if="error" class="notice error" role="alert">{{ error }}</div>
         <div v-if="busy" class="notice" role="status">{{ busy }}</div>
+        <div v-if="session?.status === 'ACTIVE' && !current" class="notice" role="status">
+          {{ phase === 'RETRY_WAIT' ? '暂时无法连接模型，正在自动重试…' : '正在准备下一题…' }}
+        </div>
+        <div v-if="phase === 'GENERATION_FAILED' && active" class="notice error" role="alert">
+          {{ error || '后续问题生成失败。你的回答已保存，可以单独重试生成。' }}
+          <button class="button button-ghost" :disabled="locked" @click="retryGeneration">重试生成</button>
+        </div>
         <div v-if="draftStatus" class="notice" role="status">{{ draftStatus }}</div>
         <div v-if="draftConflict" class="notice" role="status">
           <p>另一个标签页保存了这道题更新的草稿，请选择要保留的版本。</p>
@@ -310,98 +410,32 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-if="restoreId && !session" class="restore-actions"><p>发现上次练习，恢复后可继续回答或结束面试。</p><button class="button button-primary" :disabled="locked" @click="restore">重试恢复</button><button class="text-button" :disabled="locked" @click="reset">开始新的练习</button></div>
-        <template v-else-if="!session">
-          <div class="interview-session-top"><div><span class="session-overline">BEFORE WE BEGIN</span><h2>准备你的简历</h2><span class="session-company">上传、确认内容，再开始面试</span></div></div>
-          <label class="field">上传简历 <span>PDF / DOCX / TXT · 最大 10 MiB</span><input type="file" accept=".pdf,.docx,.txt" :disabled="locked" @change="upload($event.target.files[0]); $event.target.value = ''" /></label>
-          <details class="paste-panel"><summary>或粘贴简历文本</summary><label class="field" for="resume-paste">简历内容</label><textarea id="resume-paste" v-model="paste" rows="6" maxlength="20000" :disabled="locked" placeholder="粘贴简历内容（最多 20,000 字）"></textarea><button class="button button-ghost" :disabled="locked || !paste.trim()" @click="uploadPaste">使用这份文本</button></details>
-          <div v-if="material" class="resume-preview"><h3>已解析 · {{ material.fileName }}</h3><p>请确认文字完整；扫描版 PDF 可改用粘贴文本。</p><pre>{{ material.text }}</pre></div>
-          <div class="setup-grid"><label class="field">目标岗位（可选）<input v-model="targetRole" maxlength="200" :disabled="locked" placeholder="例如：运营、产品经理、Java 开发工程师" /></label><div class="interview-plan"><strong>12 道主问题 + 1 道岗位专项题</strong><p>主问题合计 80%，专项题固定 20%。软件开发等编码岗位出 Hot 100 算法题，其他岗位出专业案例题。追问不计入总题数，并入对应主问题评分。</p><p>优先按目标岗位匹配；未填写时参考简历职业方向。</p></div></div>
-        </template>
-        <template v-if="!session && !restoreId"><p class="consent">开始面试后，简历文本和回答将发送至配置的大模型服务</p><button class="button button-primary" :disabled="locked || !material" @click="start">开始面试 <span aria-hidden="true">→</span></button></template>
+        <InterviewSetup v-else-if="!session" :material="material" v-model:paste="paste" v-model:target-role="targetRole" :locked="locked" @upload="upload" @use-paste="uploadPaste" @start="start" />
         <template v-if="session">
-          <div class="interview-session-top"><div><span class="session-overline">{{ active ? 'IN CONVERSATION' : 'SESSION COMPLETE' }}</span><h2>{{ session.targetRole || '简历模拟面试' }}</h2><span class="session-company">{{ active ? '结合简历与回答进行提问' : '本次面试已结束，可回顾下方问答' }}</span></div></div>
-          <div v-if="session.specialty" class="specialty-plan notice" data-testid="specialty-plan"><strong>本轮专项 · {{ specialtyLabel(session.specialty.kind) }} · 20%</strong><p>{{ session.specialty.focus }}</p><p>{{ session.specialty.reason }}</p></div>
-          <div class="interview-progress"><div><span>已答题目 · 追问不计入</span><b>{{ completedRoots.length }} <i>/</i> {{ session.questionCount }}</b></div><div class="interview-progress-track"><i :style="{ width: `${completedRoots.length / session.questionCount * 100}%` }"></i></div></div>
-          <ol v-if="completed.length" class="history" aria-label="面试问答记录">
-            <li v-for="(turn, index) in completed" :key="turn.questionId">
-              <div class="session-overline">{{ questionLabel(turn, index) }}</div>
-              <p v-if="session.questionMetadata?.[turn.questionId]?.kind === 'ALGORITHM'" class="algorithm-source">LeetCode Hot 100 · {{ session.questionMetadata[turn.questionId].algorithm?.title }} <a v-if="algorithmUrl(session.questionMetadata[turn.questionId].algorithm)" :href="algorithmUrl(session.questionMetadata[turn.questionId].algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p>
-              <h3>{{ turn.question }}</h3>
-              <div class="past-answer"><span>你的回答</span><p>{{ turn.answer }}</p></div>
-            </li>
-          </ol>
+          <InterviewHeader :role="session.targetRole" :active="active" :progress="completedRoots.length" :total="session.questionCount" :can-finish="!!session && active && !busy && !finishFinishing" @finish="requestFinish" @open-info="openInfo" />
+          <InterviewMessages v-if="conversationMessages.length" :messages="conversationMessages" :voice="voice" :session-id="session.sessionId" />
           <template v-if="active && current">
             <div class="question-card">
               <div class="question-number">{{ questionLabel(current, completedRoots.length) }}</div>
               <p v-if="currentMetadata.kind === 'ALGORITHM'" class="algorithm-source">LeetCode Hot 100 · {{ currentMetadata.algorithm?.title }} <a v-if="algorithmUrl(currentMetadata.algorithm)" :href="algorithmUrl(currentMetadata.algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p>
               <h3>{{ current.question }}</h3>
               <div class="voice-actions">
-                <button data-testid="question-play" class="button button-ghost" :disabled="locked || !voice.ttsEnabled" @click="voice.playQuestion">{{ voice.speechState === 'loading' ? '正在生成语音…' : voice.speechState === 'stopped' ? '重播题目' : '播放题目' }}</button>
-                <button data-testid="question-stop" class="text-button" :disabled="!['loading', 'playing'].includes(voice.speechState)" @click="voice.stopQuestion">停止朗读</button>
+                <button data-testid="question-play" class="button button-ghost" :disabled="locked || !voice.ttsEnabled" @click="voice.speechQuestionId === current.questionId && ['loading', 'playing'].includes(voice.speechState) ? voice.stopQuestion() : voice.playQuestion({ sessionId: session.sessionId, questionId: current.questionId })">{{ voice.speechQuestionId === current.questionId && voice.speechState === 'loading' ? '正在生成 · 停止' : voice.speechQuestionId === current.questionId && voice.speechState === 'playing' ? '停止朗读' : '播放题目' }}</button>
               </div>
               <p v-if="!voice.ttsEnabled" class="voice-note">{{ voice.capabilityState === 'loading' ? '正在确认题目朗读能力，文字作答可直接继续。' : '题目朗读暂不可用，可阅读题目并用文字回答。' }}</p>
               <p v-if="voice.speechError" class="notice error" role="alert">{{ voice.speechError }}</p>
             </div>
-            <div class="answer-editor">
-              <label for="interview-answer">你的回答 <span>{{ answerGuidance(currentMetadata.kind) }}</span></label>
-              <p v-if="pending != null" class="notice">回答已保留。重试会提交同一份回答；结束时会保留服务端已收到的回答。录音和转写不能覆盖待提交回答。</p>
-              <div class="voice-panel">
-                <p class="voice-note">可选语音作答：点击后才会申请麦克风。录音由你主动识别时发送至火山引擎；转写先预览，确认后再写入草稿，不会自动提交回答。</p>
-                <p class="voice-note">录音上限 {{ voice.maxSeconds }} 秒 / {{ (voice.maxBytes / 1024 / 1024).toFixed(1) }} MiB。</p>
-                <p v-if="voice.capabilityState === 'loading'" role="status" class="voice-note">正在确认语音能力，可继续文字作答。</p>
-                <p v-else-if="voice.capabilityError" class="voice-note">{{ voice.capabilityError }}</p>
-                <p v-else-if="!voice.asrEnabled" class="voice-note">语音识别暂不可用，请用文字回答。</p>
-                <button v-if="voice.capabilityState !== 'loading' && (!voice.asrEnabled || !voice.ttsEnabled)" class="text-button" :disabled="locked" @click="voice.loadCapabilities">重试语音能力</button>
-              <RouterLink to="/settings" class="text-button config-link" aria-label="去设置页配置大模型与语音">去配置 AI →</RouterLink>
-                <div class="voice-actions">
-                  <button data-testid="recording-start" class="button button-ghost" :disabled="locked || pending != null || !voice.asrEnabled" @click="voice.startRecording">{{ voice.blob ? '重新录音' : '开始录音' }}</button>
-                  <button data-testid="recording-stop" class="button button-ghost" :disabled="voice.recorderState !== 'recording'" @click="voice.stopRecording">停止录音</button>
-                  <button data-testid="recording-cancel" class="text-button" :disabled="!['requesting-mic', 'recording', 'recorded'].includes(voice.recorderState) && !voice.blob" @click="voice.cancelRecording">{{ voice.recorderState === 'recorded' ? '丢弃录音' : '取消录音' }}</button>
-                </div>
-                <p v-if="voice.recorderState === 'requesting-mic'" class="voice-note" role="status">等待麦克风授权，可随时取消。</p>
-                <p v-if="voice.recorderState === 'recording'" class="voice-note" role="status">录音中 · {{ voice.durationSeconds }} / {{ voice.maxSeconds }} 秒</p>
-                <audio v-if="voice.recordingUrl" ref="recordingAudio" :src="voice.recordingUrl" controls :class="{ 'replay-locked': locked }" :inert="locked" aria-label="回放自己的录音" @play="voice.replayRecording"></audio>
-                <div v-if="voice.blob" class="voice-actions">
-                  <button data-testid="transcription-start" class="button button-ghost" :disabled="locked || pending != null || !voice.asrEnabled" @click="voice.transcribe">{{ voice.transcribing ? '正在识别…' : '识别 / 重试录音' }}</button>
-                  <button v-if="voice.transcribing" data-testid="transcription-cancel" class="text-button" @click="voice.cancelTranscription">取消识别，保留录音</button>
-                </div>
-                <p v-if="voice.transcribing" class="voice-note" role="status">正在转写录音，最长等待 90 秒；可取消后重试。</p>
-                <p v-if="voice.error || voice.recorderError" class="notice error" role="alert">{{ voice.error || voice.recorderError }}</p>
-                <div v-if="voice.preview" class="transcription-preview">
-                  <h4>转写预览 · 尚未写入草稿</h4>
-                  <pre>{{ voice.preview.text }}</pre>
-                  <p v-if="voice.preview.text.length > 5000" class="notice error">转写超过 5000 字，已完整保留。确认后请在回答框精简再提交。</p>
-                  <div class="voice-actions">
-                    <button data-testid="transcript-replace" class="button button-ghost" :disabled="locked || pending != null" @click="voice.acceptPreview('replace')">替换草稿</button>
-                    <button data-testid="transcript-append" class="button button-ghost" :disabled="locked || pending != null" @click="voice.acceptPreview('append')">追加到草稿</button>
-                    <button data-testid="transcript-keep" class="text-button" :disabled="locked || pending != null" @click="voice.acceptPreview('keep')">保留原草稿</button>
-                  </div>
-                </div>
-              </div>
-              <textarea id="interview-answer" v-model="answer" :class="{ 'algorithm-answer': currentMetadata.kind === 'ALGORITHM' }" rows="7" maxlength="5000" :disabled="locked || pending != null" :placeholder="answerGuidance(currentMetadata.kind)"></textarea>
-              <p v-if="answer.length > 5000" class="notice error">回答超过 5000 字，请精简后提交；完整内容已保留。</p>
-              <div class="answer-tools"><span>{{ answer.length }} / 5000 字</span><button class="button button-primary" :disabled="locked || !(pending ?? answer.trim()) || (pending ?? answer).length > 5000" @click="submitAnswer">{{ pending != null ? '重试提交' : '提交回答' }} →</button></div>
-            </div>
+            <InterviewComposer v-model="answer" :locked="locked" :pending="pending" :kind="currentMetadata.kind" :guidance="answerGuidance(currentMetadata.kind)" :voice="voice" @send="submitAnswer" @audio="recordingAudio = $event" />
           </template>
-          <div v-if="finishChoice && active" class="notice finish-choice" role="group" aria-label="处理未提交内容">
-            <p>{{ finishMessage }}</p>
-            <p v-if="voice.preview">转写尚未确认，请先替换、追加或保留原草稿，再提交后结束。</p>
-            <div class="voice-actions">
-              <button data-testid="finish-submit" class="button button-primary" :disabled="locked || !!voice.preview || !(pending ?? answer.trim()) || (pending ?? answer).length > 5000" @click="chooseFinish('submit')">提交后结束</button>
-              <button v-if="pending != null" data-testid="finish-preserve" class="button button-ghost" :disabled="locked" @click="chooseFinish('preserve')">{{ finishAlternativeLabel }}</button>
-              <button v-else data-testid="finish-discard" class="button button-ghost" :disabled="locked" @click="chooseFinish('discard')">{{ finishAlternativeLabel }}</button>
-              <button class="text-button" :disabled="locked" @click="chooseFinish('continue')">继续作答</button>
-            </div>
-          </div>
           <div class="session-actions">
-            <button v-if="active" data-testid="finish-interview" class="text-button" :disabled="locked" @click="finish">结束本次面试</button>
-            <template v-else><button data-testid="view-report" class="button button-primary" :disabled="locked" @click="viewReport">查看报告</button><button class="button button-ghost" :disabled="locked" @click="reset">开始新的练习</button></template>
+            <template v-if="!active"><button data-testid="view-report" class="button button-primary" :disabled="locked" @click="viewReport">查看报告</button><button class="button button-ghost" :disabled="locked" @click="reset">开始新的练习</button></template>
           </div>
           <p class="interview-footnote">本地录音在刷新后无法恢复，请重新录音；回答文字与转写预览按题保存在本机，保留 7 天。已提交面试记录可在一天内恢复，后端重启后失效。请勿在简历或回答中填写不必要的敏感信息。</p>
         </template>
       </main>
-      <aside class="interview-aside"><div class="aside-quote-mark">“</div><div class="eyebrow">A THOUGHT BEFORE YOU BEGIN</div><h3>不必急着<br>给出完美答案。</h3><p>面试更像一次专业对话。讲清楚你的思路、选择和真实贡献，就已经很好。</p><div class="aside-divider"></div><div class="interview-aside-meta"><span>本次练习关注</span><ul><li><i>01</i> 项目表达</li><li><i>02</i> 技术理解</li><li><i>03</i> 逻辑结构</li></ul></div></aside>
     </div>
+    <InterviewInfoDrawer :open="infoOpen" :session="session" :material="material" :voice-max-seconds="voice.maxSeconds" :voice-max-bytes="voice.maxBytes" @close="closeInfo" />
+    <InterviewFinishDialog :open="finishChoice && active" :message="finishMessage" :alternative-label="finishAlternativeLabel" :pending="pending" :answer="answer" :voice="voice" :locked="voice.busy" :finishing="finishFinishing" @continue="continueFinish" @confirm="chooseFinish" />
     <footer class="page-footer"><span>拾阶 · CAREER STUDIO</span><span>为认真准备的人，整理下一步。</span><span>文字与语音面试</span></footer>
   </section>
 </template>

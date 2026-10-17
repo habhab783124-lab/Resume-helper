@@ -69,8 +69,12 @@ class InterviewReportAssemblerTest {
     }
     @Test void earlyFinishAndUnansweredQuestionAreClearlySeparated() {
         var partial = List.of(turns.get(0), new InterviewService.Turn("q2", "第二题", null));
-        var report = new InterviewReportAssembler().assemble(5, partial, contracts, Map.of("q1", assessed("q1", 0)));
+        var report = new InterviewReportAssembler().assemble(5, partial, contracts, Map.of("q1", assessed("q1", 0)), Map.of(
+                "q1", new InterviewService.Context(InterviewService.Kind.MAIN, null, 1, null),
+                "q2", new InterviewService.Context(InterviewService.Kind.MAIN, null, 2, null),
+                "q3", new InterviewService.Context(InterviewService.Kind.MAIN, null, 3, null)), "USER_ENDED");
         assertNull(report.overallScore());
+        assertEquals("USER_ENDED", report.finishReason());
         assertTrue(report.overallSummary().contains("提前结束"));
         assertEquals("UNANSWERED", report.turnFeedbacks().get(1).status());
         assertNull(report.turnFeedbacks().get(1).score());

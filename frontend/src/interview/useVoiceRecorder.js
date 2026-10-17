@@ -32,6 +32,7 @@ export function useVoiceRecorder({
   let chunks = []
   let seconds = 0
   let timer = null
+  let stopResolve = null
 
   function clearTimer() {
     if (timer !== null) clearInterval(timer)
@@ -62,6 +63,8 @@ export function useVoiceRecorder({
     blob.value = null
     durationSeconds.value = 0
     state.value = 'idle'
+    stopResolve?.(null)
+    stopResolve = null
   }
 
   function cancel() {
@@ -80,12 +83,19 @@ export function useVoiceRecorder({
     if (state.value === 'requesting-mic') {
       cancel()
       error.value = message
-      return
+      return Promise.resolve(null)
     }
     const current = recorder
-    if (!current || current.state === 'inactive') return
+    if (!current || current.state === 'inactive') return Promise.resolve(blob.value)
     if (message) error.value = message
-    try { current.stop() } catch { current.onstop?.() }
+    if (stopResolve) return new Promise(resolve => {
+      const previous = stopResolve
+      stopResolve = value => { previous(value); resolve(value) }
+    })
+    return new Promise(resolve => {
+      stopResolve = resolve
+      try { current.stop() } catch { current.onstop?.() }
+    })
   }
 
   async function start() {
@@ -146,6 +156,8 @@ export function useVoiceRecorder({
       else error.value = '录音为空，请重新录音或改用文字回答。'
       state.value = blob.value ? 'recorded' : 'idle'
       stopTracks()
+      stopResolve?.(blob.value)
+      stopResolve = null
     }
     try {
       recorder.start(1000)

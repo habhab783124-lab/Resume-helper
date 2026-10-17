@@ -423,10 +423,10 @@ type SessionProgress = {
 
 **Interfaces：** 保留现有 InterviewService 对外方法；增加生产注入的 InterviewStore / Clock 和测试可用的构造方式。状态修改统一经“构建候选快照→save→发布快照”；所有写入统一递增 stateVersion。阶段 A 生成 legacy-v3 的冻结默认计划，后续字段不靠硬编码重新推断。
 
-- [ ] 先写“服务 A 保存，服务 B 使用同目录恢复”“写失败不增加 revision”“恢复后已成功评分不再调用模型”“过期/越权不返回数据”的失败测试。
-- [ ] 将纯快照和运行期 handle 分开；会话短锁、报告锁、工作 Future 不进入快照；保留既有数量限制和惰性到期清理。
-- [ ] 适配旧内存 pending 的一次迁移；把重启时在途操作标记 FAILED，只恢复数据，不恢复带 Key 的模型任务。
-- [ ] 运行 B2；记录旧实现已丢失的会话不可找回。此任务不新增历史列表页面或改变保存期限。
+- [x] 先写“服务 A 保存，服务 B 使用同目录恢复”“写失败不增加 revision”“恢复后已成功评分不再调用模型”“过期/越权不返回数据”的失败测试。
+- [x] 将纯快照和运行期 handle 分开；会话短锁、报告锁、工作 Future 不进入快照；保留既有数量限制和惰性到期清理。
+- [x] 适配旧内存 pending 的一次迁移；把重启时在途操作标记 FAILED，只恢复数据，不恢复带 Key 的模型任务。
+- [x] 运行 B2；记录旧实现已丢失的会话不可找回。此任务不新增历史列表页面或改变保存期限。
 
 ### T04：提供只保存回答的幂等接口
 
@@ -436,10 +436,10 @@ type SessionProgress = {
 
 **Interfaces：** saveAnswer(String owner,String sessionId,Submission submission) → Session；POST /answers 按 4.2；此方法不接收 AiClient。
 
-- [ ] 添加正确保存、同 ID 同内容重复、同 ID 不同内容、换 ID 覆盖、非当前题、5000 字边界、跨用户、存储失败场景。
-- [ ] 保存后 answer 写入原 Turn、currentQuestion=null、revision 增加一次；专项末题直接 COMPLETED。服务端确认后才返回成功。
-- [ ] 用抛错/计数模型替身证明此接口模型调用数为 0；重复请求快照等价，不能产生第二条用户回答。
-- [ ] 运行 B3 中 InterviewAnswerApiTest；更新旧 pending 兼容断言但保留原重复保护。
+- [x] 添加正确保存、同 ID 同内容重复、同 ID 不同内容、换 ID 覆盖、非当前题、5000 字边界、跨用户、存储失败场景。
+- [x] 保存后 answer 写入原 Turn、currentQuestion=null、revision 增加一次；专项末题直接 COMPLETED。服务端确认后才返回成功。
+- [x] 用抛错/计数模型替身证明此接口模型调用数为 0；重复请求快照等价，不能产生第二条用户回答。
+- [x] 运行 B3 中 InterviewAnswerApiTest；更新旧 pending 兼容断言但保留原重复保护。
 
 ### T05：拆开生成操作的认领与回写
 
@@ -449,10 +449,10 @@ type SessionProgress = {
 
 **Interfaces：** claim(owner,id,requestId,kind,expectedRevision) → GenerationClaim；commitSuccess(claim,result) / commitFailure(claim,failure) → Session。GenerationClaim 是 Coordinator 内定义的不可变输入，包含 4.2 第 6 条字段。
 
-- [ ] 先写相同请求加入同操作、不同请求撞上同一活跃操作只加入、旧 revision 被拒、两次成功回写只追加一题的失败测试。
-- [ ] 实现 OPENING / NEXT 认领规则；NEXT 必须有一份尚未推进的已保存回答，不能从未提交草稿生成下一题。
-- [ ] 将 nextIndex、父题、追问次数和专项转换保持在原服务端规则内；生成结果只能通过 commitSuccess 更新题目。
-- [ ] 运行 B4 中 Coordinator 测试；验收不改变现有 12+1、追问并入父题和冻结评分契约。
+- [x] 先写相同请求加入同操作、不同请求撞上同一活跃操作只加入、旧 revision 被拒、两次成功回写只追加一题的失败测试。
+- [x] 实现 OPENING / NEXT 认领规则；NEXT 必须有一份尚未推进的已保存回答，不能从未提交草稿生成下一题。
+- [x] 将 nextIndex、父题、追问次数和专项转换保持在原服务端规则内；生成结果只能通过 commitSuccess 更新题目。
+- [x] 运行 B4 中 Coordinator 测试；验收不改变现有 12+1、追问并入父题和冻结评分契约。
 
 ### T06：后台运行生成并开放非阻塞状态查询
 
@@ -462,10 +462,10 @@ type SessionProgress = {
 
 **Interfaces：** Runner.start(GenerationClaim claim,AiClient ai) → void；cancel(String generationId) → void；POST /generations 返回当前 Session，GET /interviews/{id} 返回 Generation 状态。
 
-- [ ] 用 CountDownLatch 阻塞模型，证明 GET 在释放模型之前返回；同时证明同一会话重复点击只调用一次模型。
-- [ ] 注入有界线程池，模型调用和等待均在会话锁外；拒绝排队/执行器关闭后把操作写为明确 FAILED，不遗留 QUEUED。
-- [ ] 保存 Future 的运行期映射并及时释放；成功、失败、取消均收敛到一次终态；无 Key、非 ACTIVE 或过期会话不排任务。
-- [ ] 运行 B4；测试中可靠释放 latch / 关闭执行器，不用 Thread.sleep 假装证明无死锁。
+- [x] 用 CountDownLatch 阻塞模型，证明 GET 在释放模型之前返回；同时证明同一会话重复点击只调用一次模型。
+- [x] 注入有界线程池，模型调用和等待均在会话锁外；拒绝排队/执行器关闭后把操作写为明确 FAILED，不遗留 QUEUED。
+- [x] 保存 Future 的运行期映射并及时释放；成功、失败、取消均收敛到一次终态；无 Key、非 ACTIVE 或过期会话不排任务。
+- [x] 运行 B4；测试中可靠释放 latch / 关闭执行器，不用 Thread.sleep 假装证明无死锁。
 
 ### T07：将首题纳入可恢复生成操作并兼容旧客户端
 
@@ -475,10 +475,10 @@ type SessionProgress = {
 
 **Interfaces：** async=true 的 start 返回首题尚未就绪的 Session；start 的 requestId 持久化去重；已有 start 和 /turns 走同一 Coordinator / Runner 的兼容适配。
 
-- [ ] 覆盖 start 响应丢失后同 ID 重发、重启后同 ID 重发、同 ID 不同岗位冲突、首题失败后原会话重试、首题期间零回答结束。
-- [ ] 首题成功时一次性冻结专项计划和首题标准；失败不生成半份计划，不新建会话替代原会话。
-- [ ] 兼容旧 start /turns：同步等待在锁外进行；旧同题重试可加入未完成操作，完成的同题重提不重复出题。
-- [ ] 运行 B3、B4 中 Opening 和 Flow 测试；新旧客户端混用只能出现一条有效后续问题。
+- [x] 覆盖 start 响应丢失后同 ID 重发、重启后同 ID 重发、同 ID 不同岗位冲突、首题失败后原会话重试、首题期间零回答结束。
+- [x] 首题成功时一次性冻结专项计划和首题标准；失败不生成半份计划，不新建会话替代原会话。
+- [x] 兼容旧 start /turns：同步等待在锁外进行；旧同题重试可加入未完成操作，完成的同题重提不重复出题。
+- [x] 运行 B3、B4 中 Opening 和 Flow 测试；新旧客户端混用只能出现一条有效后续问题。
 
 ### T08：加入最多五次自动重试和总等待预算
 
@@ -488,10 +488,10 @@ type SessionProgress = {
 
 **Interfaces：** RetryPolicy.decide(InterviewFailure failure,int attempt,int retryCount,Instant deadlineAt,Instant now) → RetryDecision；RetryDecision 在 Policy 内定义为 {retry:boolean,delayMs:long,attemptTimeoutSeconds:int}。Runner 持久化 4.1 的 stage / attempt / retryCount / nextRetryAt / failure。InterviewAgent.prepareOpening / prepareNext / prepareAlgorithm / prepareCase 增加显式 timeoutSeconds 重载，旧调用保持原超时默认；各重载必须把值传到最终 AiClient.chat。
 
-- [ ] 用可控时钟先写“快速失败恰好最多 6 次”“第一次成功仅 1 次”“第 3 次成功不再请求”“预算到期少于 6 次”“格式错误最多补一次”“不可重试仅 1 次”。
-- [ ] 实现 4.3 的分类、间隔、Retry-After、抖动和剩余预算；把单次剩余超时实际传到 AiClient.chat，不能只写一个不会中止 HTTP 的计时器。专项的决策/正文共享请求计数，成功阶段不重跑。
-- [ ] 每次尝试前和每次等待后检查操作仍有效；取消等待不得安排下一次请求。前端轮询和兼容适配都不能启动另一个重试循环。
-- [ ] 运行 B1、B5；记录每次 stage、attempt、elapsedMs、failureCode。界面可以据状态显示“重试 n/5”。
+- [x] 用可控时钟先写“快速失败恰好最多 6 次”“第一次成功仅 1 次”“第 3 次成功不再请求”“预算到期少于 6 次”“格式错误最多补一次”“不可重试仅 1 次”。
+- [x] 实现 4.3 的分类、间隔、Retry-After、抖动和剩余预算；把单次剩余超时实际传到 AiClient.chat，不能只写一个不会中止 HTTP 的计时器。专项的决策/正文共享请求计数，成功阶段不重跑。
+- [x] 每次尝试前和每次等待后检查操作仍有效；取消等待不得安排下一次请求。前端轮询和兼容适配都不能启动另一个重试循环。
+- [x] 运行 B1、B5；记录每次 stage、attempt、elapsedMs、failureCode。界面可以据状态显示“重试 n/5”。
 
 ### T09：原子结束并隔离迟到的生成结果
 
@@ -501,10 +501,10 @@ type SessionProgress = {
 
 **Interfaces：** finish(owner,id,requestId,Submission nullable) → Session；空 body 沿用旧 finish。状态和回答一次落盘，成功后取消运行期任务。
 
-- [ ] 先写无草稿结束、有最后回答结束、重复结束、同题已保存、RUNNING/RETRY_WAIT/QUEUED 结束、存储失败、跨用户以及结束和回答竞态测试。
-- [ ] 原子保存可选 Submission、处理已收到 pending、标记 FINISHED/USER_ENDED 并使旧 generationId 无效；已自然完成的会话保留 COMPLETED。
-- [ ] 断言“提交并结束”的新增出题调用数为 0；结束返回不需要等待被 latch 阻塞的模型释放；释放后题目数不增加。
-- [ ] 运行 B6；前后两次读取均为 FINISHED，取消后无下一次自动尝试；存储失败时不得错误报告结束成功。
+- [x] 先写无草稿结束、有最后回答结束、重复结束、同题已保存、RUNNING/RETRY_WAIT/QUEUED 结束、存储失败、跨用户以及结束和回答竞态测试。
+- [x] 原子保存可选 Submission、处理已收到 pending、标记 FINISHED/USER_ENDED 并使旧 generationId 无效；已自然完成的会话保留 COMPLETED。
+- [x] 断言“提交并结束”的新增出题调用数为 0；结束返回不需要等待被 latch 阻塞的模型释放；释放后题目数不增加。
+- [x] 运行 B6；前后两次读取均为 FINISHED，取消后无下一次自动尝试；存储失败时不得错误报告结束成功。
 
 ### T10：接入前端分离 API 和可取消轮询
 
@@ -514,10 +514,10 @@ type SessionProgress = {
 
 **Interfaces：** api.start(body)、saveAnswer(id,submission,signal)、generate(id,body,signal)、getSession(id,{signal})、finish(id,body,signal)；useInterviewPolling({api,onSession,onError,clock}) 返回 start(sessionId)、stop()。
 
-- [ ] API 测试精确断言路径、请求体、现有身份/AI 请求头、error.code / retryable 解析以及取消信号，语音专用头不能混入文字模型请求。
-- [ ] 为短请求设置截止时间：状态读取 10 秒，保存/创建/结束/排队请求 15 秒；支持外部取消，超时异常区分“浏览器请求未确认”和模型 TIMEOUT。
-- [ ] 轮询在同一会话一次一个请求，间隔从 1 秒逐渐到最多 5 秒；终态停止、换轮和离页取消，读取失败只显示连接状态，不发生成 POST。
-- [ ] 运行 F1；确认计时器和 AbortController 被清理，已停止轮询的旧结果不再回调。
+- [x] API 测试精确断言路径、请求体、现有身份/AI 请求头、error.code / retryable 解析以及取消信号，语音专用头不能混入文字模型请求。
+- [x] 为短请求设置截止时间：状态读取 10 秒，保存/创建/结束/排队请求 15 秒；支持外部取消，超时异常区分“浏览器请求未确认”和模型 TIMEOUT。
+- [x] 轮询在同一会话一次一个请求，间隔从 1 秒逐渐到最多 5 秒；终态停止、换轮和离页取消，读取失败只显示连接状态，不发生成 POST。
+- [x] 运行 F1；确认计时器和 AbortController 被清理，已停止轮询的旧结果不再回调。
 
 ### T11：集中管理发送、保存确认和恢复
 
@@ -527,10 +527,10 @@ type SessionProgress = {
 
 **Interfaces：** useInterviewConversation({api,drafts,voice,polling,ids}) 返回 session、draft、phase、error、submission、send()、retryGeneration()、restore(id)、dispose()。phase 为 PREPARING / ANSWERING / SAVING / GENERATING / RETRY_WAIT / GENERATION_FAILED / FINISHING / FINISHED。
 
-- [ ] 先写保存成功但出题失败、保存响应丢失后读回、读回也失败、双击发送、旧轮响应晚到和刷新恢复测试。
-- [ ] 首次发送生成并保存 submissionId；保存结果未知时保留同一 ID 和原文。读回确认保存后只恢复/请求生成，不重交回答。
-- [ ] 仅保存确认后清本题草稿；失败保留。服务端状态为权威，UI 的“发送中”不能伪装成已保存；拒绝 stateVersion 倒退。手动继续生成用新 requestId，同轮轮询不更换 ID。服务地址/用户改变时先按旧 scope 保存草稿，停止旧轮询并重建上下文；会话指针也按现有服务/用户 scope 隔离，避免恢复到另一后端；不为新指针贸然改变 v1 草稿键，旧指针仅在当前 scope 读回校验后迁移。
-- [ ] 运行 F2；现有新一轮导航、草稿存储失败提示、多标签冲突和超长文字保护继续通过。
+- [x] 先写保存成功但出题失败、保存响应丢失后读回、读回也失败、双击发送、旧轮响应晚到和刷新恢复测试。
+- [x] 首次发送生成并保存 submissionId；保存结果未知时保留同一 ID 和原文。读回确认保存后只恢复/请求生成，不重交回答。
+- [x] 仅保存确认后清本题草稿；失败保留。服务端状态为权威，UI 的“发送中”不能伪装成已保存；拒绝 stateVersion 倒退。手动继续生成用新 requestId，同轮轮询不更换 ID。服务地址/用户改变时先按旧 scope 保存草稿，停止旧轮询并重建上下文；会话指针也按现有服务/用户 scope 隔离，避免恢复到另一后端；不为新指针贸然改变 v1 草稿键，旧指针仅在当前 scope 读回校验后迁移。
+- [x] 运行 F2；现有新一轮导航、草稿存储失败提示、多标签冲突和超长文字保护继续通过。
 
 ### T12：拆分准备页、精简顶部和信息抽屉
 
@@ -540,10 +540,10 @@ type SessionProgress = {
 
 **Interfaces：** Setup 接收现有材料/岗位字段并 emit upload、use-paste、start；Header 接收 role、progress、canFinish 并 emit finish、open-info；Drawer 只展示当前会话信息，不修改冻结规则。
 
-- [ ] 先更新浏览器正常流程用例：准备阶段能上传/粘贴，开始后表单收起，岗位与进度保留，信息按钮能打开和关闭抽屉。
-- [ ] 移走装饰侧栏；抽屉收纳材料摘要、12+1 规则、专项说明、保存期限和语音说明，避免复制两份状态或规则。
-- [ ] Header 的结束入口不再使用全局 locked 一律禁用；只在未建立会话、结束请求提交中或已结束时不可重复触发。
-- [ ] 运行 F2 和局部浏览器用例；键盘可关闭抽屉并回到触发按钮，窄屏不遮住结束入口。
+- [x] 先更新浏览器正常流程用例：准备阶段能上传/粘贴，开始后表单收起，岗位与进度保留，信息按钮能打开和关闭抽屉。
+- [x] 移走装饰侧栏；抽屉收纳材料摘要、12+1 规则、专项说明、保存期限和语音说明，避免复制两份状态或规则。
+- [x] Header 的结束入口不再使用全局 locked 一律禁用；只在未建立会话、结束请求提交中或已结束时不可重复触发。
+- [x] 运行 F2 和局部浏览器用例；键盘可关闭抽屉并回到触发按钮，窄屏不遮住结束入口。
 
 ### T13：实现稳定消息序列和历史滚动
 
@@ -553,10 +553,10 @@ type SessionProgress = {
 
 **Interfaces：** toConversationMessages(session,pendingSubmission) → [{id,role,questionId,text,status,kind}]，ID 用 questionId + question/answer；useConversationScroll({threshold:80}) 返回 onScroll、onMessagesChanged、scrollToLatest、hasNewMessages。
 
-- [ ] 添加主问题、追问、等待生成、首题为空、保存未确认、同快照重复应用、结束迟到快照不能插消息的断言。
-- [ ] 用户回答右侧、问题左侧；普通正文保留换行，算法显示代码友好排版；待生成状态是一条可更新状态消息。
-- [ ] 按 80px 阈值跟随，远离底部则保留位置并提示新消息；首次恢复定位最新，展开历史中的长内容不突然跳到底。
-- [ ] 运行 F3；浏览器用 10 组长问答检查当前题可见、消息无重复、输入区不覆盖最后一条消息。
+- [x] 添加主问题、追问、等待生成、首题为空、保存未确认、同快照重复应用、结束迟到快照不能插消息的断言。
+- [x] 用户回答右侧、问题左侧；普通正文保留换行，算法显示代码友好排版；待生成状态是一条可更新状态消息。
+- [x] 按 80px 阈值跟随，远离底部则保留位置并提示新消息；首次恢复定位最新，展开历史中的长内容不突然跳到底。
+- [x] 运行 F3；浏览器用 10 组长问答检查当前题可见、消息无重复、输入区不覆盖最后一条消息。
 
 ### T14：实现固定多行输入区和算法展开输入
 
@@ -566,10 +566,10 @@ type SessionProgress = {
 
 **Interfaces：** Composer 接收 modelValue、phase、kind、voiceState、maxLength=5000，emit update:modelValue、send、toggle-record、stop-record、retry-transcription；composerActions 导出 shouldSend(event) 和 insertIndent(text,start,end)。
 
-- [ ] 测试 Enter 换行、Ctrl/Cmd+Enter 发送、isComposing=true 不发送、空白/超长不可发送、算法缩进和保留换行。
-- [ ] 普通输入自动增高到约 6 行；算法支持“展开编辑”、语言标记和 Tab 缩进，Esc 可退出缩进捕获，提供明确关闭/焦点返回入口；输入展开不会另存一份相互覆盖的草稿。整份提交仍受 5000 字约束，不能形成键盘陷阱。
-- [ ] 布局预留输入区实际高度，处理动态视口和窄屏；麦克风/发送在输入容器内部，状态只按当前操作展开。
-- [ ] 运行 F3；浏览器检查 390px 宽、长文本、算法代码和键盘焦点。避免用隐藏溢出来掩盖无法访问的内容。
+- [x] 测试 Enter 换行、Ctrl/Cmd+Enter 发送、isComposing=true 不发送、空白/超长不可发送、算法缩进和保留换行。
+- [x] 普通输入自动增高到约 6 行；算法支持“展开编辑”、语言标记和 Tab 缩进，Esc 可退出缩进捕获，提供明确关闭/焦点返回入口；输入展开不会另存一份相互覆盖的草稿。整份提交仍受 5000 字约束，不能形成键盘陷阱。
+- [x] 布局预留输入区实际高度，处理动态视口和窄屏；麦克风/发送在输入容器内部，状态只按当前操作展开。
+- [x] 运行 F3；浏览器检查 390px 宽、长文本、算法代码和键盘焦点。避免用隐藏溢出来掩盖无法访问的内容。
 
 ### T15：收敛录音转写和问题内朗读
 
@@ -579,10 +579,10 @@ type SessionProgress = {
 
 **Interfaces：** voice.stopRecording({transcribe:boolean})，普通停止传 true，在 Blob 就绪后触发一次转写；结束确认中的停止传 false，仅保留录音。voice.playQuestion({sessionId,questionId}) 明确指定问题；保留 cancelRecording、cancelTranscription、dispose 和预览恢复能力。
 
-- [ ] 先测手动停止/达到上限仅转写一次、取消录音不转写、Blob 尚未就绪不提前请求、识别期间输入新文字不被旧快照覆盖。
-- [ ] 复用现有 preview→追加草稿→保存→清 preview 流程，超过 5000 字保留全文；失败保留 Blob 和局部重试。录音刷新不可恢复的说明保留在信息抽屉。
-- [ ] 合并朗读按钮的加载/播放/停止；历史问题按自己的 questionId 播放，未授权 Key 不外泄，录音开始停止其他播放。
-- [ ] 运行 F4；覆盖麦克风拒绝、语音能力不可用、90 秒取消、换题/离页迟到回调、恢复旧预览不会自动提交。首次语音使用说明可见，文字路径不中断。
+- [x] 先测手动停止/达到上限仅转写一次、取消录音不转写、Blob 尚未就绪不提前请求、识别期间输入新文字不被旧快照覆盖。
+- [x] 复用现有 preview→追加草稿→保存→清 preview 流程，超过 5000 字保留全文；失败保留 Blob 和局部重试。录音刷新不可恢复的说明保留在信息抽屉。
+- [x] 合并朗读按钮的加载/播放/停止；历史问题按自己的 questionId 播放，未授权 Key 不外泄，录音开始停止其他播放。
+- [x] 运行 F4；覆盖麦克风拒绝、语音能力不可用、90 秒取消、换题/离页迟到回调、恢复旧预览不会自动提交。首次语音使用说明可见，文字路径不中断。
 
 ### T16：接入提前结束弹窗及录音/生成状态处理
 
@@ -592,10 +592,10 @@ type SessionProgress = {
 
 **Interfaces：** useInterviewFinish({conversation,voice,api,drafts}) 返回 open、finishing、requestFinish()、confirmFinish('submit'|'discard')、continueInterview()；调用 conversation 的 FINISHING 状态阻止旧回调应用。
 
-- [ ] 弹窗覆盖无草稿、有草稿、已保存等待下一题、首题生成中、自动重试中；草稿存在时明确三种选择，已保存回答不能显示成可丢弃本地草稿。
-- [ ] 录音中打开弹窗先停止并保留音频，不自动上传；可选“转写并检查后继续选择”或“直接结束”；已在转写中时可取消并保留原文字。继续面试时可恢复音频重试，不自动丢内容。
-- [ ] submit 直接带 Submission 调用 finish，不调用 send() / generate()；discard 只舍弃尚未提交内容。结束确认成功后释放录音/朗读、停止轮询并导航报告。
-- [ ] 请求失败/结果未知时保留文字和录音，读回会话后再确认；不误清草稿、不展示假成功。运行 F5，并验证已结束轮次不会被晚到模型结果重开。
+- [x] 弹窗覆盖无草稿、有草稿、已保存等待下一题、首题生成中、自动重试中；草稿存在时明确三种选择，已保存回答不能显示成可丢弃本地草稿。
+- [x] 录音中打开弹窗先停止并保留音频，不自动上传；可选“转写并检查后继续选择”或“直接结束”；已在转写中时可取消并保留原文字。继续面试时可恢复音频重试，不自动丢内容。
+- [x] submit 直接带 Submission 调用 finish，不调用 send() / generate()；discard 只舍弃尚未提交内容。结束确认成功后释放录音/朗读、停止轮询并导航报告。
+- [x] 请求失败/结果未知时保留文字和录音，读回会话后再确认；不误清草稿、不展示假成功。运行 F5，并验证已结束轮次不会被晚到模型结果重开。
 
 ### T17：完善提前结束的报告和零回答状态
 
@@ -605,10 +605,10 @@ type SessionProgress = {
 
 **Interfaces：** 报告新增 finishReason，保留 plannedCount / answeredCount / reportStatus / overallScore；原评分 API 和人工补评入口继续可用。
 
-- [ ] 测试零题、只答一题、主题带追问、未答专项、最后专项自然完成和部分评分失败；score=0 与 score=null 必须区分。
-- [ ] 标注“提前结束 · 已答 X/13”，未答不补零；范围不足 overallScore=null。零回答不请求评分模型，显示暂无可评价内容。
-- [ ] 报告加载/评分失败仍能看到已结束状态和问答，允许重试未评分题；成功评分缓存、打印导出及原完整轮 80/20 算法保持。
-- [ ] 运行 B7、F5；“提交当前回答并结束”保存的最后答案出现在报告，未提交草稿不出现。
+- [x] 测试零题、只答一题、主题带追问、未答专项、最后专项自然完成和部分评分失败；score=0 与 score=null 必须区分。
+- [x] 标注“提前结束 · 已答 X/13”，未答不补零；范围不足 overallScore=null。零回答不请求评分模型，显示暂无可评价内容。
+- [x] 报告加载/评分失败仍能看到已结束状态和问答，允许重试未评分题；成功评分缓存、打印导出及原完整轮 80/20 算法保持。
+- [x] 运行 B7、F5；“提交当前回答并结束”保存的最后答案出现在报告，未提交草稿不出现。
 
 ### T18：将报告评分改为可查询的后台任务
 
@@ -618,10 +618,10 @@ type SessionProgress = {
 
 **Interfaces：** GET /api/interviews/{id}/report?async=true → 原报告字段加 scoringState / scoringOperationId / stateVersion；POST /report/retry 接受 {async:true,requestId}，只排队尚未成功的评分。旧无 async 调用保留兼容。
 
-- [ ] 用阻塞模型证明 async GET/POST 在模型释放之前返回已有问答和评分状态；重复刷新只加入同一评分任务，评分失败仍可读报告。
-- [ ] 复用现有按五题分批和成功缓存，有界后台执行；每批经统一快照提交，评分和出题操作分别管理，不占会话读取锁。
-- [ ] 前端短请求轮询 scoringState，失败只提示/允许人工补评，不反复启动任务；重启把在途评分恢复为可补评，删除/过期后结果不能创建快照。
-- [ ] 运行 B7、B7a 和 F5；原证据校验、合法零分、完整综合分、成功评分不重复、打印和部分报告均保留。
+- [x] 用阻塞模型证明 async GET/POST 在模型释放之前返回已有问答和评分状态；重复刷新只加入同一评分任务，评分失败仍可读报告。
+- [x] 复用现有按五题分批和成功缓存，有界后台执行；每批经统一快照提交，评分和出题操作分别管理，不占会话读取锁。
+- [x] 前端短请求轮询 scoringState，失败只提示/允许人工补评，不反复启动任务；重启把在途评分恢复为可补评，删除/过期后结果不能创建快照。
+- [x] 运行 B7、B7a 和 F5；原证据校验、合法零分、完整综合分、成功评分不重复、打印和部分报告均保留。
 
 ### T19：补齐后端跨接口并发与重启回归
 
@@ -631,10 +631,10 @@ type SessionProgress = {
 
 **Interfaces：** 使用真实 Spring 控制器、临时存储和受控模型/调度器，不连接真实厂商。
 
-- [ ] 建立故障矩阵：保存成功响应丢失→读回→生成；多客户端同时生成；重试间隔内结束；模型完成与结束竞态；结束存储失败；生成/评分同时写快照；重启恢复后重新生成。
-- [ ] 断言每个 submissionId 只保存一次、同一源题最多追加一题、FINISHED 后无出题写入、报告并发写入不覆盖最后回答，跨用户无法操作。
-- [ ] 验证服务重启后 start requestId 查回原会话、已成功评分无需重算、在途状态明确 FAILED；模拟执行器饱和和截止时间，不能留永久处理中。
-- [ ] 运行完整后端测试与打包；记录实际测试输出及所有仍未执行的外部模型场景。
+- [x] 建立故障矩阵：保存成功响应丢失→读回→生成；多客户端同时生成；重试间隔内结束；模型完成与结束竞态；结束存储失败；生成/评分同时写快照；重启恢复后重新生成。
+- [x] 断言每个 submissionId 只保存一次、同一源题最多追加一题、FINISHED 后无出题写入、报告并发写入不覆盖最后回答，跨用户无法操作。
+- [x] 验证服务重启后 start requestId 查回原会话、已成功评分无需重算、在途状态明确 FAILED；模拟执行器饱和和截止时间，不能留永久处理中。
+- [x] 运行完整后端测试与打包；记录实际测试输出及所有仍未执行的外部模型场景。
 
 ### T20：验收聊天正常流程与响应式布局
 
@@ -644,10 +644,10 @@ type SessionProgress = {
 
 **Interfaces：** 模拟 API 按 4.2 返回真实状态转换；页面事件驱动，不靠搜索 Vue 源码断言交互正确。
 
-- [ ] 脚本完成准备→首题→文字回答→下一题→历史阅读→回到最新→提前结束→报告；另覆盖最后专项自然结束。
-- [ ] 使用现有假麦克风完成录音→停止→自动转写→修改文字→发送，以及问题朗读加载→播放→停止；结果必须对应题号。补完旧草稿任务未完成的设置往返、刷新、提交断网、配额失败、多标签冲突场景。
-- [ ] 检查桌面 1440×900、窄屏 390×844、长题干/长答案、算法展开、抽屉和结束弹窗；键盘操作、焦点返回、输入区不遮消息。
-- [ ] 运行 npm test、npm run build、浏览器脚本；保存实际截图和断言结果，修复发现的问题后只重跑受影响用例及必要回归。
+- [x] 脚本完成准备→首题→文字回答→下一题→历史阅读→回到最新→提前结束→报告；另覆盖最后专项自然结束。
+- [x] 使用现有假麦克风完成录音→停止→自动转写→修改文字→发送，以及问题朗读加载→播放→停止；结果必须对应题号。补完旧草稿任务未完成的设置往返、刷新、提交断网、配额失败、多标签冲突场景。
+- [x] 检查桌面 1440×900、窄屏 390×844、长题干/长答案、算法展开、抽屉和结束弹窗；键盘操作、焦点返回、输入区不遮消息。
+- [x] 运行 npm test、npm run build、浏览器脚本；保存实际截图和断言结果，修复发现的问题后只重跑受影响用例及必要回归。
 
 ### T21：故障体验验收、说明更新与交付记录
 

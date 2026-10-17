@@ -46,7 +46,12 @@ public record InterviewSnapshot(
         Progress progress,
         Set<String> closedRootIds,
         Instant createdAt,
-        Instant expiresAt) {
+        Instant expiresAt,
+        String scoringState,
+        String scoringOperationId,
+        String scoringRequestId,
+        String scoringError,
+        long scoringStateVersion) {
 
     /** 当前唯一支持的文件结构版本；读取到其他版本必须报受控错误而不是猜测。 */
     public static final int SCHEMA_VERSION = 2;
@@ -66,6 +71,20 @@ public record InterviewSnapshot(
         assessments = orderedCopy(assessments);
         closedRootIds = closedRootIds == null ? Set.of() : Set.copyOf(closedRootIds);
         progress = progress == null ? Progress.empty() : progress;
+    }
+
+    /** Reads/writes schema-v2 snapshots created before T18 introduced report job state. */
+    public InterviewSnapshot(int schemaVersion, String sessionId, String owner, String materialId, String resumeText,
+            String targetRole, int questionCount, String status, String finishReason, String pendingAnswer,
+            long revision, long stateVersion, List<SnapshotTurn> turns, Map<String, InterviewQuestion> questionContracts,
+            Map<String, QuestionContext> contexts, Hot100Catalog.Problem selectedAlgorithm, InterviewSpecialty specialty,
+            Map<String, InterviewAssessment> assessments, InterviewAgent.InterviewReport cachedReport, Generation generation,
+            String startRequestId, InterviewPlan plan, Progress progress, Set<String> closedRootIds,
+            Instant createdAt, Instant expiresAt) {
+        this(schemaVersion, sessionId, owner, materialId, resumeText, targetRole, questionCount, status, finishReason,
+                pendingAnswer, revision, stateVersion, turns, questionContracts, contexts, selectedAlgorithm, specialty,
+                assessments, cachedReport, generation, startRequestId, plan, progress, closedRootIds, createdAt, expiresAt,
+                "NOT_STARTED", null, null, null, 0);
     }
 
     private static <V> Map<String, V> orderedCopy(Map<String, V> source) {

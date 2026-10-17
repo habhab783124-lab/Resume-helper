@@ -4,16 +4,22 @@ import { readFileSync } from 'node:fs'
 import { ref, computed, reactive, watch } from 'vue'
 import { algorithmUrl } from '../interview/algorithmSource.js'
 import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specialtyPresentation.js'
+import { useInterviewConversation } from '../interview/useInterviewConversation.js'
+import { useInterviewPolling } from '../interview/useInterviewPolling.js'
+import { useInterviewFinish } from '../interview/useInterviewFinish.js'
 
 const source = readFileSync(new URL('../views/Interview.vue', import.meta.url), 'utf8')
+const setupSource = readFileSync(new URL('../components/interview/InterviewSetup.vue', import.meta.url), 'utf8')
+const headerSource = readFileSync(new URL('../components/interview/InterviewHeader.vue', import.meta.url), 'utf8')
+const drawerSource = readFileSync(new URL('../components/interview/InterviewInfoDrawer.vue', import.meta.url), 'utf8')
 const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import\s.*$/gm, '').replace(/import\.meta\.env/g, '({})')
   + '\nreturn { applySession, start, material, completed, completedRoots, currentMetadata, questionLabel, algorithmUrl };'
 function mount(api = {}) {
-  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
+  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', body)(
     ref, computed, reactive, watch, () => {}, () => {}, () => ({ query: {} }), () => ({ push() {} }), () => api,
     () => ({ save() { return { saved: true } }, load() { return null }, remove() { return true }, clearScope() { return 0 }, keyFor() { return '' } }), () => '', () => 'demo-user',
-    () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance)
+    () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance, useInterviewPolling, useInterviewConversation, useInterviewFinish)
 }
 const turn = (id, answer = '已回答') => ({ questionId: id, question: id, answer })
 const metadata = {
@@ -47,10 +53,10 @@ test('starting uses fixed 13-question configuration and setup explains 12+1 and 
   view.material.value = { materialId: 'm', text: '简历' }
   await view.start()
   assert.equal(sent[0].questionCount, 13)
-  assert.match(source, /12 道主问题/)
-  assert.match(source, /1 道岗位专项题/)
-  assert.match(source, /80%/)
-  assert.match(source, /追问不计入/)
+  assert.match(setupSource, /12 道主问题/)
+  assert.match(setupSource, /1 道岗位专项题/)
+  assert.match(setupSource, /80%/)
+  assert.match(setupSource, /追问不计入/)
   assert.doesNotMatch(source, /v-model="questionCount"/)
 })
 
@@ -65,6 +71,22 @@ test('non-coding sessions retain the case plan and label question13 without algo
   assert.match(view.questionLabel(current), /专业案例题.*20%/)
   assert.doesNotMatch(view.questionLabel(current), /算法|Hot 100|主问题/)
   assert.equal(view.completedRoots.value.length, 1)
-  assert.match(source, /session.specialty.focus/)
-  assert.match(source, /session.specialty.reason/)
+  assert.match(drawerSource, /session\.specialty\.focus/)
+  assert.match(drawerSource, /session\.specialty\.reason/)
+})
+
+test('preparation, session header, and information drawer are separate accessible components', () => {
+  assert.match(source, /<InterviewSetup\b/)
+  assert.match(source, /@upload="upload"/)
+  assert.match(source, /@use-paste="uploadPaste"/)
+  assert.match(source, /@start="start"/)
+  assert.match(source, /<InterviewHeader\b/)
+  assert.match(source, /@finish="requestFinish"/)
+  assert.match(source, /@open-info="openInfo"/)
+  assert.match(source, /<InterviewInfoDrawer\b/)
+  assert.doesNotMatch(source, /<aside class="interview-aside"/)
+  assert.match(headerSource, /:disabled="!canFinish"/)
+  assert.match(source, /const \{ finishing: finishFinishing \} = finishFlow/)
+  assert.match(source, /:can-finish="[^\"]*!busy[^\"]*!finishFinishing[^\"]*"/)
+  assert.match(drawerSource, /event\.key === 'Escape'/)
 })

@@ -16,6 +16,7 @@ export function useInterviewVoice({
   const speech = createSpeech({ api })
   const preview = ref(null)
   const error = ref('')
+  const speechQuestionId = ref('')
   const transcribing = ref(false)
   const recordingUrl = ref('')
   const recorderState = computed(() => recorder.value?.state.value || 'idle')
@@ -27,7 +28,7 @@ export function useInterviewVoice({
   const ttsEnabled = computed(() => capabilityState.value === 'ready' && capabilities.value.ttsEnabled === true)
   const maxSeconds = computed(() => capabilities.value?.maxRecordingSeconds || 120)
   const maxBytes = computed(() => capabilities.value?.maxAudioBytes || 5 * 1024 * 1024)
-  let generation = 0, capabilityGeneration = 0, contextKey = '', request = null, disposed = false, recorderLimits = ''
+  let generation = 0, capabilityGeneration = 0, contextKey = '', request = null, disposed = false, recorderLimits = '', suppressStopTranscription = false
 
   function clearRecordingUrl() {
     pauseReplay()
@@ -37,6 +38,12 @@ export function useInterviewVoice({
   const stopBlobWatch = watch(blob, value => {
     clearRecordingUrl()
     if (value?.size) recordingUrl.value = createUrl(value)
+  }, { flush: 'sync' })
+  let previousRecorderState = recorderState.value
+  const stopStateWatch = watch(recorderState, value => {
+    const stoppedWithAudio = previousRecorderState === 'recording' && value === 'recorded'
+    previousRecorderState = value
+    if (stoppedWithAudio && !suppressStopTranscription) queueMicrotask(() => { if (blob.value?.size) transcribe() })
   }, { flush: 'sync' })
   function contextSignature(context) {
     return JSON.stringify([context?.sessionId, context?.questionId, context?.status, context?.pending ?? null])
@@ -87,6 +94,7 @@ export function useInterviewVoice({
     cancelTranscription()
     recorder.value?.dispose()
     speech.dispose()
+    speechQuestionId.value = ''
     clearRecordingUrl()
     error.value = ''
   }
@@ -104,19 +112,29 @@ export function useInterviewVoice({
     recorder.value.cancel()
     await recorder.value.start()
   }
-  function stopRecording() {
-    if (recorderState.value === 'recording') recorder.value.stop()
+  async function stopRecording({ transcribe: shouldTranscribe = true } = {}) {
+    if (recorderState.value !== 'recording') return false
+    suppressStopTranscription = true
+    try {
+      const stopped = recorder.value.stop()
+      if (stopped?.then) await stopped
+      if (shouldTranscribe && blob.value?.size) await transcribe()
+      return true
+    } finally { suppressStopTranscription = false }
   }
   function cancelRecording() {
     cancelTranscription()
     recorder.value?.cancel()
     clearRecordingUrl()
   }
-  function playQuestion() {
+  function playQuestion(question = {}) {
     const context = getContext()
-    if (!ttsEnabled.value || busy.value || disposed || context?.blocked || context?.status !== 'ACTIVE' || !context.questionId) return
+    const sessionId = question.sessionId || context?.sessionId
+    const questionId = question.questionId || context?.questionId
+    if (!ttsEnabled.value || busy.value || disposed || context?.blocked || !sessionId || !questionId || sessionId !== context?.sessionId) return
     pauseReplay()
-    speech.play(context.sessionId, context.questionId)
+    speechQuestionId.value = questionId
+    speech.play(sessionId, questionId)
   }
   function replayRecording() {
     if (busy.value || getContext()?.blocked) { pauseReplay(); return }
@@ -203,9 +221,10 @@ export function useInterviewVoice({
     capabilityGeneration += 1
     clearContext()
     stopBlobWatch()
+    stopStateWatch()
   }
   return { capabilities, capabilityState, capabilityError, asrEnabled, ttsEnabled, maxSeconds, maxBytes,
     recorderState, blob, durationSeconds, recorderError, speechState: speech.state, speechError: speech.error,
-    preview, error, transcribing, busy, recordingUrl, loadCapabilities, syncContext, startRecording, stopRecording,
+    preview, error, transcribing, busy, recordingUrl, speechQuestionId, loadCapabilities, syncContext, startRecording, stopRecording,
     cancelRecording, cancelTranscription, transcribe, acceptPreview, restorePreview, playQuestion, stopQuestion: speech.stop, replayRecording, dispose }
 }

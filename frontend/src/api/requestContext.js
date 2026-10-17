@@ -7,6 +7,9 @@ const storageKeys = {
 const localApiBaseUrlKey = 'resume-helper-local-api-base-url'
 let localApiBaseUrlMemory = null
 let memory = null
+globalThis.addEventListener?.('storage', event => {
+  if (event.key === localApiBaseUrlKey) localApiBaseUrlMemory = String(event.newValue || '').trim()
+})
 
 export function getAiSettings() {
   if (memory) return { ...memory }
@@ -67,6 +70,7 @@ export function setLocalApiBaseUrl(url = '') {
     if (localApiBaseUrlMemory) globalThis.localStorage?.setItem(localApiBaseUrlKey, localApiBaseUrlMemory)
     else globalThis.localStorage?.removeItem(localApiBaseUrlKey)
   } catch { /* The active tab still uses the in-memory address. */ }
+  try { globalThis.dispatchEvent?.(new Event('request-context-change')) } catch { /* Non-browser runtimes have no event target. */ }
 }
 
 // Match the existing demo identity used by materials and resume requests.

@@ -251,7 +251,7 @@ class InterviewSpeechApiTest {
         verify(speech, never()).transcribe(any(byte[].class), anyString());
     }
 
-    @Test void pendingAnswerBlocksTranscription() throws Exception {
+    @Test void savedAnswerAfterGenerationFailureBlocksTranscription() throws Exception {
         var owner = new MockHttpSession();
         Ref ref = start(owner);
         when(resolver.resolve(any(HttpServletRequest.class))).thenReturn((s, p) -> {
@@ -260,9 +260,11 @@ class InterviewSpeechApiTest {
         mvc.perform(post("/api/interviews/" + ref.sessionId() + "/turns").header("X-User-Id", owner.getId())
                         .contentType("application/json")
                         .content("{\"questionId\":\"" + ref.questionId() + "\",\"answer\":\"我的回答\"}"))
-                .andExpect(status().isBadRequest());
+                .andExpect(status().isOk());
         mvc.perform(get("/api/interviews/" + ref.sessionId()).header("X-User-Id", owner.getId()))
-                .andExpect(jsonPath("$.data.pendingAnswer").value("我的回答"));
+                .andExpect(jsonPath("$.data.turns[0].answer").value("我的回答"))
+                .andExpect(jsonPath("$.data.pendingAnswer").doesNotExist())
+                .andExpect(jsonPath("$.data.generation.state").value("FAILED"));
         mvc.perform(transcription(owner, ref, UUID_1)).andExpect(status().isConflict());
         verify(speech, never()).transcribe(any(byte[].class), anyString());
     }

@@ -9,8 +9,10 @@ test('session recovery forwards an optional abort signal and keeps existing read
   const controller = new AbortController()
   await api.getSession('s1', { signal: controller.signal })
   await api.getSession('s1')
-  assert.equal(calls[0][1].signal, controller.signal)
-  assert.equal(calls[1][1].signal, undefined)
+  assert.notEqual(calls[0][1].signal, controller.signal)
+  controller.abort()
+  assert.equal(calls[0][1].signal.aborted, false)
+  assert.ok(calls[1][1].signal instanceof AbortSignal)
   assert.equal(calls[0][1].method, 'GET')
 })
 test('uses API origin, cookies and ephemeral AI headers with JSON bodies', async () => {
@@ -43,6 +45,60 @@ test('sends turn and finish to their endpoints', async () => {
   assert.equal(calls[0][0], '/api/interviews/abc/turns')
   assert.equal(JSON.parse(calls[0][1].body).answer, 'hello')
   assert.equal(calls[1][0], '/api/interviews/abc/finish')
+})
+test('separated answer and generation APIs forward cancellation, text credentials and exact bodies', async () => {
+  const calls = []; const controller = new AbortController()
+  const { setAiSettings } = await import('./requestContext.js')
+  setAiSettings({ apiKey: 'text-key', model: 'text-model', baseUrl: 'https://text.test' })
+  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { status: 'ACTIVE' } }) } })
+  await api.saveAnswer('s /', { questionId: 'q', submissionId: 'sub', answer: 'hello' }, controller.signal)
+  await api.generate('s /', { requestId: 'gen', kind: 'NEXT', expectedRevision: 2 }, controller.signal)
+  assert.equal(calls[0][0], '/api/interviews/s%20%2F/answers')
+  assert.deepEqual(JSON.parse(calls[0][1].body), { questionId: 'q', submissionId: 'sub', answer: 'hello' })
+  assert.notEqual(calls[0][1].signal, controller.signal)
+  controller.abort()
+  assert.equal(calls[0][1].signal.aborted, false)
+  assert.equal(calls[0][1].headers['X-User-Id'], 'demo-user')
+  assert.equal(calls[0][1].headers['X-Speech-Api-Key'], undefined)
+  assert.equal(calls[0][1].headers['X-AI-Api-Key'], 'text-key')
+  assert.equal(calls[1][0], '/api/interviews/s%20%2F/generations')
+  assert.equal(JSON.parse(calls[1][1].body).expectedRevision, 2)
+  assert.notEqual(calls[1][1].signal, controller.signal)
+  assert.equal(calls[1][1].signal.aborted, false)
+  assert.equal(calls[1][1].headers['X-AI-Api-Key'], 'text-key')
+  setAiSettings({})
+})
+test('finish sends optional body and forwards cancellation', async () => {
+  let request
+  const controller = new AbortController()
+  const api = createInterviewApi({ fetchImpl: async (...args) => { request = args; return response({ success: true, data: {} }) } })
+  const body = { requestId: 'finish', submission: { questionId: 'q', submissionId: 'sub', answer: 'last' } }
+  await api.finish('s', body, controller.signal)
+  assert.equal(request[0], '/api/interviews/s/finish')
+  assert.deepEqual(JSON.parse(request[1].body), body)
+  assert.notEqual(request[1].signal, controller.signal)
+  assert.equal(request[1].signal.aborted, false)
+})
+test('short request timeout is distinct from model timeout and parses structured backend errors', async () => {
+  const api = createInterviewApi({ requestTimeouts: { read: 5, write: 5 }, fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
+    options.signal.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true })
+  }) })
+  await assert.rejects(api.getSession('s'), error => error.code === 'BROWSER_UNCONFIRMED' && error.retryable === true)
+  const backend = createInterviewApi({ fetchImpl: async () => response({ success: false, message: 'busy', code: 'RATE_LIMITED', retryable: true }, 429) })
+  await assert.rejects(backend.getSession('s'), error => error.code === 'RATE_LIMITED' && error.retryable === true)
+})
+test('external cancellation aborts the underlying short request', async () => {
+  let underlying
+  const api = createInterviewApi({ fetchImpl: async (_url, options) => {
+    underlying = options.signal
+    return new Promise((_resolve, reject) => underlying.addEventListener('abort', () => reject(Object.assign(new Error('aborted'), { name: 'AbortError' })), { once: true }))
+  } })
+  const controller = new AbortController()
+  const pending = api.getSession('s', { signal: controller.signal })
+  await new Promise(resolve => setImmediate(resolve))
+  controller.abort()
+  await assert.rejects(pending, error => error.name === 'AbortError')
+  assert.equal(underlying.aborted, true)
 })
 test('preserves HTTP status and API message for expiry and retry UI', async () => {
   const api = createInterviewApi({ fetchImpl: async () => response({ success: false, message: 'expired' }, 404) })
@@ -142,4 +198,15 @@ test('report GET and missing-assessment retry POST preserve request-time identit
   assert.equal(calls[1][1].headers['X-AI-Base-Url'], 'https://report.test/v1'); assert.equal(calls[1][1].body, undefined)
   assert.equal(calls[2][1].headers['X-AI-Api-Key'], undefined)
   setAiSettings({})
+})
+
+test('async report requests expose scoring state and retries carry an idempotency requestId', async () => {
+  const calls = []
+  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { scoringState: 'QUEUED' } }) } })
+  await api.report('s1', { async: true })
+  await api.retryReport('s1', { async: true, requestId: 'retry-1' })
+  assert.equal(calls[0][0], '/api/interviews/s1/report?async=true')
+  assert.equal(calls[0][1].method, 'GET')
+  assert.equal(calls[1][1].method, 'POST')
+  assert.deepEqual(JSON.parse(calls[1][1].body), { async: true, requestId: 'retry-1' })
 })

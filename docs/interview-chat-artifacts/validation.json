@@ -1,0 +1,1332 @@
+{
+  "checks": [
+    "unified settings saves and detects backend independently from model and speech",
+    "model and speech checks use separate credentials at the selected backend",
+    "settings survives reload and remains usable at390px without horizontal overflow",
+    "no microphone or TTS request before explicit click",
+    "setup fixes 12+1 questions and explains the 80/20 split",
+    "unified material response renders original resume text",
+    "start renders generated question and voice controls without scoring criteria",
+    "stop and replay use cached native MP3 without second synthesis",
+    "recording locks answer and submit while keeping finish available",
+    "cancel releases native tracks and allows re-record",
+    "native fake-device MediaRecorder produces replayable WebM Blob",
+    "ASR upload has real audio + matching IDs and only creates preview",
+    "390px mobile interview has no horizontal overflow",
+    "explicit append preserves editable original draft without submitting",
+    "keep original draft drops preview without altering answer",
+    "follow-up retains 1/13 root progress and saves edited answer",
+    "transcription locks submission while finish and cancel remain available",
+    "late canceled ASR cannot overwrite text and retained recording can retry",
+    "kept transcription offers finish choices and preserves submit/discard actions",
+    "final algorithm exposes Hot100 source, fixed 20% and code answer guidance",
+    "last answer completes, retains algorithm source and offers report entry",
+    "restored FINISHED session exposes report entry",
+    "restored FINISHED history retains canonical algorithm title and official source link",
+    "report failure retains saved question-answer history",
+    "GET retry renders weighted report and recovered target role",
+    "report export menu exposes Markdown and PDF choices",
+    "PDF export completes without a report error",
+    "report score and feedback remain visible in print media",
+    "native Chrome prints report PDF with text content",
+    "report navigation cleans media tracks and Blob URLs",
+    "practice again opens the setup page instead of the finished session",
+    "practice again reuses the previous resume and role without opening a new session",
+    "the previous round and its answers can still be viewed from the setup page",
+    "intent=new without a source session clears the restore pointer and shows setup",
+    "capability retry with TTS unavailable preserves recording/URL/preview",
+    "finish dialog focuses its close action and Escape restores opener focus",
+    "local draft finish offers submit/discard/continue",
+    "generation failure keeps the saved answer in history and offers generation-only retry",
+    "finish after generation failure explicitly preserves the accepted answer",
+    "preserve finish includes the accepted answer in report session",
+    "submit-and-finish saves answer before ending and routing",
+    "discard finish does not submit unsent local draft",
+    "disabled ASR/TTS leaves ordinary text submission available",
+    "13 root weights sum to100 with algorithm20 and exact weighted total82",
+    "refresh reuses cached scoring via GET",
+    "weighted report has no mobile horizontal overflow",
+    "early finish labels answered scope and unanswered rows without zero scores",
+    "partial report shows successful question scores but no total or level",
+    "retry keeps prior report visible and disables duplicate scoring",
+    "failed scoring retry retains question answers and successful scores",
+    "explicit POST retries missing question only and preserves successful assessment",
+    "all scoring unavailable preserves question history with no invented score or praise",
+    "empty report has no numeric score or scoring retry",
+    "legitimate zero remains a scored total and per-question score",
+    "information drawer exposes the frozen professional plan and rationale",
+    "Escape closes the drawer and returns focus to its opener",
+    "question13 is a20 percent professional case with job analysis guidance and safe plain text",
+    "case answer completes exactly13 roots with follow-up excluded and no Hot100 source",
+    "restored completed case retains specialty metadata and report entry",
+    "case report has13 roots, fixed20 percent and professional feedback without an algorithm link",
+    "case retry targets only its missing assessment and retains fixed20 percent",
+    "early non-coding report reserves specialty20 percent and has no complete total",
+    "a started round keeps its session across a reload instead of being lost to intent=new",
+    "typed draft survives a settings round trip and a hard reload",
+    "a failed submit keeps the question draft on disk and reports no storage problem",
+    "a newer draft from another tab prompts instead of overwriting the current input",
+    "question speech sends only question ID route without answers or contracts",
+    "application API calls carry common demo identity; backend probe sends no credentials",
+    "text settings shared into report; speech carries no model/provider credentials",
+    "no uncaught browser or mock-server errors"
+  ],
+  "errors": [],
+  "calls": [
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/sources",
+      "bytes": 0,
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/ai/check",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interview-speech/check",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/materials",
+      "bytes": 244,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 130,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/questions/local-session-1-q1/speech",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/transcriptions",
+      "bytes": 13943,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-1-q1",
+        "requestId": "527a2e4c-088e-4b13-b447-ab875a72f8ab"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/transcriptions",
+      "bytes": 13943,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-1-q1",
+        "requestId": "e53ac6a0-9b1d-4704-98aa-8e342fef5cdf"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/transcriptions",
+      "bytes": 13943,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-1-q1",
+        "requestId": "774f3742-9179-4099-9db4-cb8b752370df"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 125,
+      "answer": {
+        "questionId": "local-session-1-q1",
+        "submissionId": "701c5b70-0b3a-4352-bc33-1208f1be3989",
+        "answer": "编辑后确认的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/transcriptions",
+      "bytes": 13943,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-1-f1",
+        "requestId": "32971806-c4bd-412b-8c9e-b8787a231050"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/transcriptions",
+      "bytes": 13943,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-1-f1",
+        "requestId": "ef680874-a1dd-4c03-aabc-d3da24da32ef"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 125,
+      "answer": {
+        "questionId": "local-session-1-f1",
+        "submissionId": "53398b35-f05c-480b-8598-2eb1e6d2d0d7",
+        "answer": "取消后保留的文字"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q2",
+        "submissionId": "a2f8fc13-8e1d-4d0b-b670-2a9db47da8f8",
+        "answer": "主问题 2 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q3",
+        "submissionId": "55cb7eb8-dac8-4547-9d16-15deb934709a",
+        "answer": "主问题 3 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q4",
+        "submissionId": "1001b54a-0abe-4146-9709-fe628c206cd7",
+        "answer": "主问题 4 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q5",
+        "submissionId": "dd3c0a13-6fb3-498d-b57c-ddda23b999df",
+        "answer": "主问题 5 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q6",
+        "submissionId": "c1eaf03f-83f8-4d54-b83c-ce0436af02da",
+        "answer": "主问题 6 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q7",
+        "submissionId": "ffbbe61d-fbd8-48d4-a0fe-73f8b3a898de",
+        "answer": "主问题 7 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q8",
+        "submissionId": "18dfe6f4-2757-4620-b5a2-81fcfc50148b",
+        "answer": "主问题 8 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-1-q9",
+        "submissionId": "4bee55b1-6900-4102-9dcb-fa28f9d84901",
+        "answer": "主问题 9 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 124,
+      "answer": {
+        "questionId": "local-session-1-q10",
+        "submissionId": "bbc93643-17a5-4ea4-a715-1add4c504f1d",
+        "answer": "主问题 10 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 124,
+      "answer": {
+        "questionId": "local-session-1-q11",
+        "submissionId": "1b10f89a-4375-4205-942e-12965eeca838",
+        "answer": "主问题 11 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 124,
+      "answer": {
+        "questionId": "local-session-1-q12",
+        "submissionId": "3c835ac4-f526-458a-b22e-abdcc5ba3b57",
+        "answer": "主问题 12 的回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/answers",
+      "bytes": 204,
+      "answer": {
+        "questionId": "local-session-1-q13",
+        "submissionId": "929d6c1f-2358-47b1-98c4-c9dc8aa38404",
+        "answer": "使用哈希表，逐个查找差值。\nfunction twoSum(nums, target) { /* O(n) time, O(n) space */ }"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-2",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-2/transcriptions",
+      "bytes": 13943,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-2-q1",
+        "requestId": "b29c5d69-7c9a-4ecc-92ab-1e589c6f98aa"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-2/transcriptions",
+      "bytes": 13943,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-2-q1",
+        "requestId": "df3fc4bd-728a-4008-a2f2-f39d69607977"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-2/answers",
+      "bytes": 116,
+      "answer": {
+        "questionId": "local-session-2-q1",
+        "submissionId": "0fc18908-9f56-4095-bd65-e4dbb8bf7c21",
+        "answer": "未提交草稿"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-2/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-2/finish",
+      "bytes": 52,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-2",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-2/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-3",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-3/finish",
+      "bytes": 191,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-3",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-3/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-4",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-4/finish",
+      "bytes": 52,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-4",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-4/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-5",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-5/answers",
+      "bytes": 116,
+      "answer": {
+        "questionId": "local-session-5-q1",
+        "submissionId": "cedd3327-fbf4-4c4b-8398-1b1291117296",
+        "answer": "纯文字回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-5/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-6/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-6",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-6/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-6",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-7/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-7",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-8/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-8",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-8/report/retry",
+      "bytes": 65,
+      "retryQuestions": [
+        "local-session-8-q2"
+      ],
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-8/report/retry",
+      "bytes": 65,
+      "retryQuestions": [
+        "local-session-8-q2"
+      ],
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-9/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-9",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-10/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-10",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-11/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-11",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-12",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q1",
+        "submissionId": "2f0a29f5-3504-4398-b24e-374fb687d6c1",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-f1",
+        "submissionId": "cfb46459-e721-49a7-83cf-5380369bc787",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q2",
+        "submissionId": "60267291-b6b0-44ef-a597-5b63e014a35d",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q3",
+        "submissionId": "25271a05-c299-4b05-9f99-64dfb3b3f2ef",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q4",
+        "submissionId": "3fab4c9d-b135-4c58-ba3d-9c4ccee12ac7",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q5",
+        "submissionId": "4f5c3532-d45f-4c7a-a6b0-1cf18cfb5cab",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q6",
+        "submissionId": "28b00594-4518-4090-9c8a-f8609fb141c6",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q7",
+        "submissionId": "3b411921-78d5-4e5a-94b1-814b85e1400c",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q8",
+        "submissionId": "a17d127d-82ec-4827-9123-8349c070f5c5",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-12-q9",
+        "submissionId": "8507edde-9a88-440a-b5bf-fa28d4ad4a5a",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-12-q10",
+        "submissionId": "3f115bdb-f7b9-4d0f-80c3-009b32f26def",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-12-q11",
+        "submissionId": "99ab2aa9-533a-44ed-9e58-0ea8f68ff82e",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-12-q12",
+        "submissionId": "be061652-5bb5-4d3a-9bb7-e8dc7099b207",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-12-q13",
+        "submissionId": "37a9f5eb-24e9-478c-9e83-ef0b0068e91d",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-12",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-12",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-12/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-13/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-13",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-13/report/retry",
+      "bytes": 65,
+      "retryQuestions": [
+        "local-session-13-q13"
+      ],
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-14/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-14",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-6",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 141,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-15",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-16/answers",
+      "bytes": 126,
+      "answer": {
+        "questionId": "local-session-16-q1",
+        "submissionId": "3eaaec72-0de8-47d6-9370-2e573a740947",
+        "answer": "提交失败后应保留"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-17",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    }
+  ]
+}

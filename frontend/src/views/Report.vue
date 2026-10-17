@@ -18,18 +18,25 @@ const report = ref(null)
 const sessionRole = ref('综合模拟')
 const session = ref(null)
 const warning = ref('')
+let scoringTimer = null
+let reportGeneration = 0
 
 const sessionId = computed(() => typeof route.query.sessionId === 'string' ? route.query.sessionId.trim() : '')
 
 const hasOverallScore = computed(() => report.value?.reportStatus === 'COMPLETE' && report.value?.answeredCount === report.value?.plannedCount && Number.isFinite(report.value?.overallScore))
 const needsScoring = computed(() => (report.value?.turnFeedbacks || []).some(item => item.status === 'PENDING'))
-const statusLabel = computed(() => ({ COMPLETE: hasOverallScore.value ? '评分已完成' : report.value?.answeredCount > 0 ? '逐题反馈已完成' : '暂无评分', PARTIAL: needsScoring.value ? '待评分' : '逐题反馈已完成', UNAVAILABLE: '评分暂不可用', EMPTY: '暂无评分' })[report.value?.reportStatus] || '暂无评分')
+const statusLabel = computed(() => ['QUEUED', 'RUNNING'].includes(report.value?.scoringState) ? '评分进行中'
+  : report.value?.scoringState === 'FAILED' ? '评分暂不可用'
+    : ({ COMPLETE: hasOverallScore.value ? '评分已完成' : report.value?.answeredCount > 0 ? '逐题反馈已完成' : '暂无评分', PARTIAL: needsScoring.value ? '待评分' : '逐题反馈已完成', UNAVAILABLE: '评分暂不可用', EMPTY: '暂无评分' })[report.value?.reportStatus] || '暂无评分')
 const scopeLabel = computed(() => {
   const value = report.value
   if (!value) return ''
   const scope = `已答 ${value.answeredCount}/${value.plannedCount} 题`
-  if (!value.answeredCount) return `${scope}，尚无可评分内容`
-  return value.answeredCount < value.plannedCount ? `${scope}，提前结束；仅展示已答题反馈，暂无综合分。` : `${scope}，已完成计划题目；追问并入主问题。`
+  const endedByUser = value.finishReason === 'USER_ENDED'
+  if (!value.answeredCount) return `${scope}${endedByUser ? '，用户提前结束' : ''}，尚无可评分内容`
+  return endedByUser || value.answeredCount < value.plannedCount
+    ? `${scope}，${endedByUser ? '用户提前结束' : '提前结束'}；仅展示已答题反馈，暂无综合分。`
+    : `${scope}，已完成计划题目；追问并入主问题。`
 })
 const reviewedTurns = computed(() => {
   const saved = new Map((session.value?.turns || []).map(turn => [turn.questionId, turn]))
@@ -74,12 +81,14 @@ async function loadReport() {
     error.value = '没有找到面试记录。请先完成一次模拟面试。'
     return
   }
+  const generation = ++reportGeneration
+  clearTimeout(scoringTimer)
   loading.value = true
   error.value = ''
   warning.value = ''
   try {
     const [reportResult, sessionResult] = await Promise.allSettled([
-      api.report(sessionId.value),
+      api.report(sessionId.value, { async: true }),
       api.getSession(sessionId.value),
     ])
     if (sessionResult.status === 'fulfilled') {
@@ -88,6 +97,7 @@ async function loadReport() {
     }
     if (reportResult.status === 'fulfilled') {
       report.value = reportResult.value
+      scheduleScoringPoll(generation)
       if (sessionResult.status === 'rejected') {
         warning.value = '报告已加载，但面试记录暂时无法读取，岗位和回答记录可能不完整。请重试。'
       }
@@ -102,11 +112,37 @@ async function loadReport() {
   }
 }
 
+function scheduleScoringPoll(generation, delay = 1000) {
+  clearTimeout(scoringTimer)
+  if (generation !== reportGeneration || !['QUEUED', 'RUNNING'].includes(report.value?.scoringState)) return
+  scoringTimer = setTimeout(() => refreshScoring(generation), delay)
+}
+
+async function refreshScoring(generation) {
+  if (generation !== reportGeneration || !sessionId.value) return
+  try {
+    const value = await api.report(sessionId.value, { async: true })
+    if (generation !== reportGeneration) return
+    report.value = value
+    warning.value = ''
+    scheduleScoringPoll(generation, 1500)
+  } catch (cause) {
+    if (generation !== reportGeneration) return
+    warning.value = cause.message || '评分状态暂时无法读取，已保留当前问答与评分。'
+    scheduleScoringPoll(generation, 3000)
+  }
+}
+
 async function retryScoring() {
   if (loading.value || retryBusy.value || !sessionId.value || !needsScoring.value) return
   retryBusy.value = true
+  const generation = ++reportGeneration
+  clearTimeout(scoringTimer)
   error.value = ''
-  try { report.value = await api.retryReport(sessionId.value) }
+  try {
+    report.value = await api.retryReport(sessionId.value, { async: true, requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` })
+    scheduleScoringPoll(generation)
+  }
   catch (cause) { error.value = cause.message || '评分重试失败，请稍后再试。' }
   finally { retryBusy.value = false }
 }
@@ -154,6 +190,7 @@ async function onExportPdf() {
 }
 
 onMounted(() => { loadReport() })
+onUnmounted(() => { reportGeneration++; clearTimeout(scoringTimer) })
 onUnmounted(() => { restorePrintDetails() })
 </script>
 
@@ -209,7 +246,7 @@ onUnmounted(() => { restorePrintDetails() })
 
     <p class="weight-explanation">12 道主问题合计 80%，出题前锁定相对权重；1 道岗位专项题固定 20%，按目标岗位或简历职业方向选择算法题或专业案例题。追问不计题数，并入对应主问题评分。提前结束时主问题权重仅在已出主问题间分配，专项题的 20% 始终保留；完成并评完全部 13 题后才显示综合分。分数仅供训练参考。</p>
     <div v-if="needsScoring" class="scoring-retry" role="status">
-      <p>{{ statusLabel }}：已保存的问答和成功评分会保留，重试仅处理待评分题目。</p>
+      <p>{{ statusLabel }}：已保存的问答和成功评分会保留，重试仅处理待评分题目。{{ report.scoringError || '' }}</p>
       <button data-testid="retry-scoring" class="button button-outline" :disabled="retryBusy || loading" @click="retryScoring">{{ retryBusy ? '正在重试评分…' : '重试评分' }}</button>
     </div>
     <div class="report-overview">

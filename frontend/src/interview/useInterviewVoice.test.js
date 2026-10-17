@@ -20,7 +20,7 @@ function setup(options = {}) {
   voice.syncContext()
   return { voice, context, draft, recorder, speech, calls, revoked, events }
 }
-async function recording(fixture) { await fixture.voice.loadCapabilities(); await fixture.voice.startRecording(); fixture.voice.stopRecording() }
+async function recording(fixture) { await fixture.voice.loadCapabilities(); await fixture.voice.startRecording(); await fixture.voice.stopRecording({ transcribe: false }) }
 
 test('transcription creates a preview without submitting or overwriting; confirmation controls full draft', async () => {
   const f = setup(); await recording(f); await f.voice.transcribe()
@@ -187,4 +187,28 @@ test('changed capability limits preserve audio but validate old duration before 
   await f.voice.transcribe(); assert.equal(f.calls.length, 0); assert.match(f.voice.error.value, /时长/)
   await f.voice.startRecording(); assert.deepEqual(f.events.filter(value => typeof value === 'object').at(-1), { maxSeconds: 20, maxBytes: 100 })
   f.voice.dispose()
+})
+
+test('stopping a recording automatically creates a transcription preview once', async () => {
+  const f = setup(); await f.voice.loadCapabilities(); await f.voice.startRecording()
+  await f.voice.stopRecording()
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.voice.preview.value.text, '转写全文')
+  assert.equal(f.draft.value, '原草稿')
+})
+
+test('plays a selected historical question by its explicit session and question IDs', async () => {
+  const f = setup(); await f.voice.loadCapabilities()
+  f.voice.playQuestion({ sessionId: 's1', questionId: 'q-history' })
+  assert.ok(f.events.some(event => Array.isArray(event) && event[0] === 'play' && event[1] === 's1' && event[2] === 'q-history'))
+})
+
+test('recorder limit stop starts one transcription when its Blob arrives', async () => {
+  const f = setup(); await f.voice.loadCapabilities(); await f.voice.startRecording()
+  f.recorder.blob.value = new Blob(['limit audio'])
+  f.recorder.state.value = 'recorded'
+  await new Promise(resolve => queueMicrotask(resolve))
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(f.calls.length, 1)
+  assert.equal(f.voice.preview.value.text, '转写全文')
 })

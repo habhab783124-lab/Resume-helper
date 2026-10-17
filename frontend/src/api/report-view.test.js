@@ -7,7 +7,7 @@ import { setAiSettings } from './requestContext.js'
 const source = readFileSync(new URL('../views/Report.vue', import.meta.url), 'utf8')
 const setup = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import .*$/gm, '').replace(/import\.meta\.env/g, '({})')
-  + '\nreturn { loadReport, report, error, loading, sessionRole, session: typeof session === "undefined" ? null : session, onExportMarkdown: typeof onExportMarkdown === "undefined" ? null : onExportMarkdown, onExportPdf: typeof onExportPdf === "undefined" ? null : onExportPdf, warning: typeof warning === "undefined" ? null : warning }'
+  + '\nreturn { loadReport, report, error, loading, sessionRole, scopeLabel, hasOverallScore, session: typeof session === "undefined" ? null : session, onExportMarkdown: typeof onExportMarkdown === "undefined" ? null : onExportMarkdown, onExportPdf: typeof onExportPdf === "undefined" ? null : onExportPdf, warning: typeof warning === "undefined" ? null : warning }'
 function mount(api, query = { sessionId: 's1' }) {
   const printed = []
   const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRoute', 'useRouter', 'window', setup)(
@@ -34,7 +34,7 @@ test('report failure retains recovered history and retry uses current context', 
   const calls = []
   const api = createInterviewApi({ fetchImpl: async (url, init) => {
     calls.push([url, init])
-    if (!url.endsWith('/report')) return new Response(JSON.stringify({ success: true, data: history }))
+    if (!url.includes('/report')) return new Response(JSON.stringify({ success: true, data: history }))
     return new Response(JSON.stringify(fail ? { success: false, message: '模型暂不可用' } : { success: true, data: report }), { status: fail ? 503 : 200 })
   } })
   const view = mount(api)
@@ -48,7 +48,7 @@ test('report failure retains recovered history and retry uses current context', 
   assert.equal(view.error.value, '')
   assert.equal(view.sessionRole.value, '工程师')
   assert.deepEqual(view.report.value, report)
-  assert.equal(calls.filter(([url]) => url.endsWith('/report')).at(-1)[1].headers['X-AI-Api-Key'], 'second')
+  assert.equal(calls.filter(([url]) => url.includes('/report?async=true')).at(-1)[1].headers['X-AI-Api-Key'], 'second')
   assert.match(source, /@click="loadReport"/)
 })
 
@@ -72,4 +72,15 @@ test('expired session gives a restart message and export handlers are wired', as
   assert.match(source, /@click="onExportPdf"/)
   assert.ok(!source.includes('printReport'))
   assert.ok(!source.includes('window.print'))
+})
+
+test('USER_ENDED report names the answered scope and never shows a composite score', () => {
+  const view = mount({})
+  view.report.value = { reportStatus: 'COMPLETE', overallScore: 88, plannedCount: 13, answeredCount: 1,
+    finishReason: 'USER_ENDED', turnFeedbacks: [] }
+  assert.match(view.scopeLabel.value, /用户提前结束.*已答题反馈/)
+  assert.equal(view.hasOverallScore.value, false)
+  view.report.value = { reportStatus: 'EMPTY', overallScore: null, plannedCount: 13, answeredCount: 0,
+    finishReason: 'USER_ENDED', turnFeedbacks: [] }
+  assert.match(view.scopeLabel.value, /尚无可评分内容/)
 })

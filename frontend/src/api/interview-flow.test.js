@@ -2,17 +2,23 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
-import { ref, computed, reactive, watch } from 'vue'
+import { ref, computed, reactive, watch, nextTick } from 'vue'
 import { isNewInterviewRoute } from '../interview/interviewNavigation.js'
+import { useInterviewConversation } from '../interview/useInterviewConversation.js'
+import { useInterviewPolling } from '../interview/useInterviewPolling.js'
+import { useInterviewFinish } from '../interview/useInterviewFinish.js'
 
 // 直接执行 Interview.vue 的 <script setup> 源码，注入最小 Vue 替身与 API stub。
 // 不依赖真实浏览器，就能断言提交恢复这条链路上的边界行为。
 const viewSource = readFileSync(fileURLToPath(new URL('../views/Interview.vue', import.meta.url)), 'utf8')
+const headerSource = readFileSync(fileURLToPath(new URL('../components/interview/InterviewHeader.vue', import.meta.url)), 'utf8')
+const composerSource = readFileSync(fileURLToPath(new URL('../components/interview/InterviewComposer.vue', import.meta.url)), 'utf8')
+const finishDialogSource = readFileSync(fileURLToPath(new URL('../components/interview/InterviewFinishDialog.vue', import.meta.url)), 'utf8')
 const setupBody = /<script setup>([\s\S]*?)<\/script>/.exec(viewSource)[1]
   .replace(/^import\s.*$/gm, '')
   .replace(/import\.meta\.env/g, '({})')
   .trimEnd()
-  + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, material };'
+  + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, finishFlow, material };'
 
 function mount(apiStub) {
   const mounted = [], unmounted = [], pushes = [], events = [], storeCalls = []
@@ -29,14 +35,19 @@ function mount(apiStub) {
   })
   // 模型凭据改由 Settings 页写入共享存储、api 层读取，面试页不再持有它们，
   // 所以这里也不再注入 getAiSettings / setAiSettings。
+  let lastSaveResult
+  const api = {
+    ...apiStub,
+    saveAnswer: apiStub.saveAnswer || (async (id, submission) => { lastSaveResult = await apiStub.answer(id, { questionId: submission.questionId, answer: submission.answer }); return lastSaveResult }),
+    generate: apiStub.generate || (async () => lastSaveResult),
+  }
   const view = new Function(
-    'ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', setupBody)(
-    ref, computed, reactive, watch, callback => mounted.push(callback), callback => unmounted.push(callback), () => apiStub,
+    'ref', 'computed', 'reactive', 'watch', 'nextTick', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', setupBody)(
+    ref, computed, reactive, watch, nextTick, callback => mounted.push(callback), callback => unmounted.push(callback), () => api,
     drafts, () => '', () => 'demo-user',
     () => ({ query: {} }),
     () => ({ push: route => { events.push('route'); pushes.push(route) } }),
-    isNewInterviewRoute,
-    () => fakeVoice)
+    isNewInterviewRoute, () => fakeVoice, useInterviewPolling, useInterviewConversation, useInterviewFinish)
   Object.assign(view, { pushes, events, mounted, unmounted, storeCalls })
   return view
 }
@@ -144,12 +155,13 @@ test('finish offers inline choices for a draft or unaccepted preview and continu
   await view.finish(); assert.equal(view.finishChoice.value, true); assert.equal(finished, 0)
   await view.chooseFinish('submit'); assert.equal(finished, 0); assert.match(view.error.value, /转写/)
 })
-test('submit then finish confirms the original answer saved; failed submit never finishes or navigates', async () => {
-  let finished = 0
+test('submit and finish sends the current answer directly to finish without generating another question', async () => {
+  let finished = 0, finishBody
   const view = mount({ answer: async () => { throw Object.assign(new Error('invalid'), { status: 400 }) }, getSession: async () => firstQuestion,
-    finish: async () => { finished += 1; return finishedSession } })
+    finish: async (_id, body) => { finished += 1; finishBody = body; return finishedSession } })
   view.applySession(firstQuestion); view.answer.value = '草稿'; await view.finish(); await view.chooseFinish('submit')
-  assert.equal(finished, 0); assert.equal(view.pushes.length, 0); assert.equal(view.answer.value, '草稿'); assert.equal(view.finishChoice.value, true)
+  assert.equal(finished, 1); assert.equal(view.pushes.length, 1); assert.equal(view.answer.value, ''); assert.equal(view.finishChoice.value, false)
+  assert.equal(finishBody.submission.questionId, 'q1'); assert.equal(finishBody.submission.answer, '草稿'); assert.ok(finishBody.submission.submissionId)
 })
 test('lost submit response recovered as saved qualifies for finish; voice disposes before report navigation', async () => {
   const calls = []
@@ -157,7 +169,7 @@ test('lost submit response recovered as saved qualifies for finish; voice dispos
     getSession: async () => session([{ questionId: 'q1', question: '介绍项目', answer: '草稿' }], { questionId: 'q2', question: '继续' }),
     finish: async () => { calls.push('finish'); return finishedSession } })
   view.applySession(firstQuestion); view.answer.value = '草稿'; await view.finish(); await view.chooseFinish('submit')
-  assert.deepEqual(calls, ['answer', 'finish']); assert.equal(view.pushes.length, 1)
+  assert.deepEqual(calls, ['finish']); assert.equal(view.pushes.length, 1)
   assert.ok(view.events.lastIndexOf('dispose') < view.events.indexOf('route'))
   assert.deepEqual(view.pushes[0].query, { sessionId: 's1' })
 })
@@ -171,7 +183,7 @@ test('discard then finish sends no answer; automatic/restored FINISHED provide r
 test('voice busy blocks submit and finish while cancellation remains outside page lock', async () => {
   let calls = 0; const view = mount({ answer: async () => { calls += 1 }, finish: async () => { calls += 1 } })
   view.applySession(firstQuestion); view.answer.value = '草稿'; view.voice.busy = true
-  await view.submitAnswer(); await view.finish(); assert.equal(calls, 0); assert.equal(view.finishChoice.value, false)
+  await view.submitAnswer(); await view.finish(); assert.equal(calls, 0); assert.equal(view.finishChoice.value, true)
 })
 test('same-question recovery preserves text; voice conflict sync cannot apply to a newer question', async () => {
   const view = mount({ getSession: async () => firstQuestion })
@@ -208,12 +220,14 @@ test('mount/unmount manage voice lifecycle and model settings no longer live on 
 })
 
 test('voice controls remain visible with explicit disabled reasons, inline finishing controls and finished report entry', () => {
-  for (const id of ['question-play', 'question-stop', 'recording-start', 'recording-stop', 'recording-cancel', 'transcription-start', 'transcription-cancel', 'transcript-replace', 'transcript-append', 'transcript-keep', 'finish-interview', 'finish-submit', 'finish-discard', 'view-report']) {
-    assert.ok(viewSource.includes(`data-testid="${id}"`), `missing control ${id}`)
+  for (const id of ['question-play', 'recording-start', 'recording-stop', 'recording-cancel', 'transcription-start', 'transcription-cancel', 'transcript-replace', 'transcript-append', 'transcript-keep', 'view-report']) {
+    assert.ok(`${viewSource}\n${composerSource}`.includes(`data-testid="${id}"`), `missing control ${id}`)
   }
-  assert.match(viewSource, /<audio[^>]+controls/)
-  assert.match(viewSource, /火山引擎/)
-  assert.match(viewSource, /5000.*精简/)
+  for (const id of ['finish-submit', 'finish-discard', 'finish-preserve']) assert.ok(finishDialogSource.includes(`data-testid="${id}"`), `missing dialog control ${id}`)
+  assert.ok(headerSource.includes('data-testid="finish-interview"'), 'missing header finish control')
+  assert.match(composerSource, /<audio[^>]+controls/)
+  assert.match(composerSource, /火山引擎/)
+  assert.match(composerSource, /5000.*精简/)
   assert.doesNotMatch(viewSource, /文字面试 · 不会录音/)
 })
 
@@ -247,6 +261,6 @@ test('unknown submission outcome warns finishing can retain an answer; local dra
   view.applySession(firstQuestion); view.answer.value = '待确认'; await view.submitAnswer(); await view.finish()
   assert.equal(view.finishAlternativeLabel.value, '结束并保留已收到的回答'); assert.match(view.finishMessage.value, /可能.*保留/)
   const local = mount({}); local.applySession(firstQuestion); local.answer.value = '未发送'
-  assert.equal(local.finishAlternativeLabel.value, '放弃草稿并结束')
-  assert.match(viewSource, /data-testid="finish-preserve"/)
+  assert.equal(local.finishAlternativeLabel.value, '放弃未提交内容并结束')
+  assert.match(finishDialogSource, /data-testid="finish-preserve"/)
 })

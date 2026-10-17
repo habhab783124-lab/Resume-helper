@@ -50,7 +50,14 @@ class InterviewReportApiTest {
         when(ai.withOutputBudget(anyInt())).thenReturn(ai);
         when(ai.chat(anyString(), anyString())).thenAnswer(call -> ((String) call.getArgument(1)).contains("selectedAlgorithm")
                 ? algorithmFromPrompt(call.getArgument(1)) : question(QUESTION));
-        when(ai.chat(anyString(), anyString(), eq(60))).thenAnswer(call -> assessmentsFromPrompt(call.getArgument(1), 80));
+        when(ai.chat(anyString(), anyString(), eq(60))).thenAnswer(call -> {
+            String system = call.getArgument(0);
+            String prompt = call.getArgument(1);
+            if (system.contains("当前模式：OPENING")) return question(QUESTION);
+            if (prompt.contains("selectedAlgorithm")) return algorithmFromPrompt(prompt);
+            if (prompt.contains("\"inputs\"")) return assessmentsFromPrompt(prompt, 80);
+            return question(QUESTION);
+        });
         when(ai.name()).thenReturn("test-model");
         when(resolver.resolve(any(HttpServletRequest.class))).thenReturn(ai);
     }
@@ -79,7 +86,9 @@ class InterviewReportApiTest {
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].question").value(QUESTION))
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].answer").value(ANSWER))
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].evidence[0]").value(ANSWER));
-        assertEquals(before, sessionData(session.sessionId()));
+        // 评分会落盘 assessments 与报告缓存：快照版本前移，但会话逻辑内容不变（revision 只记逻辑提交）。
+        assertEquals(dropStateVersion(before), dropStateVersion(sessionData(session.sessionId())));
+        assertTrue(sessionData(session.sessionId()).at("/stateVersion").asLong() > before.at("/stateVersion").asLong());
     }
 
     @Test void finishedReportIsCachedWithoutResolvingChangedModelSettings() throws Exception {
@@ -100,6 +109,40 @@ class InterviewReportApiTest {
                 .andExpect(jsonPath("$.data.overallScore").value(nullValue()))
                 .andExpect(jsonPath("$.data.turnFeedbacks[0].status").value("UNANSWERED"));
         verifyNoInteractions(resolver);
+    }
+
+    @Test void asyncReportReturnsSavedAnswersBeforeScoringAndRefreshJoinsTheSameOperation() throws Exception {
+        var session = completed(1);
+        clearInvocations(ai);
+        CountDownLatch scoringEntered = new CountDownLatch(1), releaseScoring = new CountDownLatch(1);
+        when(ai.chat(anyString(), anyString(), eq(60))).thenAnswer(call -> {
+            scoringEntered.countDown();
+            assertTrue(releaseScoring.await(3, TimeUnit.SECONDS));
+            return assessmentsFromPrompt(call.getArgument(1), 80);
+        });
+        try {
+            long started = System.nanoTime();
+            JsonNode first = asyncReport(session.sessionId());
+            assertTrue(TimeUnit.NANOSECONDS.toMillis(System.nanoTime() - started) < 1000,
+                    "async GET must return before the controlled model is released");
+            assertEquals(ANSWER, first.at("/turnFeedbacks/0/answer").asText());
+            assertTrue(Set.of("QUEUED", "RUNNING").contains(first.path("scoringState").asText()));
+            assertTrue(scoringEntered.await(2, TimeUnit.SECONDS));
+
+            JsonNode refreshed = asyncReport(session.sessionId());
+            assertEquals(first.path("scoringOperationId").asText(), refreshed.path("scoringOperationId").asText());
+            assertEquals(ANSWER, refreshed.at("/turnFeedbacks/0/answer").asText());
+            verify(ai, times(1)).chat(anyString(), anyString(), eq(60));
+            releaseScoring.countDown();
+            long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(3);
+            JsonNode completed;
+            do {
+                Thread.sleep(25);
+                completed = asyncReport(session.sessionId());
+            } while (!"SUCCEEDED".equals(completed.path("scoringState").asText()) && System.nanoTime() < deadline);
+            assertEquals("SUCCEEDED", completed.path("scoringState").asText());
+            assertEquals("COMPLETE", completed.path("reportStatus").asText());
+        } finally { releaseScoring.countDown(); }
     }
 
     @ParameterizedTest @ValueSource(booleans = {true, false})
@@ -152,7 +195,7 @@ class InterviewReportApiTest {
 
     @Test void pendingAnswerIsIncludedAfterFinishAndFailedNextQuestionDoesNotChangeContract() throws Exception {
         var session = start(2);
-        when(ai.chat(anyString(), anyString())).thenThrow(new AiClient.AiException("failed next question"));
+        when(ai.chat(anyString(), anyString(), eq(60))).thenThrow(new AiClient.AiException("failed next question"));
         assertThrows(InterviewException.class, () -> interviews.answer(owner, session.sessionId(),
                 session.currentQuestion().questionId(), ANSWER, ai));
         report(session.sessionId(), owner).andExpect(status().isConflict());
@@ -205,7 +248,9 @@ class InterviewReportApiTest {
         var session = start(count);
         for (int i = 0; i < count; i++)
             session = interviews.answer(owner, session.sessionId(), session.currentQuestion().questionId(), ANSWER, ai);
-        return interviews.finish(owner, session.sessionId());
+        var finished = interviews.finish(owner, session.sessionId());
+        clearInvocations(ai);
+        return finished;
     }
     private ResultActions report(String id, String user) throws Exception {
         return mvc.perform(get("/api/interviews/" + id + "/report").header(UserContext.HEADER, user));
@@ -216,8 +261,19 @@ class InterviewReportApiTest {
     private JsonNode reportData(String id) throws Exception {
         return json.readTree(report(id, owner).andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
     }
+    private JsonNode asyncReport(String id) throws Exception {
+        return json.readTree(mvc.perform(get("/api/interviews/" + id + "/report").param("async", "true")
+                        .header(UserContext.HEADER, owner))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+    }
     private JsonNode sessionData(String id) throws Exception {
         return json.readTree(mvc.perform(get("/api/interviews/" + id).header(UserContext.HEADER, owner))
                 .andExpect(status().isOk()).andReturn().getResponse().getContentAsString()).path("data");
+    }
+    /** stateVersion 随每次落盘递增，不参与「逻辑内容未变」的比较。 */
+    private static JsonNode dropStateVersion(JsonNode node) {
+        var copy = ((com.fasterxml.jackson.databind.node.ObjectNode) node).deepCopy();
+        copy.remove("stateVersion");
+        return copy;
     }
 }

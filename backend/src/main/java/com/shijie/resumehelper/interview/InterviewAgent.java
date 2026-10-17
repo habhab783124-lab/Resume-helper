@@ -17,6 +17,7 @@ import java.util.*;
 /** Stateless model adapter; the service owns frozen question contracts and assessment memory. */
 @Component
 public class InterviewAgent {
+    private static final int DEFAULT_GENERATION_TIMEOUT_SECONDS = 60;
     private static final ObjectMapper JSON = new ObjectMapper()
             .enable(DeserializationFeature.FAIL_ON_TRAILING_TOKENS)
             .enable(JsonParser.Feature.STRICT_DUPLICATE_DETECTION);
@@ -36,10 +37,33 @@ public class InterviewAgent {
             BigDecimal overallScore, String overallSummary,
             List<String> strengths, List<String> gaps, List<String> suggestions,
             List<TurnFeedback> turnFeedbacks, String aiModel, String reportStatus,
-            String scoringVersion, int plannedCount, int answeredCount, int scoredCount) {
+            String scoringVersion, int plannedCount, int answeredCount, int scoredCount, String finishReason,
+            String scoringState, String scoringOperationId, long scoringStateVersion, String scoringError) {
         public InterviewReport {
             strengths = List.copyOf(strengths); gaps = List.copyOf(gaps);
             suggestions = List.copyOf(suggestions); turnFeedbacks = List.copyOf(turnFeedbacks);
+            finishReason = finishReason == null ? "" : finishReason;
+            scoringState = scoringState == null ? "NOT_STARTED" : scoringState;
+            scoringError = scoringError == null ? "" : scoringError;
+        }
+        public InterviewReport(BigDecimal overallScore, String overallSummary,
+                List<String> strengths, List<String> gaps, List<String> suggestions,
+                List<TurnFeedback> turnFeedbacks, String aiModel, String reportStatus,
+                String scoringVersion, int plannedCount, int answeredCount, int scoredCount) {
+            this(overallScore, overallSummary, strengths, gaps, suggestions, turnFeedbacks, aiModel,
+                    reportStatus, scoringVersion, plannedCount, answeredCount, scoredCount, "", "NOT_STARTED", null, 0, "");
+        }
+        public InterviewReport(BigDecimal overallScore, String overallSummary,
+                List<String> strengths, List<String> gaps, List<String> suggestions,
+                List<TurnFeedback> turnFeedbacks, String aiModel, String reportStatus,
+                String scoringVersion, int plannedCount, int answeredCount, int scoredCount, String finishReason) {
+            this(overallScore, overallSummary, strengths, gaps, suggestions, turnFeedbacks, aiModel,
+                    reportStatus, scoringVersion, plannedCount, answeredCount, scoredCount, finishReason, "NOT_STARTED", null, 0, "");
+        }
+        public InterviewReport withScoring(String state, String operationId, long stateVersion, String error) {
+            return new InterviewReport(overallScore, overallSummary, strengths, gaps, suggestions, turnFeedbacks, aiModel,
+                    reportStatus, scoringVersion, plannedCount, answeredCount, scoredCount, finishReason,
+                    state, operationId, stateVersion, error);
         }
     }
     @JsonInclude(JsonInclude.Include.ALWAYS)
@@ -79,6 +103,10 @@ public class InterviewAgent {
     }
 
     public Opening prepareOpening(String resume, String role, AiClient ai) {
+        return prepareOpening(resume, role, ai, DEFAULT_GENERATION_TIMEOUT_SECONDS);
+    }
+
+    public Opening prepareOpening(String resume, String role, AiClient ai, int timeoutSeconds) {
         if (ai == null || ai.isFallback()) throw new InterviewException(503, "请填写模型 API Key，或由服务端配置 AI_API_KEY 后开始面试");
         String system = InterviewSkill.questionInstructions() + POLICY + """
                 当前模式：OPENING。本节优先于常规提问契约以及前文Grill的JSON格式要求。
@@ -93,7 +121,7 @@ public class InterviewAgent {
                 """;
         try {
             var node = readObject(ai.withOutputBudget(2800).chat(system,
-                    JSON.writeValueAsString(Map.of("targetRole", role, "resume", resume))), 14_000);
+                    JSON.writeValueAsString(Map.of("targetRole", role, "resume", resume)), timeoutSeconds), 14_000);
             if (node.has("kind") && !"MAIN".equals(text(node, "kind", 20))) throw new IllegalArgumentException("首题类型无效");
             var plan = node.path("specialty");
             if (!plan.isObject() || plan.size() != 3) throw new IllegalArgumentException("专项计划无效");
@@ -105,12 +133,18 @@ public class InterviewAgent {
                     ? "模型调用失败，请稍后重试" : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试",
                     InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
-            throw new InterviewException(502, "模型未返回有效首题与专项计划，请重试");
+            throw invalidOutput("模型未返回有效首题与专项计划，请重试");
         }
     }
 
     public Proposal prepareNext(String resume, String role, List<InterviewService.Turn> history, int total,
                                 int nextMainIndex, boolean allowFollowUp, AiClient ai) {
+        return prepareNext(resume, role, history, total, nextMainIndex, allowFollowUp,
+                ai, DEFAULT_GENERATION_TIMEOUT_SECONDS);
+    }
+
+    public Proposal prepareNext(String resume, String role, List<InterviewService.Turn> history, int total,
+                                int nextMainIndex, boolean allowFollowUp, AiClient ai, int timeoutSeconds) {
         if (ai == null || ai.isFallback()) throw new InterviewException(503, "请填写模型 API Key，或由服务端配置 AI_API_KEY 后开始面试");
         String system = InterviewSkill.questionInstructions() + POLICY + """
                 根据真实简历和历史回答，一次只提出一道中文问题，首题围绕具体项目或经历。
@@ -128,7 +162,7 @@ public class InterviewAgent {
                 .append(allowFollowUp ? "。可返回 kind=FOLLOW_UP 追问当前主问题；追问不占题数，最多两次。否则推进下一根题。" : "。追问额度已用完或首题，不得再追问。")
                 .append(nextMainIndex == 13 ? "主问题已完成，不追问时返回 {\"kind\":\"SPECIALTY\"}，专项题由服务端按冻结计划另行生成。" : "仅输出一道题的结构化契约。");
         try {
-            String raw = ai.withOutputBudget(2400).chat(system, prompt.toString());
+            String raw = ai.withOutputBudget(2400).chat(system, prompt.toString(), timeoutSeconds);
             JsonNode node = readObject(raw, 12_000);
             String kind = node.has("kind") ? text(node, "kind", 20) : "MAIN";
             if (!Set.of("MAIN", "FOLLOW_UP", "ALGORITHM", "CASE_STUDY", "SPECIALTY").contains(kind)
@@ -144,7 +178,7 @@ public class InterviewAgent {
                     e.retryable() ? "模型调用失败，请稍后重试；当前回答已保留" : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试",
                     InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
-            throw new InterviewException(502, "模型未返回有效问题与评分标准，请重试");
+            throw invalidOutput("模型未返回有效问题与评分标准，请重试");
         }
     }
 
@@ -161,6 +195,11 @@ public class InterviewAgent {
     }
 
     public InterviewQuestion prepareCase(InterviewSpecialty specialty, String role, AiClient ai) {
+        return prepareCase(specialty, role, ai, DEFAULT_GENERATION_TIMEOUT_SECONDS);
+    }
+
+    public InterviewQuestion prepareCase(InterviewSpecialty specialty, String role, AiClient ai,
+                                         int timeoutSeconds) {
         if (ai == null || ai.isFallback()) throw new InterviewException(503, "请配置模型后重试；当前回答已保留");
         if (specialty.kind() != InterviewSpecialty.Kind.CASE_STUDY) throw new IllegalArgumentException("专项计划类型不匹配");
         String system = InterviewSkill.questionInstructions() + POLICY + """
@@ -174,7 +213,7 @@ public class InterviewAgent {
                 """;
         try {
             var node = readObject(ai.withOutputBudget(2400).chat(system,
-                    JSON.writeValueAsString(Map.of("specialty", specialty, "targetRole", role))), 12_000);
+                    JSON.writeValueAsString(Map.of("specialty", specialty, "targetRole", role)), timeoutSeconds), 12_000);
             if (node.has("kind") && !"CASE_STUDY".equals(text(node, "kind", 20))) throw new IllegalArgumentException("案例类型无效");
             var question = parseQuestion(node);
             return new InterviewQuestion(question.text(), question.competency(), question.importance(), question.difficulty(),
@@ -186,12 +225,16 @@ public class InterviewAgent {
                     : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试；专项计划和当前回答已保留",
                     InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
-            throw new InterviewException(502, "专业案例生成失败，请重试；专项计划和当前回答已保留");
+            throw invalidOutput("专业案例生成失败，请重试；专项计划和当前回答已保留");
         }
     }
 
     /** The identity is server-selected before any request; malformed output never changes it. */
     public InterviewQuestion prepareAlgorithm(Hot100Catalog.Problem selected, AiClient ai) {
+        return prepareAlgorithm(selected, ai, DEFAULT_GENERATION_TIMEOUT_SECONDS);
+    }
+
+    public InterviewQuestion prepareAlgorithm(Hot100Catalog.Problem selected, AiClient ai, int timeoutSeconds) {
         if (ai == null || ai.isFallback()) throw new InterviewException(503, "请配置模型后重试；当前回答已保留");
         try {
             String prompt = JSON.writeValueAsString(Map.of("selectedAlgorithm", selected,
@@ -204,7 +247,7 @@ public class InterviewAgent {
                     algorithmId必须与输入选题ID一致；description说明输入与输出目标，examples至少一组正确输入输出，constraints说明范围与前提。
                     不输出question、criteria、分类、权重或评分。算法题固定20%及冻结标准均由服务端管理。
                     """;
-            var node = readObject(ai.withOutputBudget(2400).chat(system, prompt), 18_000);
+            var node = readObject(ai.withOutputBudget(2400).chat(system, prompt, timeoutSeconds), 18_000);
             if (!selected.id().equals(text(node, "algorithmId", 20))) throw new IllegalArgumentException("算法题身份不匹配");
             String question = selected.id() + ". " + selected.title() + "\n" + selected.overview().url()
                     + "\n题意：" + text(node, "description", 1400) + "\n示例：" + text(node, "examples", 500)
@@ -221,7 +264,7 @@ public class InterviewAgent {
                     : "模型鉴权或配置无效，请检查 API Key 和模型名称后重试；已选题目和当前回答已保留",
                     InterviewFailure.from(e));
         } catch (IOException | IllegalArgumentException e) {
-            throw new InterviewException(502, "算法题生成失败，请重试；已选题目和当前回答已保留");
+            throw invalidOutput("算法题生成失败，请重试；已选题目和当前回答已保留");
         }
     }
 
@@ -302,6 +345,11 @@ public class InterviewAgent {
                 e.elapsedMs(),
                 e.code(),
                 e.retryable());
+    }
+
+    private static InterviewException invalidOutput(String message) {
+        return new InterviewException(502, message,
+                new InterviewFailure(InterviewFailure.Code.INVALID_OUTPUT, true, message, null));
     }
 
     private static JsonNode readObject(String raw, int limit) throws IOException {

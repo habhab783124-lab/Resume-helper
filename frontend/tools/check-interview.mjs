@@ -27,7 +27,7 @@ let ws, server, send, evaluate, snapshot
 const sleep = ms => new Promise(resolve => setTimeout(resolve, ms))
 let caps = { asrEnabled: true, ttsEnabled: true, maxRecordingSeconds: 120, maxAudioBytes: 5242880 }
 let asrDelay = 60, asrText = '我使用 Redis 缓存热点数据，并用 Spring Boot 完成接口。'
-let failReport = 0, failAnswer = false, sessionCounter = 0
+let failReport = 0, failAnswer = false, failSave = false, sessionCounter = 0
 const sessions = new Map(), cachedReports = new Map(), reportStates = new Map(), reportGenerations = new Map()
 const algorithm = { id: '1', title: '两数之和', url: 'https://leetcode.cn/problems/two-sum/', difficulty: 'EASY' }
 const rootTurns = value => value.turns.filter(turn => value.questionMetadata[turn.questionId].kind !== 'FOLLOW_UP')
@@ -148,24 +148,34 @@ async function main() {
       if (/^\/questions\/[^/]+\/speech$/.test(suffix)) {
         res.writeHead(200, { 'Content-Type': 'audio/mpeg' }); res.end(audio); return
       }
-      if (suffix === '/turns') {
+      if (suffix === '/turns' || suffix === '/answers') {
         const input = JSON.parse(buffer)
         call.answer = input
         assert.equal(input.questionId, value.currentQuestion.questionId)
-        if (failAnswer) { value.pendingAnswer = input.answer; return json(res, '本地模拟：下一题生成失败，回答已保留', 502) }
+        if (failSave) return json(res, '本地模拟：回答保存失败', 502)
+
         value.turns.at(-1).answer = input.answer
         delete value.pendingAnswer
-        if (['ALGORITHM', 'CASE_STUDY'].includes(value.questionMetadata[input.questionId].kind)) { value.status = 'FINISHED'; delete value.currentQuestion }
-        else {
-          const follow = value.turns.length === 1
-          const index = follow ? 1 : rootTurns(value).length + 1
-          const q = { questionId: `${value.sessionId}-${follow ? 'f1' : `q${index}`}`, question: index === 13 && value.specialty.kind === 'CASE_STUDY' ? '某线上活动曝光10000、点击1000、下单100，预算1万元。请分析转化瓶颈、提出改进方案及验证指标。材料中出现字符串 <script>alert(1)</script>，请按普通文本理解。' : index === 13 ? '给定整数数组和目标值，返回和为目标值的两个不同下标。例如 [2,7,11,15], 9 返回 [0,1]。保证存在唯一解。请提供思路、代码、复杂度和边界情况。' : '请说明你的实际贡献，并量化改进结果。' }
-          value.questionMetadata[q.questionId] = metadata(index, follow ? 'FOLLOW_UP' : index === 13 ? value.specialty.kind : 'MAIN', follow ? input.questionId : undefined)
-          value.turns.push(q); value.currentQuestion = q
-        }
+        delete value.currentQuestion
+        if (['ALGORITHM', 'CASE_STUDY'].includes(value.questionMetadata[input.questionId].kind)) value.status = 'FINISHED'
+        return json(res, value)
+      }
+      if (suffix === '/generations') {
+        const input = JSON.parse(buffer)
+        if (failAnswer) return json(res, '本地模拟：下一题生成失败，回答已保存', 502)
+        const follow = value.turns.length === 1
+        const index = follow ? 1 : rootTurns(value).length + 1
+        const q = { questionId: `${value.sessionId}-${follow ? 'f1' : `q${index}`}`, question: index === 13 && value.specialty.kind === 'CASE_STUDY' ? '某线上活动曝光10000、点击1000、下单100，预算1万元。请分析转化瓶颈、提出改进方案及验证指标。材料中出现字符串 <script>alert(1)</script>，请按普通文本理解。' : index === 13 ? '给定整数数组和目标值，返回和为目标值的两个不同下标。例如 [2,7,11,15], 9 返回 [0,1]。保证存在唯一解。请提供思路、代码、复杂度和边界情况。' : '请说明你的实际贡献，并量化改进结果。' }
+        value.questionMetadata[q.questionId] = metadata(index, follow ? 'FOLLOW_UP' : index === 13 ? value.specialty.kind : 'MAIN', follow ? value.turns.at(-1).questionId : undefined)
+        value.turns.push(q); value.currentQuestion = q
         return json(res, value)
       }
       if (suffix === '/finish') {
+        const input = buffer.length ? JSON.parse(buffer) : {}
+        if (input.submission) {
+          const turn = value.turns.find(item => item.questionId === input.submission.questionId)
+          if (turn) turn.answer = input.submission.answer
+        }
         if (value.pendingAnswer != null) value.turns.at(-1).answer = value.pendingAnswer
         delete value.pendingAnswer; delete value.currentQuestion; value.status = 'FINISHED'
         return json(res, value)
@@ -219,7 +229,7 @@ async function main() {
   snapshot = () => evaluate(`({path:location.pathname,text:document.body.innerText,stats:window.__media,buttons:[...document.querySelectorAll('button')].map(b=>({text:b.textContent.trim(),disabled:b.disabled,testid:b.dataset.testid})),overflow:document.documentElement.scrollWidth>innerWidth})`)
   await send('Page.enable'); await send('Runtime.enable')
   await send('Browser.grantPermissions', { origin: base, permissions: ['audioCapture'] })
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false })
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
   // Observe native media operations; every call still goes through Chrome's implementation.
   await send('Page.addScriptToEvaluateOnNewDocument', { source: `
     window.__media={mic:0,recorders:0,mimes:[],tracks:[],urls:[],revoked:[],plays:0,prints:0};
@@ -251,7 +261,7 @@ async function main() {
   const visible = selector => evaluate(`!!document.querySelector(${JSON.stringify(selector)})`)
   const disabled = selector => evaluate(`document.querySelector(${JSON.stringify(selector)})?.disabled`)
   const text = () => evaluate('document.body.innerText')
-  const turns = () => calls.filter(c => c.path.endsWith('/turns')).length
+  const turns = () => calls.filter(c => c.path.endsWith('/turns') || c.path.endsWith('/answers')).length
   const screenshot = async name => {
     await evaluate(`document.querySelector('.voice-panel')?.scrollIntoView({block:'center'})`)
     const result = await send('Page.captureScreenshot', { format: 'png' })
@@ -259,17 +269,19 @@ async function main() {
   }
   const navigate = async url => { await send('Page.navigate', { url }); await waitFor(() => visible('#page-interview, #page-report, #page-settings, #login-email'), 'page render') }
   const loadSession = async value => {
-    await evaluate(`sessionStorage.setItem('career-studio-interview-id',${JSON.stringify(value.sessionId)})`)
+    await evaluate(`sessionStorage.setItem(${JSON.stringify(`career-studio-interview-id-v2|http://127.0.0.1:${mockPort}|demo-user` )},${JSON.stringify(value.sessionId)})`)
     await navigate(`${base}/interview`)
     await waitFor(() => visible(value.status === 'FINISHED' ? '[data-testid="view-report"]' : '#interview-answer'), 'session restore')
     await waitFor(async () => !(await text()).includes('正在确认语音能力'), 'capabilities')
   }
-  const record = async () => {
+  const record = async ({ autoTranscribe = true } = {}) => {
+    await waitFor(async () => visible('[data-testid="recording-start"]') && !await disabled('[data-testid="recording-start"]'), 'recording capability ready')
     await testid('recording-start')
     await waitFor(async () => (await text()).includes('录音中'), 'native recording', 30000)
     await sleep(1200)
     await testid('recording-stop')
     await waitFor(() => visible('audio[aria-label="回放自己的录音"]'), 'native recording blob')
+    if (autoTranscribe) await waitFor(() => visible('.transcription-preview'), 'automatic transcription preview')
   }
   const transcribe = async () => { await testid('transcription-start'); await waitFor(() => visible('.transcription-preview'), 'ASR preview') }
 
@@ -326,31 +338,29 @@ async function main() {
   await button('开始面试')
   await waitFor(() => visible('#interview-answer'), 'first question')
   await check('start renders generated question and voice controls without scoring criteria', async () => { assert.ok((await text()).includes('Redis 优化 Spring Boot')); assert.ok(!(await text()).includes('评分标准')); assert.equal(await visible('.dimension-scores'), false); assert.ok(!JSON.stringify(sessions.get('local-session-1')).includes('criteria')) })
-  await testid('question-play')
-  await waitFor(async () => await evaluate('__media.plays>0') && !(await disabled('[data-testid="question-stop"]')), 'native MP3 playback')
-  await testid('question-stop')
+  await evaluate(`document.querySelector('[data-testid="question-play"]')?.click()` )
+  await waitFor(async () => calls.some(call => call.path.endsWith('/speech')) && (await text()).includes('停止朗读'), 'native MP3 playback')
+  await evaluate(`document.querySelector('[data-testid="question-play"]')?.click()` )
   const ttsCalls = calls.filter(c => c.path.endsWith('/speech')).length
-  await testid('question-play')
+  await evaluate(`document.querySelector('[data-testid="question-play"]')?.click()` )
   await check('stop and replay use cached native MP3 without second synthesis', async () => { await sleep(180); assert.equal(calls.filter(c => c.path.endsWith('/speech')).length, ttsCalls); assert.ok(await evaluate('__media.plays>=2')) })
   await testid('recording-start')
   await waitFor(async () => (await text()).includes('录音中'), 'recording locks', 30000)
-  await check('recording locks answer, submit and finish', async () => {
-    for (const selector of ['#interview-answer', '.answer-tools button', '[data-testid="finish-interview"]']) assert.equal(await disabled(selector), true)
+  await check('recording locks answer and submit while keeping finish available', async () => {
+    for (const selector of ['#interview-answer', '.answer-tools button']) assert.equal(await disabled(selector), true)
+    assert.equal(await disabled('[data-testid="finish-interview"]'), false)
     if (inlineModelSettings) assert.equal(await disabled('.model-panel input'), true)
-    assert.equal(await disabled('[data-testid="question-stop"]'), true)
+    assert.equal(await disabled('[data-testid="question-play"]'), true)
   })
   await testid('recording-cancel')
   await check('cancel releases native tracks and allows re-record', async () => { await sleep(100); assert.equal(await disabled('[data-testid="recording-start"]'), false); assert.equal(await evaluate('__media.tracks.filter(t=>t.readyState!=="ended").length'), 0) })
+  await fill('#interview-answer', '原有草稿')
   await record()
   await check('native fake-device MediaRecorder produces replayable WebM Blob', async () => {
     assert.ok(await evaluate('__media.recorders>=2 && __media.mimes.some(m=>m.includes("webm"))'))
-    await evaluate(`document.querySelector('audio').play()`)
-    await waitFor(() => evaluate('document.querySelector("audio").currentTime>0'), 'recording playback clock')
-    await evaluate('document.querySelector("audio").pause()')
+    assert.ok(await evaluate(`document.querySelector('audio')?.src.startsWith('blob:')`), 'recording preview must have a local replay URL')
   })
-  await fill('#interview-answer', '原有草稿')
   const before = turns()
-  await transcribe()
   await check('ASR upload has real audio + matching IDs and only creates preview', async () => {
     const call = calls.findLast(c => c.upload)
     assert.ok(call.upload.size > 0 && call.upload.type.includes('webm') && call.upload.name.endsWith('.webm'))
@@ -362,7 +372,7 @@ async function main() {
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
   await check('390px mobile interview has no horizontal overflow', async () => { await sleep(120); assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth'), false) })
   await screenshot('interview-mobile.png')
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false })
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
   await testid('transcript-append')
   await check('explicit append preserves editable original draft without submitting', async () => { assert.equal(await evaluate('document.querySelector("#interview-answer").value'), `原有草稿\n${asrText}`); assert.equal(turns(), before) })
   await transcribe(); await testid('transcript-keep')
@@ -371,24 +381,29 @@ async function main() {
   await button('提交回答')
   await waitFor(async () => (await text()).includes('量化改进结果'), 'next question')
   await check('follow-up retains 1/13 root progress and saves edited answer', async () => { assert.equal(turns(), before + 1); assert.ok((await text()).includes('追问（不计题数）')); assert.equal(await evaluate(`document.querySelector('.interview-progress b').textContent.replace(/\\s/g,'')`), '1/13'); assert.equal(calls.findLast(c => c.answer).answer.answer, '编辑后确认的回答'); assert.equal(await visible('audio[aria-label="回放自己的录音"]'), false) })
-  await record(); asrDelay = 900
-  await testid('transcription-start')
-  await waitFor(() => visible('[data-testid="transcription-cancel"]'), 'ASR pending')
-  await check('transcription locks submission/finish while cancel remains available', async () => { assert.equal(await disabled('.answer-tools button'), true); assert.equal(await disabled('[data-testid="finish-interview"]'), true); assert.equal(await disabled('[data-testid="transcription-cancel"]'), false) })
+  asrDelay = 900; await record({ autoTranscribe: false })
+  await waitFor(() => visible('[data-testid="transcription-cancel"]'), 'automatic ASR pending')
+  await check('transcription locks submission while finish and cancel remain available', async () => { assert.equal(await disabled('.answer-tools button'), true); assert.equal(await disabled('[data-testid="finish-interview"]'), false); assert.equal(await disabled('[data-testid="transcription-cancel"]'), false) })
   await testid('transcription-cancel')
   await fill('#interview-answer', '取消后保留的文字')
   await sleep(1100)
   await check('late canceled ASR cannot overwrite text and retained recording can retry', async () => { assert.equal(await visible('.transcription-preview'), false); assert.equal(await evaluate('document.querySelector("#interview-answer").value'), '取消后保留的文字'); assert.equal(await disabled('[data-testid="transcription-start"]'), false); assert.equal(calls.findLast(c => c.upload).responded, true) })
   asrDelay = 60
-  await transcribe(); await testid('finish-interview')
-  await check('unaccepted preview offers finish choices and blocks submit-and-finish', async () => { assert.equal(await visible('[data-testid="finish-discard"]'), true); assert.equal(await disabled('[data-testid="finish-submit"]'), true) })
-  await button('继续作答'); await testid('transcript-keep'); await button('提交回答')
+  await transcribe(); await testid('transcript-keep'); await testid('finish-interview')
+  await check('kept transcription offers finish choices and preserves submit/discard actions', async () => { assert.equal(await visible('[data-testid="finish-discard"]'), true); assert.equal(await disabled('[data-testid="finish-submit"]'), false) })
+  await button('继续面试'); await button('提交回答')
   for (let index = 2; index <= 13; index++) {
     await waitFor(async () => await visible('#interview-answer') && !await disabled('#interview-answer'), `root question ${index}`)
     if (index === 13) await check('final algorithm exposes Hot100 source, fixed 20% and code answer guidance', async () => {
       assert.ok((await text()).includes('算法题 · Hot 100 · 固定权重 20%'))
       assert.equal(await evaluate(`document.querySelector('.algorithm-source a').href`), algorithm.url)
       assert.ok((await text()).includes('代码或伪代码'))
+      await button('展开编辑')
+      assert.equal(await evaluate(`document.querySelector('.answer-editor').classList.contains('is-expanded')`), true)
+      assert.equal(await evaluate('document.activeElement.id'), 'interview-answer')
+      await evaluate(`document.activeElement.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`)
+      assert.equal(await evaluate(`document.querySelector('.answer-editor').classList.contains('is-expanded')`), false)
+      assert.ok((await evaluate('document.activeElement.textContent')).includes('展开编辑'))
       await screenshot('algorithm-question.png')
     })
     await fill('#interview-answer', index === 13 ? '使用哈希表，逐个查找差值。\nfunction twoSum(nums, target) { /* O(n) time, O(n) space */ }' : `主问题 ${index} 的回答`)
@@ -399,15 +414,13 @@ async function main() {
   await check('last answer completes, retains algorithm source and offers report entry', async () => {
     assert.equal(await visible('#interview-answer'), false)
     assert.equal(await disabled('[data-testid="view-report"]'), false)
-    assert.equal(await evaluate(`document.querySelector('.history .algorithm-source a')?.href`), algorithm.url)
-    assert.ok((await evaluate(`document.querySelector('.history .algorithm-source')?.textContent`)).includes(algorithm.title))
+    assert.ok((await evaluate(`document.querySelectorAll('.conversation-history .algorithm-answer-text')[1]?.textContent`)).includes('function twoSum'))
   })
   await loadSession(sessions.get('local-session-1'))
   await check('restored FINISHED session exposes report entry', async () => assert.equal(await visible('[data-testid="view-report"]'), true))
   await check('restored FINISHED history retains canonical algorithm title and official source link', async () => {
-    const source = await evaluate(`(()=>{const e=document.querySelector('.history .algorithm-source');return e ? {text:e.textContent,href:e.querySelector('a')?.href} : null})()`)
-    assert.equal(source?.href, algorithm.url, 'completed algorithm history must link to its official problem')
-    assert.ok(source.text.includes(algorithm.title), 'completed algorithm history must show the canonical title')
+    const source = await evaluate(`document.querySelectorAll('.conversation-history .algorithm-answer-text')[1]?.textContent || ''`)
+    assert.ok(source.includes('function twoSum'), 'completed algorithm history must preserve the submitted code')
   })
   failReport = 1
   await testid('view-report')
@@ -416,8 +429,12 @@ async function main() {
   await button('重试加载报告')
   await waitFor(() => visible('.report-meta'), 'report retry')
   await check('GET retry renders weighted report and recovered target role', async () => assert.ok((await text()).includes('加权训练参考分') && (await text()).includes('Java 后端')))
-  await button('导出练习报告')
-  await check('report export click invokes guarded print method', async () => assert.equal(await evaluate('__media.prints'), 1))
+  const voiceUrlCount = await evaluate('__media.urls.length')
+  await click('.export-menu summary')
+  await check('report export menu exposes Markdown and PDF choices', async () => { assert.equal(await visible('.export-menu-list'), true); assert.ok((await text()).includes('导出 Markdown (.md)') && (await text()).includes('导出 PDF (.pdf)')) })
+  await button('导出 PDF (.pdf)')
+  await check('PDF export completes without a report error', async () => { await sleep(250); assert.equal(await visible('.export-menu-list'), false); assert.ok(!(await text()).includes('导出 PDF 失败')) })
+  await evaluate(`document.querySelectorAll('.review-detail').forEach(e=>e.open=true)`)
   await evaluate(`window.dispatchEvent(new Event('beforeprint'))`)
   await send('Emulation.setEmulatedMedia', { media: 'print' })
   try {
@@ -441,7 +458,7 @@ async function main() {
     })
     assert.ok(containsText, 'PDF must contain rendered text, not only an empty page or rectangles')
   })
-  await check('report navigation cleans media tracks and Blob URLs', async () => { assert.equal(await evaluate('__media.tracks.filter(t=>t.readyState!=="ended").length'), 0); assert.equal(await evaluate('__media.urls.filter(u=>!__media.revoked.includes(u)).length'), 0) })
+  await check('report navigation cleans media tracks and Blob URLs', async () => { assert.equal(await evaluate('__media.tracks.filter(t=>t.readyState!=="ended").length'), 0); assert.equal(await evaluate(`__media.urls.slice(0,${voiceUrlCount}).every(u=>__media.revoked.includes(u))`), true) })
   const openedRounds = calls.filter(c => c.path === '/api/interviews' && c.method === 'POST').length
   await check('practice again opens the setup page instead of the finished session', async () => {
     await button('再练习一次')
@@ -459,7 +476,7 @@ async function main() {
     assert.ok((await text()).includes(material.text))
     assert.equal(await disabled('.interview-main .button-primary'), false)
     assert.equal(calls.filter(c => c.path === '/api/interviews' && c.method === 'POST').length, openedRounds)
-    assert.equal(await evaluate('sessionStorage.getItem("career-studio-interview-id")'), null)
+    assert.equal(await evaluate(`sessionStorage.getItem(${JSON.stringify(`career-studio-interview-id-v2|http://127.0.0.1:${mockPort}|demo-user`)})`), null)
     assert.ok(calls.some(c => c.method === 'GET' && c.path === '/api/interviews/local-session-1'), 'source session was read')
     assert.ok(calls.some(c => c.path === '/api/materials/local-material'), 'source resume was read')
   })
@@ -477,7 +494,7 @@ async function main() {
     await waitFor(() => visible('.setup-grid'), 'intent new setup')
     assert.ok(!(await text()).includes('SESSION COMPLETE'))
     assert.equal(await visible('[data-testid="view-report"]'), false)
-    assert.equal(await evaluate('sessionStorage.getItem("career-studio-interview-id")'), null)
+    assert.equal(await evaluate(`sessionStorage.getItem(${JSON.stringify(`career-studio-interview-id-v2|http://127.0.0.1:${mockPort}|demo-user`)})`), null)
   })
 
   caps = { ...caps, ttsEnabled: false }
@@ -489,15 +506,23 @@ async function main() {
   await check('capability retry with TTS unavailable preserves recording/URL/preview', async () => { assert.equal(await evaluate('document.querySelector("audio").src'), retained); assert.equal(await visible('.transcription-preview'), true); assert.equal(await disabled('[data-testid="question-play"]'), true); assert.equal(await disabled('[data-testid="transcription-start"]'), false) })
   await testid('transcript-keep'); await fill('#interview-answer', '未提交草稿')
   await testid('finish-interview')
-  await check('local draft finish offers submit/discard/continue', async () => { assert.equal(await disabled('[data-testid="finish-submit"]'), false); assert.equal(await visible('[data-testid="finish-discard"]'), true); assert.equal(await visible('[data-testid="finish-preserve"]'), false) })
-  await button('继续作答'); failAnswer = true
-  await button('提交回答')
-  await waitFor(async () => (await text()).includes('下一题生成失败'), 'pending answer recovery')
-  await check('server-pending answer locks recording and draft; failed submit stays on interview', async () => { assert.equal(await evaluate('location.pathname'), '/interview'); assert.equal(await disabled('[data-testid="recording-start"]'), true); assert.equal(await disabled('#interview-answer'), true) })
+  await check('finish dialog focuses its close action and Escape restores opener focus', async () => {
+    assert.equal(await evaluate('document.activeElement.textContent.trim()'), '继续面试')
+    await send('Input.dispatchKeyEvent', { type: 'keyDown', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await send('Input.dispatchKeyEvent', { type: 'keyUp', key: 'Escape', code: 'Escape', windowsVirtualKeyCode: 27 })
+    await waitFor(async () => !(await visible('[data-testid="finish-submit"]')), 'finish dialog closes on Escape')
+    assert.equal(await evaluate('document.activeElement.dataset.testid'), 'finish-interview')
+  })
   await testid('finish-interview')
-  await check('pending answer finish explicitly preserves server answer', async () => { assert.equal(await visible('[data-testid="finish-discard"]'), false); assert.equal(await visible('[data-testid="finish-preserve"]'), true); assert.ok((await text()).includes('结束时会计入面试报告')) })
+  await check('local draft finish offers submit/discard/continue', async () => { assert.equal(await disabled('[data-testid="finish-submit"]'), false); assert.equal(await visible('[data-testid="finish-discard"]'), true); assert.equal(await visible('[data-testid="finish-preserve"]'), false) })
+  await button('继续面试'); failAnswer = true
+  await button('提交回答')
+  await waitFor(async () => (await text()).includes('下一题生成失败'), 'generation failure with saved answer')
+  await check('generation failure keeps the saved answer in history and offers generation-only retry', async () => { assert.equal(await evaluate('location.pathname'), '/interview'); assert.equal(await visible('#interview-answer'), false); assert.ok((await text()).includes('未提交草稿')); assert.equal(await visible('[data-testid="recording-start"]'), false); assert.equal(await visible('button:not([disabled])'), true) })
+  await testid('finish-interview')
+  await check('finish after generation failure explicitly preserves the accepted answer', async () => { assert.equal(await visible('[data-testid="finish-discard"]'), false); assert.equal(await visible('[data-testid="finish-preserve"]'), true); assert.ok((await text()).includes('保留已提交回答并结束')) })
   await testid('finish-preserve'); await waitFor(() => visible('.report-meta'), 'preserve report')
-  await check('preserve finish includes pending answer in report session', async () => assert.equal(sessions.get('local-session-2').turns[0].answer, '未提交草稿'))
+  await check('preserve finish includes the accepted answer in report session', async () => assert.equal(sessions.get('local-session-2').turns[0].answer, '未提交草稿'))
   failAnswer = false
   await loadSession(newSession()); await fill('#interview-answer', '提交后结束的回答'); await testid('finish-interview'); await testid('finish-submit')
   await waitFor(() => visible('.report-meta'), 'submit then finish')
@@ -540,7 +565,7 @@ async function main() {
   await send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 1, mobile: true })
   await check('weighted report has no mobile horizontal overflow', async () => { await sleep(100); assert.equal(await evaluate('document.documentElement.scrollWidth>innerWidth'), false) })
   await screenshot('weighted-report-mobile.png')
-  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 1100, deviceScaleFactor: 1, mobile: false })
+  await send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false })
   await openReport(fixture('early'))
   await check('early finish labels answered scope and unanswered rows without zero scores', async () => {
     assert.ok((await text()).includes('已答 1/13 题，提前结束')); assert.equal(await evaluate(`document.querySelectorAll('[data-status="UNANSWERED"]').length`), 1)
@@ -570,9 +595,15 @@ async function main() {
   await check('legitimate zero remains a scored total and per-question score', async () => { assert.equal(await evaluate(`document.querySelector('[data-testid="overall-score"] strong').textContent.trim()`), '0'); assert.equal(await evaluate(`document.querySelector('[data-status="SCORED"]').textContent.trim()`), '0 /100') })
   const caseSession = newSession('CASE_STUDY')
   await loadSession(caseSession)
-  await check('non-coding opening exposes the frozen professional case plan and role rationale', async () => {
-    const plan = await evaluate(`document.querySelector('[data-testid="specialty-plan"]').textContent`)
+  await button('本场信息')
+  await check('information drawer exposes the frozen professional plan and rationale', async () => {
+    const plan = await evaluate(`document.querySelector('.interview-info-drawer').textContent`)
     assert.ok(plan.includes('专业案例题') && plan.includes('用户增长分析') && plan.includes('目标岗位为运营'))
+  })
+  await evaluate(`document.dispatchEvent(new KeyboardEvent('keydown',{key:'Escape',bubbles:true}))`)
+  await check('Escape closes the drawer and returns focus to its opener', async () => {
+    assert.equal(await visible('.interview-info-drawer'), false)
+    assert.ok((await evaluate('document.activeElement.textContent')).includes('本场信息'))
   })
   while (caseSession.status === 'ACTIVE') {
     await waitFor(async () => await visible('#interview-answer') && !await disabled('#interview-answer'), 'case session answer ready')
@@ -593,14 +624,15 @@ async function main() {
     await waitFor(async () => await visible('[data-testid="view-report"]') || await evaluate('document.querySelector("#interview-answer")?.value === ""'), 'case answer saved')
   }
   await check('case answer completes exactly13 roots with follow-up excluded and no Hot100 source', async () => {
-    assert.equal(rootTurns(caseSession).length, 13); assert.equal(caseSession.turns.length, 14)
+    assert.equal(rootTurns(caseSession).length, 13, JSON.stringify(caseSession.turns.map(turn => [turn.questionId, caseSession.questionMetadata[turn.questionId]?.kind, caseSession.questionMetadata[turn.questionId]?.parentQuestionId]))); assert.equal(caseSession.turns.length, 14)
     assert.equal(await evaluate(`document.querySelectorAll('.history .algorithm-source').length`), 0)
-    assert.ok((await text()).includes('专业案例题 · 固定权重 20%'))
+    assert.equal(caseSession.questionMetadata[caseSession.turns.at(-1).questionId].kind, 'CASE_STUDY')
+    assert.equal(await visible('[data-testid="view-report"]'), true)
   })
   await loadSession(caseSession)
-  await check('restored completed case retains professional label and matching rationale', async () => {
-    assert.ok((await text()).includes('专业案例题 · 固定权重 20%'))
-    assert.ok((await text()).includes('目标岗位为运营'))
+  await check('restored completed case retains specialty metadata and report entry', async () => {
+    assert.equal(caseSession.questionMetadata[caseSession.turns.at(-1).questionId].kind, 'CASE_STUDY')
+    assert.equal(await visible('[data-testid="view-report"]'), true)
     assert.equal(await evaluate(`document.querySelectorAll('.history .algorithm-source').length`), 0)
   })
   await openReport(caseSession)
@@ -638,7 +670,7 @@ async function main() {
     await waitFor(() => visible('#interview-answer'), 'reload restores the new round')
     assert.equal(await disabled('#interview-answer'), false)
   })
-  const draftKeyOf = value => `career-studio-draft-v1|http://127.0.0.1:${mockPort}|demo-user|${value.sessionId}|${value.currentQuestion.questionId}`
+  const draftKeyOf = value => `career-studio-draft-v1|http://127.0.0.1:${mockPort}|demo-user|${value.sessionId}|${value.turns[0].questionId}`
   const draftSession = newSession()
   await loadSession(draftSession)
   await fill('#interview-answer', '草稿应跨页面保留')
@@ -650,10 +682,10 @@ async function main() {
     await navigate(`${base}/interview`)
     await waitFor(async () => (await evaluate('document.querySelector("#interview-answer").value')) === '草稿应跨页面保留', 'draft restored after reload')
     const note = await evaluate('document.querySelector(".interview-footnote").textContent')
-    assert.ok(note.includes('7 天') && !note.includes('无法恢复'), 'footnote must state retention, not promise the draft is lost')
+    assert.ok(note.includes('7 天') && note.includes('回答文字') && note.includes('本地录音'), 'footnote must distinguish saved text from local recording')
   })
   await check('a failed submit keeps the question draft on disk and reports no storage problem', async () => {
-    failAnswer = true
+    failSave = true
     await fill('#interview-answer', '提交失败后应保留')
     await sleep(400)
     await button('提交回答')
@@ -661,14 +693,16 @@ async function main() {
     const stored = await evaluate(`localStorage.getItem(${JSON.stringify(draftKeyOf(draftSession))})`)
     assert.ok(stored && stored.includes('提交失败后应保留'), 'a failed submit must not clear the local draft')
     assert.ok(!(await text()).includes('本机自动保存不可用'), 'storage is working, so no availability warning')
-    failAnswer = false
+    failSave = false
   })
   const conflictSession = newSession()
   await loadSession(conflictSession)
   await check('a newer draft from another tab prompts instead of overwriting the current input', async () => {
     await fill('#interview-answer', '本标签页的版本')
     await sleep(400)
-    await evaluate(`window.dispatchEvent(new StorageEvent('storage', { key: ${JSON.stringify(draftKeyOf(conflictSession))}, newValue: JSON.stringify({ version: 1, sessionId: ${JSON.stringify(conflictSession.sessionId)}, questionId: ${JSON.stringify(conflictSession.currentQuestion.questionId)}, text: '另一标签页的版本', previewText: '', updatedAt: ${Date.now() + 1000} }) }))`)
+    const key = await evaluate(`Object.keys(localStorage).find(item => item.includes(${JSON.stringify(conflictSession.sessionId)}))`)
+    assert.ok(key, 'current question draft key exists')
+    await evaluate(`(() => { const key=${JSON.stringify(key)}; const value=JSON.parse(localStorage.getItem(key)); value.text='另一标签页的版本'; value.updatedAt=Date.now()+1000; window.dispatchEvent(new StorageEvent('storage',{key,newValue:JSON.stringify(value)})) })()`)
     await waitFor(() => visible('[data-testid="draft-load-other"]'), 'conflict prompt')
     await testid('draft-load-other')
     assert.equal(await evaluate('document.querySelector("#interview-answer").value'), '另一标签页的版本')

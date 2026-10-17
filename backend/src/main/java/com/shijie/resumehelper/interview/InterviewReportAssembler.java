@@ -19,6 +19,12 @@ public final class InterviewReportAssembler {
     public InterviewAgent.InterviewReport assemble(int plannedCount, List<InterviewService.Turn> allTurns,
             Map<String, InterviewQuestion> contracts, Map<String, InterviewAssessment> assessments,
             Map<String, InterviewService.Context> contexts) {
+        return assemble(plannedCount, allTurns, contracts, assessments, contexts, "");
+    }
+
+    public InterviewAgent.InterviewReport assemble(int plannedCount, List<InterviewService.Turn> allTurns,
+            Map<String, InterviewQuestion> contracts, Map<String, InterviewAssessment> assessments,
+            Map<String, InterviewService.Context> contexts, String finishReason) {
         var turns = allTurns.stream().filter(t -> contexts.get(t.questionId()).kind() != InterviewService.Kind.FOLLOW_UP).toList();
         List<InterviewService.Turn> answered = turns.stream().filter(t -> t.answer() != null).toList();
         var shares = InterviewService.weightShares(allTurns, contracts, contexts);
@@ -75,7 +81,7 @@ public final class InterviewReportAssembler {
                         f.weightPercent().multiply(BigDecimal.valueOf(100 - f.score()))).reversed())
                 .map(InterviewAgent.TurnFeedback::improvement).filter(s -> !s.isBlank()).distinct().limit(3).toList();
         return new InterviewAgent.InterviewReport(overall, summary, strengths, gaps, suggestions, feedbacks,
-                String.join(", ", models), status, InterviewScoringPolicy.VERSION, plannedCount, answered.size(), scored.size());
+                String.join(", ", models), status, InterviewScoringPolicy.VERSION, plannedCount, answered.size(), scored.size(), finishReason);
     }
 
     private int weight(InterviewQuestion contract) {
