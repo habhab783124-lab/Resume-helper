@@ -25,9 +25,34 @@ public final class InterviewReportAssembler {
     public InterviewAgent.InterviewReport assemble(int plannedCount, List<InterviewService.Turn> allTurns,
             Map<String, InterviewQuestion> contracts, Map<String, InterviewAssessment> assessments,
             Map<String, InterviewService.Context> contexts, String finishReason) {
-        var turns = allTurns.stream().filter(t -> contexts.get(t.questionId()).kind() != InterviewService.Kind.FOLLOW_UP).toList();
+        return assemble(plannedCount, allTurns, contracts, assessments, contexts, finishReason, null,
+                InterviewSnapshot.Progress.empty());
+    }
+
+    public InterviewAgent.InterviewReport assemble(int plannedCount, List<InterviewService.Turn> allTurns,
+            Map<String, InterviewQuestion> contracts, Map<String, InterviewAssessment> assessments,
+            Map<String, InterviewService.Context> contexts, String finishReason, InterviewPlan plan,
+            InterviewSnapshot.Progress progress) {
+        return assemble(plannedCount, allTurns, contracts, assessments, contexts, finishReason, plan, progress, Set.of());
+    }
+
+    public InterviewAgent.InterviewReport assemble(int plannedCount, List<InterviewService.Turn> allTurns,
+            Map<String, InterviewQuestion> contracts, Map<String, InterviewAssessment> assessments,
+            Map<String, InterviewService.Context> contexts, String finishReason, InterviewPlan plan,
+            InterviewSnapshot.Progress progress, Set<String> skippedRoots) {
+        return assemble(plannedCount, allTurns, contracts, assessments, contexts, finishReason, plan, progress,
+                skippedRoots, Set.of());
+    }
+
+    public InterviewAgent.InterviewReport assemble(int plannedCount, List<InterviewService.Turn> allTurns,
+            Map<String, InterviewQuestion> contracts, Map<String, InterviewAssessment> assessments,
+            Map<String, InterviewService.Context> contexts, String finishReason, InterviewPlan plan,
+            InterviewSnapshot.Progress progress, Set<String> skippedRoots, Set<String> withdrawnQuestionIds) {
+        var turns = allTurns.stream().filter(t -> contexts.get(t.questionId()).kind() != InterviewService.Kind.FOLLOW_UP)
+                .filter(t -> !withdrawnQuestionIds.contains(t.questionId())).toList();
         List<InterviewService.Turn> answered = turns.stream().filter(t -> t.answer() != null).toList();
-        var shares = InterviewService.weightShares(allTurns, contracts, contexts);
+        var shares = InterviewService.weightShares(allTurns.stream()
+                .filter(t -> !withdrawnQuestionIds.contains(t.questionId())).toList(), contracts, contexts);
         List<InterviewAgent.TurnFeedback> feedbacks = new ArrayList<>();
         List<Integer> scored = new ArrayList<>();
         Set<String> models = new LinkedHashSet<>();
@@ -48,7 +73,9 @@ public final class InterviewReportAssembler {
                         .divide(BigDecimal.valueOf(mainUnits * 5), 10, RoundingMode.HALF_UP);
             feedbacks.add(new InterviewAgent.TurnFeedback(i + 1, turn.question(), score,
                     assessment == null ? "" : assessment.highlight(), assessment == null ? "" : assessment.improvement(),
-                    turn.questionId(), turn.answer(), turn.answer() == null ? "UNANSWERED" : score == null ? "PENDING" : "SCORED",
+                    turn.questionId(), turn.answer(), turn.answer() == null
+                            ? (skippedRoots.contains(turn.questionId()) ? "SKIPPED" : "UNANSWERED")
+                            : score == null ? "PENDING" : "SCORED",
                     contract.competency(), contract.difficulty().name(), contract.importance().name(),
                     weight(contract), shares.get(turn.questionId()), contribution, contract.weightReason(),
                     assessment == null ? Map.of() : assessment.dimensionScores(),
@@ -60,18 +87,40 @@ public final class InterviewReportAssembler {
         }
         String status = answered.isEmpty() ? "EMPTY" : scored.isEmpty() ? "UNAVAILABLE"
                 : scored.size() == answered.size() ? "COMPLETE" : "PARTIAL";
-        boolean fullyCovered = plannedCount == InterviewService.QUESTION_COUNT && answered.size() == InterviewService.QUESTION_COUNT
-                && turns.stream().filter(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.MAIN).count() == InterviewService.MAIN_COUNT
-                && turns.stream().filter(t -> contexts.get(t.questionId()).kind().isSpecialty()).count() == 1;
+        boolean quick = plan != null && "experience-v1".equals(plan.policyVersion())
+                && plan.mode() == InterviewPlan.Mode.QUICK;
+        int plannedMainCount = plan != null && "experience-v1".equals(plan.policyVersion())
+                ? plan.mainCount() : InterviewService.MAIN_COUNT;
+        boolean expectsSpecialty = plan == null || plan.plannedCount() > plan.mainCount();
+        long actualMainCount = turns.stream().filter(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.MAIN).count();
+        long actualSpecialtyCount = turns.stream().filter(t -> contexts.get(t.questionId()).kind().isSpecialty()).count();
+        long answeredMainCount = answered.stream().filter(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.MAIN).count();
+        long answeredSpecialtyCount = answered.stream().filter(t -> contexts.get(t.questionId()).kind().isSpecialty()).count();
+        boolean fullyCovered = !quick && answered.size() == plannedCount
+                && actualMainCount == plannedMainCount && answeredMainCount == plannedMainCount
+                && actualSpecialtyCount == (expectsSpecialty ? 1 : 0)
+                && answeredSpecialtyCount == (expectsSpecialty ? 1 : 0);
         BigDecimal overall = status.equals("COMPLETE") && fullyCovered
                 ? fullScore(feedbacks) : null;
-        String scope = (answered.size() < plannedCount ? "本次提前结束，" : "本次")
+        boolean completed = "COMPLETED".equals(finishReason);
+        String scope = (answered.size() < plannedCount && !completed ? "本次提前结束，" : "本次")
                 + "已答 " + answered.size() + "/" + plannedCount + " 题，已评分 " + scored.size() + " 题。";
-        long answeredMain = answered.stream().filter(t -> contexts.get(t.questionId()).kind() == InterviewService.Kind.MAIN).count();
         boolean answeredSpecialty = answered.stream().anyMatch(t -> contexts.get(t.questionId()).kind().isSpecialty());
-        if (!fullyCovered) scope += "未完成主问题 " + Math.max(0, InterviewService.MAIN_COUNT - answeredMain)
-                + " 道；" + (answeredSpecialty ? "专项题已回答。" : "专项题未作答（固定20%未计入，不转移给主问题）。");
+        int skippedCount = progress == null ? skippedRoots.size() : progress.skippedRoots();
+        if (skippedCount > 0 && !quick) scope += "已跳过 " + skippedCount + " 个题组；跳过题与尚未到达的题目分别标示。";
+        if (quick) {
+            scope += completed ? "快速练习已按计划结束；" : "快速练习；";
+            if (skippedCount > 0) scope += "已跳过 " + skippedCount + " 个题组；";
+            scope += "该模式不计算综合评分。";
+        } else if (!fullyCovered) {
+            int missingMain = (int) Math.max(0, plannedMainCount - answeredMainCount);
+            if (missingMain > 0) scope += "未完成主问题 " + missingMain + " 道；";
+            if (expectsSpecialty && !answeredSpecialty)
+                scope += "专项题未作答（固定20%未计入，不转移给主问题）。";
+            else if (completed) scope += "本轮已结束，但答题范围未齐全，暂无综合评分。";
+        }
         String summary = scope + (overall != null ? "加权训练参考评分 " + overall + "，仅反映本轮已回答内容。"
+                : quick ? (answered.isEmpty() ? "还没有回答，暂无逐题反馈。" : "已答题目的逐题反馈已完成。")
                 : answered.isEmpty() ? "还没有回答，暂无可评分内容。" : status.equals("COMPLETE") ? "已答题目的逐题反馈已完成；范围未齐全，暂无综合评分。" : "评分暂未齐全，可重试待评分题目；暂无综合评分。");
         List<String> strengths = feedbacks.stream().filter(f -> f.score() != null).map(InterviewAgent.TurnFeedback::highlight)
                 .filter(s -> !s.isBlank()).distinct().limit(5).toList();

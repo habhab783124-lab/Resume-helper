@@ -73,6 +73,15 @@ public final class JobViews {
                     brief(job.description()), saved);
         }
 
+        /** 岗位详情保留完整 JD，供用户确认后带入面试准备表单。 */
+        public static JobCard ofDetailed(Job job, boolean saved) {
+            return new JobCard(job.id(), job.title(), job.company(), job.companyMark(), styleOf(job.company()),
+                    job.salary(), job.place(), job.city(), job.district(), job.experience(), job.education(),
+                    job.jobType(), job.campus(), job.skills(), List.of(), List.of(), null, null,
+                    List.of(), Map.of(), job.sourceName(), job.sourceUrl(), job.collectedAt(),
+                    job.description() == null ? "" : job.description(), saved);
+        }
+
         public static JobCard of(JobMatchResult match, boolean saved) {
             Job job = match.job();
             return new JobCard(job.id(), job.title(), job.company(), job.companyMark(), styleOf(job.company()),

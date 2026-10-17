@@ -10,8 +10,8 @@ const setup = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   + '\nreturn { loadReport, report, error, loading, sessionRole, scopeLabel, hasOverallScore, session: typeof session === "undefined" ? null : session, onExportMarkdown: typeof onExportMarkdown === "undefined" ? null : onExportMarkdown, onExportPdf: typeof onExportPdf === "undefined" ? null : onExportPdf, warning: typeof warning === "undefined" ? null : warning }'
 function mount(api, query = { sessionId: 's1' }) {
   const printed = []
-  const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRoute', 'useRouter', 'window', setup)(
-    value => ({ value }), getter => ({ get value() { return getter() } }), () => {}, () => {}, () => api,
+  const view = new Function('ref', 'computed', 'watch', 'onMounted', 'onUnmounted', 'createInterviewApi', 'useRoute', 'useRouter', 'window', setup)(
+    value => ({ value }), getter => ({ get value() { return getter() } }), () => {}, () => {}, () => {}, () => api,
     () => ({ query }), () => ({ push() {} }), { print: () => printed.push(true) })
   return { ...view, printed }
 }
@@ -84,3 +84,5 @@ test('USER_ENDED report names the answered scope and never shows a composite sco
     finishReason: 'USER_ENDED', turnFeedbacks: [] }
   assert.match(view.scopeLabel.value, /尚无可评分内容/)
 })
+
+test('algorithm report states code is reviewed statically and never executed', () => { assert.match(source, /静态思路与代码评阅，未执行代码/) })

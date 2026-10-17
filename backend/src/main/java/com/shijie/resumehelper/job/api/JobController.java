@@ -134,7 +134,7 @@ public class JobController {
     public ApiResponse<JobViews.JobCard> detail(@PathVariable String id,
                                                 @RequestParam(required = false) String userId) {
         return jobService.find(id)
-                .map(job -> ApiResponse.ok(JobViews.JobCard.of(job,
+                .map(job -> ApiResponse.ok(JobViews.JobCard.ofDetailed(job,
                         jobService.isSaved(JobService.normalizeUserId(userId), job.id()))))
                 .orElseGet(() -> ApiResponse.fail("没有找到该岗位，可能已过期，请重新搜索"));
     }

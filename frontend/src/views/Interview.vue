@@ -18,11 +18,17 @@ import InterviewComposer from '../components/interview/InterviewComposer.vue'
 import InterviewFinishDialog from '../components/interview/InterviewFinishDialog.vue'
 import { toConversationMessages } from '../interview/conversationMessages.js'
 import { useInterviewFinish } from '../interview/useInterviewFinish.js'
+import { useInterviewSetup } from '../interview/useInterviewSetup.js'
+import * as materialsApi from '../api/materials.js'
+import * as resumeApi from '../api/resume.js'
+import * as jobsApi from '../api/jobs.js'
 
 const route = useRoute()
 const router = useRouter()
 const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '') })
 let activeScope = { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() }
+const setup = useInterviewSetup({ materialsApi, resumeApi, jobsApi, interviewApi: api,
+  scope: () => activeScope })
 let storageKey = `career-studio-interview-id-v2|${activeScope.apiBaseUrl}|${activeScope.userId}`
 const legacyStorageKey = 'career-studio-interview-id'
 const material = ref(null)
@@ -42,14 +48,29 @@ conversation = useInterviewConversation({ api, polling, storage: globalThis.sess
   } })
 const session = conversation.session
 const phase = conversation.phase
+const quickPracticeFeedback = computed(() => {
+  const value = session.value
+  if (value?.plan?.mode !== 'QUICK') return null
+  const latest = [...(value.turns || [])].reverse().find(turn => value.questionMetadata?.[turn.questionId]?.kind !== 'FOLLOW_UP')
+  if (!latest?.answer) return null
+  const root = latest
+  const feedback = value.practiceFeedbacks?.[root.questionId] || null
+  if (value.closedRootIds?.includes(root.questionId) && !feedback) return null
+  return { root, feedback }
+})
 const paste = ref('')
-const targetRole = ref('')
+const targetRole = setup.targetRole
 const answer = conversation.draft
 const busy = ref('')
 const error = conversation.error
 const restoreId = ref('')
 const uncertainAnswer = ref(null)
 const finishChoice = ref(false)
+const skipChoice = ref(false)
+const replacementChoice = ref(false)
+const replacementReason = ref('')
+const replacementDraftChoice = ref('')
+const resolvedReplacementDrafts = new Set()
 const finishRequestId = ref('')
 const finishRequestKey = ref('')
 const recordingAudio = ref(null)
@@ -59,6 +80,10 @@ const conversationMessages = computed(() => session.value
   ? toConversationMessages({ ...session.value, currentQuestion: null }, conversation.submission.value, phase.value) : [])
 const current = computed(() => session.value?.currentQuestion)
 const currentMetadata = computed(() => session.value?.questionMetadata?.[current.value?.questionId] || {})
+const currentClarification = computed(() => {
+  const rootId = currentMetadata.value.parentQuestionId || current.value?.questionId
+  return rootId ? session.value?.clarifications?.[rootId] || null : null
+})
 function questionLabel(turn, index = 0) {
   const metadata = session.value?.questionMetadata?.[turn?.questionId] || {}
   if (isSpecialty(metadata.kind)) return `${specialtyLabel(metadata.kind)} · 固定权重 20%`
@@ -124,6 +149,14 @@ function saveDraft() {
   draftStatus.value = result.saved ? '' : result.reason === 'QUOTA' ? '本机存储空间已满，草稿暂无法自动保存。' : '本机自动保存不可用。'
   return result
 }
+async function skipQuestion(keepDraft) {
+  const questionId = current.value?.questionId
+  if (!questionId || !session.value) return
+  saveDraft()
+  if (!keepDraft) draftStore().remove(session.value.sessionId, questionId)
+  skipChoice.value = false
+  await conversation.skip(questionId)
+}
 function scheduleDraftSave() {
   if (draftTimer) clearTimeout(draftTimer)
   draftTimer = setTimeout(() => { draftTimer = null; saveDraft() }, DRAFT_DEBOUNCE_MS)
@@ -169,7 +202,7 @@ function onRequestContextChange() {
   activeScope = nextScope
   storageKey = `career-studio-interview-id-v2|${activeScope.apiBaseUrl}|${activeScope.userId}`
   material.value = null
-  targetRole.value = ''
+  setup.switchScope()
   paste.value = ''
   uncertainAnswer.value = null
   finishChoice.value = false
@@ -185,11 +218,32 @@ function applySession(value) {
   if (!sameQuestion && session.value) saveDraft()
   if (!sameQuestion) finishChoice.value = false
   if (!conversation.applySession(value)) return false
+  const replacement = Object.entries(value.replacements || {}).find(([sourceId, operation]) =>
+    operation.status === 'COMPLETE' && operation.replacementQuestionId === value.currentQuestion?.questionId)
+  if (replacement && !resolvedReplacementDrafts.has(replacement[0])
+      && draftStore().load(value.sessionId, replacement[0])?.text) replacementDraftChoice.value = replacement[0]
   if (value.status === 'FINISHED') finishChoice.value = false
   uncertainAnswer.value = null
   voice.syncContext()
   applyQuestionDraft()
   return true
+}
+async function replaceQuestion() {
+  if (!current.value || replacementReason.value.trim().length < 1 || replacementReason.value.trim().length > 300) return
+  const sourceId = current.value.questionId
+  saveDraft()
+  const accepted = await conversation.replace(sourceId, replacementReason.value)
+  if (accepted) {
+    replacementDraftChoice.value = sourceId
+    replacementChoice.value = false
+    replacementReason.value = ''
+  }
+}
+function resolveReplacementDraft(keep) {
+  const sourceId = replacementDraftChoice.value
+  if (sourceId) resolvedReplacementDrafts.add(sourceId)
+  if (!keep && replacementDraftChoice.value) draftStore().remove(session.value?.sessionId, replacementDraftChoice.value)
+  replacementDraftChoice.value = ''
 }
 async function syncVoiceSession(context, canApply = () => true, signal) {
   try {
@@ -224,21 +278,39 @@ async function upload(file) {
     const value = await api.upload(file)
     if (!value?.materialId || typeof value.text !== 'string') throw new Error('简历解析结果异常，请重试上传。')
     if (!value.text.trim()) throw new Error('简历未提取到文字，请粘贴简历文本后开始。')
-    material.value = value
+    const preview = await setup.loadSource({ kind: 'MATERIAL', id: value.materialId })
+    material.value = { ...value, fileName: preview.sourceLabel, text: preview.resumeText }
   })
 }
 function uploadPaste() {
   if (!paste.value.trim()) { error.value = '请先粘贴简历文本。'; return }
-  return upload(new File([paste.value], '粘贴的简历.txt', { type: 'text/plain' }))
+  if (locked.value) return
+  return run('正在保存并解析粘贴的简历…', async () => {
+    const detail = await materialsApi.pasteMaterial({ title: '粘贴的简历.txt', text: paste.value.trim() })
+    const id = detail?.material?.id
+    if (!id || typeof detail.text !== 'string' || !detail.text.trim()) throw new Error('粘贴内容未提取到可用简历文字。')
+    const preview = await setup.loadSource({ kind: 'MATERIAL', id })
+    material.value = { materialId: id, fileName: preview.sourceLabel, text: preview.resumeText }
+  })
+}
+async function preparePlan() {
+  if (locked.value) return
+  await run('正在生成计划预览…', async () => {
+    const value = await setup.preparePlan()
+    if (!value && setup.planError.value) throw new Error(setup.planError.value)
+  })
 }
 function start() {
-  if (!material.value?.text?.trim()) { error.value = '请先上传有效简历或粘贴简历文本。'; return }
-  return run('正在生成第一题…', async () => {
-    const value = await api.start({ materialId: material.value.materialId, targetRole: targetRole.value.trim(), questionCount: 13,
-      requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}`, async: true })
+  const selectedSource = setup.source.value || (material.value?.materialId
+    ? { kind: 'MATERIAL', id: material.value.materialId } : null)
+  const confirmedText = setup.resumePreview.value?.resumeText || material.value?.text
+  if (!selectedSource || !confirmedText?.trim()) { error.value = '请先选择并确认一份有效简历。'; return }
+  if (!setup.planCurrent.value) { error.value = '计划已失效，请重新生成预览。'; return }
+  return run('正在确认计划并生成第一题…', async () => {
+    const value = await setup.confirmPlan()
+    if (!value) throw new Error(setup.planError.value || '计划已失效，请重新预览。')
     applySession(value)
     if (value.generation) polling.start(value.sessionId)
-    // 新场次已经建立，清掉 URL 上的「新一轮」意图，否则刷新会丢掉刚开始的练习。
     if (route.query.intent === 'new') router.replace({ name: 'Interview' })
   })
 }
@@ -260,6 +332,10 @@ function submitAnswer() {
   })
 }
 function retryGeneration() { return run('正在继续生成后续问题…', () => conversation.retryGeneration()) }
+function viewPracticeFeedback() {
+  if (!quickPracticeFeedback.value) return
+  return run('正在整理本题反馈…', () => conversation.practiceFeedback(quickPracticeFeedback.value.root.questionId))
+}
 function viewReport() {
   if (locked.value || session.value?.status !== 'FINISHED') return
   voice.dispose()
@@ -346,7 +422,13 @@ async function prepareNewRound() {
   try {
     const previous = await api.getSession(source)
     targetRole.value = typeof previous.targetRole === 'string' ? previous.targetRole.slice(0, 200) : ''
-    if (previous.materialId) material.value = await api.getMaterial(previous.materialId)
+    const priorSource = previous.plan?.source || (previous.materialId
+      ? { kind: 'MATERIAL', id: previous.materialId } : null)
+    if (priorSource?.kind && priorSource?.id) {
+      const preview = await setup.loadSource(priorSource)
+      material.value = { materialId: priorSource.kind === 'MATERIAL' ? priorSource.id : null,
+        fileName: preview.sourceLabel, text: preview.resumeText }
+    }
   } catch {
     error.value = '上一轮的简历和岗位暂时无法读取，请重新上传简历或填写岗位。'
   } finally {
@@ -374,8 +456,41 @@ onMounted(() => {
   globalThis.window?.addEventListener('storage', onDraftStorage)
   globalThis.addEventListener?.('request-context-change', onRequestContextChange)
   try { restoreId.value = sessionStorage.getItem(storageKey) || sessionStorage.getItem(legacyStorageKey) || '' } catch { /* Storage is optional. */ }
-  if (isNewInterviewRoute(route)) return prepareNewRound()
+  const requestedSessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId.trim() : ''
+  if (requestedSessionId) { restoreId.value = requestedSessionId; remember(requestedSessionId) }
+  setup.restorePreparation()
+  const queryId = value => typeof value === 'string' && value.trim() ? value.trim() : ''
+  const focusedPlanId = queryId(route.query.planId)
+  const querySource = queryId(route.query.materialId) ? { kind: 'MATERIAL', id: queryId(route.query.materialId) }
+    : queryId(route.query.resumeVersionId) ? { kind: 'RESUME_VERSION', id: queryId(route.query.resumeVersionId) } : null
+  if (isNewInterviewRoute(route)) {
+    if (!route.query.sourceSessionId) remember('')
+    restoreId.value = ''
+    if (focusedPlanId) {
+      setup.loadPreparedPlan(focusedPlanId, queryId(route.query.sourceSessionId)).then(loaded => {
+        if (!loaded) { error.value = setup.planError.value || '练习计划已失效，请回到报告重新选择重点。'; return }
+        const preview = setup.resumePreview.value
+        material.value = { materialId: setup.source.value?.kind === 'MATERIAL' ? setup.source.value.id : null,
+          fileName: preview?.sourceLabel || '已选简历', text: preview?.resumeText || '' }
+      })
+      return
+    }
+    const sourceToLoad = querySource || (!route.query.sourceSessionId ? setup.source.value : null)
+    if (sourceToLoad) setup.loadSource(sourceToLoad).then(preview => {
+      material.value = { materialId: sourceToLoad.kind === 'MATERIAL' ? sourceToLoad.id : null,
+        fileName: preview.sourceLabel, text: preview.resumeText }
+    }).catch(cause => { error.value = cause.message || '无法读取所选简历，请重新选择。' })
+    if (queryId(route.query.jobId)) setup.loadJob(queryId(route.query.jobId)).catch(() => {
+      error.value = '岗位已无法读取。你仍可以手动填写目标岗位和 JD。'
+    })
+    if (!querySource && !queryId(route.query.jobId) && route.query.sourceSessionId) return prepareNewRound()
+    return
+  }
   if (restoreId.value) restore()
+  else if (setup.source.value) setup.loadSource(setup.source.value).then(preview => {
+    material.value = { materialId: setup.source.value.kind === 'MATERIAL' ? setup.source.value.id : null,
+      fileName: preview.sourceLabel, text: preview.resumeText }
+  }).catch(cause => { error.value = cause.message || '无法读取已保存的练习准备。' })
 })
 onUnmounted(() => {
   saveDraft()
@@ -410,23 +525,68 @@ onUnmounted(() => {
           </div>
         </div>
         <div v-if="restoreId && !session" class="restore-actions"><p>发现上次练习，恢复后可继续回答或结束面试。</p><button class="button button-primary" :disabled="locked" @click="restore">重试恢复</button><button class="text-button" :disabled="locked" @click="reset">开始新的练习</button></div>
-        <InterviewSetup v-else-if="!session" :material="material" v-model:paste="paste" v-model:target-role="targetRole" :locked="locked" @upload="upload" @use-paste="uploadPaste" @start="start" />
+        <InterviewSetup v-else-if="!session" :material="material" v-model:paste="paste" v-model:target-role="targetRole"
+          v-model:job-description="setup.jobDescription.value" v-model:preferences="setup.preferences.value" :plan="setup.planPreview.value" :plan-current="setup.planCurrent.value" :plan-error="setup.planError.value" :source-session-id="setup.sourceSessionId.value" :allow-algorithm-repeat="setup.allowAlgorithmRepeat.value" :repeat-consent-required="setup.repeatConsentRequired.value" @update:allow-algorithm-repeat="setup.allowAlgorithmRepeat.value = $event" :preparing-plan="setup.preparingPlan.value" :confirming-plan="setup.confirmingPlan.value" :locked="locked" @upload="upload" @use-paste="uploadPaste" @prepare="preparePlan" @start="start" />
         <template v-if="session">
-          <InterviewHeader :role="session.targetRole" :active="active" :progress="completedRoots.length" :total="session.questionCount" :can-finish="!!session && active && !busy && !finishFinishing" @finish="requestFinish" @open-info="openInfo" />
+          <InterviewHeader :role="session.targetRole" :active="active" :progress="session.progress?.answeredRoots ?? completedRoots.length" :total="session.questionCount" :can-finish="!!session && active && !busy && !finishFinishing" @finish="requestFinish" @open-info="openInfo" />
           <InterviewMessages v-if="conversationMessages.length" :messages="conversationMessages" :voice="voice" :session-id="session.sessionId" />
           <template v-if="active && current">
             <div class="question-card">
               <div class="question-number">{{ questionLabel(current, completedRoots.length) }}</div>
-              <p v-if="currentMetadata.kind === 'ALGORITHM'" class="algorithm-source">LeetCode Hot 100 · {{ currentMetadata.algorithm?.title }} <a v-if="algorithmUrl(currentMetadata.algorithm)" :href="algorithmUrl(currentMetadata.algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p>
+              <p v-if="currentMetadata.kind === 'ALGORITHM'" class="algorithm-source">LeetCode Hot 100 · {{ currentMetadata.algorithm?.title }} · 算法难度 {{ currentMetadata.algorithm?.difficulty }} <a v-if="algorithmUrl(currentMetadata.algorithm)" :href="algorithmUrl(currentMetadata.algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p>
               <h3>{{ current.question }}</h3>
               <div class="voice-actions">
                 <button data-testid="question-play" class="button button-ghost" :disabled="locked || !voice.ttsEnabled" @click="voice.speechQuestionId === current.questionId && ['loading', 'playing'].includes(voice.speechState) ? voice.stopQuestion() : voice.playQuestion({ sessionId: session.sessionId, questionId: current.questionId })">{{ voice.speechQuestionId === current.questionId && voice.speechState === 'loading' ? '正在生成 · 停止' : voice.speechQuestionId === current.questionId && voice.speechState === 'playing' ? '停止朗读' : '播放题目' }}</button>
+                <button data-testid="skip-question" class="button button-ghost" :disabled="locked" @click="skipChoice = true">跳过这题</button>
+                <button data-testid="clarify-question" class="button button-ghost" :disabled="locked || ['RUNNING', 'COMPLETE'].includes(currentClarification?.status)" @click="conversation.clarify(current.questionId)">{{ currentClarification?.status === 'FAILED' || currentClarification?.status === 'CANCELLED' ? '重试解释' : currentClarification?.status === 'RUNNING' ? '正在解释…' : currentClarification?.status === 'COMPLETE' ? '已解释题意' : '解释题意' }}</button>
+                <button v-if="currentMetadata.kind === 'MAIN' && !session.replacements?.[current.questionId]?.status?.match?.(/COMPLETE|RUNNING/)" data-testid="replace-question" class="button button-ghost" :disabled="locked" @click="replacementChoice = true">这段经历不适用</button>
+              </div>
+              <div v-if="replacementChoice" class="notice" role="group" aria-label="说明经历不适用">
+                <p>请说明原因（1–300 字）。系统会据此生成同能力目标的新题，不会假设你参与过这段经历。当前未提交草稿会按原题编号保留，可在替换完成后选择保留或删除。</p>
+                <textarea v-model="replacementReason" maxlength="300" rows="3" aria-label="不适用原因" placeholder="例如：这项工作由其他团队负责，我没有参与"></textarea>
+                <div class="voice-actions"><button data-testid="confirm-replacement" class="button button-primary" :disabled="locked || !replacementReason.trim()" @click="replaceQuestion">提交并生成替换题</button><button class="text-button" :disabled="locked" @click="replacementChoice = false">返回作答</button></div>
+              </div>
+              <div v-if="session.replacements?.[current.questionId]?.status === 'RUNNING'" class="notice" role="status">正在生成替换题；原题不会计入回答或评分。</div>
+              <div v-if="replacementDraftChoice" class="notice" role="group" aria-label="替换题草稿处理"><p>原题草稿仍按原题编号保存。</p><button class="button button-primary" @click="resolveReplacementDraft(true)">保留原题草稿</button><button class="button button-ghost" @click="resolveReplacementDraft(false)">删除原题草稿</button></div>
+              <div v-if="currentClarification?.status === 'RUNNING'" class="notice" role="status">正在解释术语和任务要求，不会更改题目或草稿。</div>
+              <div v-else-if="currentClarification?.status === 'COMPLETE'" class="notice" role="note"><strong>题意说明</strong><p>{{ currentClarification.text }}</p></div>
+              <div v-else-if="currentClarification?.status === 'FAILED'" class="notice error" role="alert">{{ currentClarification.error || '题目解释暂不可用，可局部重试。' }}</div>
+              <div v-if="skipChoice" class="notice" role="group" aria-label="跳过题目并处理草稿">
+                <p>跳过后这题不计为已回答。{{ answer.trim() ? '可以按题目编号保留草稿，或删除草稿。' : '' }}</p>
+                <div class="voice-actions">
+                  <button data-testid="skip-keep-draft" class="button button-primary" :disabled="locked" @click="skipQuestion(true)">{{ answer.trim() ? '保留草稿并跳过' : '确认跳过' }}</button>
+                  <button v-if="answer.trim()" data-testid="skip-discard-draft" class="button button-ghost" :disabled="locked" @click="skipQuestion(false)">删除草稿并跳过</button>
+                  <button class="text-button" :disabled="locked" @click="skipChoice = false">返回作答</button>
+                </div>
               </div>
               <p v-if="!voice.ttsEnabled" class="voice-note">{{ voice.capabilityState === 'loading' ? '正在确认题目朗读能力，文字作答可直接继续。' : '题目朗读暂不可用，可阅读题目并用文字回答。' }}</p>
               <p v-if="voice.speechError" class="notice error" role="alert">{{ voice.speechError }}</p>
             </div>
             <InterviewComposer v-model="answer" :locked="locked" :pending="pending" :kind="currentMetadata.kind" :guidance="answerGuidance(currentMetadata.kind)" :voice="voice" @send="submitAnswer" @audio="recordingAudio = $event" />
           </template>
+          <div v-if="active && !current && session.plan?.mode === 'QUICK' && phase === 'ANSWERING'" class="session-actions">
+            <section v-if="quickPracticeFeedback" class="quick-practice-feedback" data-testid="quick-practice-feedback">
+              <p class="notice" role="status">回答已保存。可以先查看这组题的教学反馈，再继续练习。</p>
+              <div v-if="quickPracticeFeedback.feedback?.status === 'COMPLETE'" class="practice-feedback-result">
+                <h3>本题组反馈</h3>
+                <p><strong>做得不错：</strong>{{ quickPracticeFeedback.feedback.assessment.highlight }}</p>
+                <p v-for="item in quickPracticeFeedback.feedback.assessment.evidence" :key="item"><strong>回答证据：</strong>{{ item }}</p>
+                <p v-for="item in quickPracticeFeedback.feedback.assessment.missingPoints" :key="item"><strong>可补充：</strong>{{ item }}</p>
+                <p><strong>下一步：</strong>{{ quickPracticeFeedback.feedback.assessment.improvement }}</p>
+                <p><strong>表达框架：</strong>{{ quickPracticeFeedback.feedback.assessment.suggestedOutline }}</p>
+              </div>
+              <p v-else-if="['QUEUED', 'RUNNING'].includes(quickPracticeFeedback.feedback?.status)" class="notice" role="status">正在整理本题反馈；完成后会显示原回答中的依据。</p>
+              <p v-else-if="quickPracticeFeedback.feedback?.status === 'FAILED'" class="notice error" role="status">{{ quickPracticeFeedback.feedback.error || '本题反馈暂不可用，可以继续下一题。' }}</p>
+              <div class="voice-actions">
+                <button v-if="!quickPracticeFeedback.feedback" data-testid="quick-view-feedback" class="button button-outline" :disabled="locked" @click="viewPracticeFeedback">查看本题反馈</button>
+                <button data-testid="quick-next-question" class="button button-primary" :disabled="locked" @click="retryGeneration">继续生成下一题</button>
+              </div>
+            </section>
+            <div v-else class="quick-practice-next">
+              <p class="notice" role="status">这组题已保存或跳过。你可以结束本轮，或继续生成下一题。</p>
+              <button data-testid="quick-next-question" class="button button-primary" :disabled="locked" @click="retryGeneration">继续生成下一题</button>
+            </div>
+          </div>
           <div class="session-actions">
             <template v-if="!active"><button data-testid="view-report" class="button button-primary" :disabled="locked" @click="viewReport">查看报告</button><button class="button button-ghost" :disabled="locked" @click="reset">开始新的练习</button></template>
           </div>
@@ -472,6 +632,11 @@ summary { cursor: pointer; font-size: 13px; }
 .past-answer p { white-space: pre-wrap; overflow-wrap: anywhere; line-height: 1.8; font-size: 13px; margin-bottom: 0; }
 .question-card h3 { white-space: pre-wrap; overflow-wrap: anywhere; }
 .session-actions, .restore-actions { margin: 24px 0; display: flex; flex-wrap: wrap; gap: 18px; }
+.quick-practice-feedback, .quick-practice-next { width: 100%; padding: 18px; border: 1px solid #e2e4dc; border-radius: 8px; background: #fafaf7; }
+.quick-practice-feedback > .notice { margin-bottom: 12px; }
+.practice-feedback-result { margin: 16px 0; padding: 14px; border-left: 3px solid #9aab76; background: #f1f3eb; }
+.practice-feedback-result h3 { margin: 0 0 10px; font-size: 15px; }
+.practice-feedback-result p { margin: 8px 0; line-height: 1.75; font-size: 13px; overflow-wrap: anywhere; }
 .restore-actions p { width: 100%; }
 .voice-panel { margin: 18px 0; padding: 18px; border: 1px solid #e2e4dc; border-radius: 8px; background: #fafaf7; }
 .voice-actions { display: flex; align-items: center; flex-wrap: wrap; gap: 12px; margin: 12px 0; }

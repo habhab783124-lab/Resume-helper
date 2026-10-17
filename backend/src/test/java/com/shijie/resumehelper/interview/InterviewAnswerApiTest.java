@@ -14,6 +14,8 @@ import org.springframework.test.web.servlet.MockMvc;
 
 import java.util.Map;
 
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.Mockito.when;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
@@ -28,7 +30,7 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "app.material.storage-dir=./target/test-materials",
-                "app.interview.storage-dir=./target/test-interviews"
+                "app.interview.storage-dir=${java.io.tmpdir}/resume-helper-answer-api-${random.uuid}"
         })
 @AutoConfigureMockMvc
 class InterviewAnswerApiTest {
@@ -78,6 +80,23 @@ class InterviewAnswerApiTest {
                 .andReturn();
         long revision = json.readTree(saved.getResponse().getContentAsString()).at("/data/revision").asLong();
         assertTrue(revision >= 1);
+    }
+
+    @Test
+    void historyIsOwnerScopedAndDeletingTheSameRoundTwiceIsIdempotent() throws Exception {
+        String id = startInterview(USER, null);
+        String ownHistory = mvc.perform(get("/api/interviews").header(UserContext.HEADER, USER))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertTrue(json.readTree(ownHistory).at("/data/items").toString().contains(id));
+        String otherHistory = mvc.perform(get("/api/interviews").header(UserContext.HEADER, "answer-user-b"))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertFalse(json.readTree(otherHistory).at("/data/items").toString().contains(id));
+
+        mvc.perform(delete("/api/interviews/" + id).header(UserContext.HEADER, USER)).andExpect(status().isOk());
+        mvc.perform(delete("/api/interviews/" + id).header(UserContext.HEADER, USER)).andExpect(status().isOk());
+        String afterDelete = mvc.perform(get("/api/interviews").header(UserContext.HEADER, USER))
+                .andExpect(status().isOk()).andReturn().getResponse().getContentAsString();
+        assertFalse(json.readTree(afterDelete).at("/data/items").toString().contains(id));
     }
 
     @Test

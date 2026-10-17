@@ -34,7 +34,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest(
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         // 测试不要往仓库的 data/ 里写用户简历，丢到 target 下
-        properties = "app.material.storage-dir=./target/test-materials")
+        properties = {"app.material.storage-dir=./target/test-materials",
+                "app.interview.storage-dir=./target/test-api-interviews"})
 @AutoConfigureMockMvc
 class InterviewApiTest {
 

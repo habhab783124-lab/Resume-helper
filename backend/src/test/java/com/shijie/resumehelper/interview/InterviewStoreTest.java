@@ -116,6 +116,74 @@ class InterviewStoreTest {
     }
 
     @Test
+    void deletionTombstoneSurvivesRestartAndPreventsLateSaveFromResurrectingSession() {
+        var snapshot = sample("alice", "s-delete", "start-delete", NOW.plusSeconds(86400));
+        var store = store();
+        store.save(snapshot);
+        store.delete("alice", "s-delete");
+
+        var reopened = new FileSystemInterviewStore(dir, mapper());
+        assertTrue(reopened.isDeleted("alice", "s-delete"));
+        assertTrue(reopened.find("alice", "s-delete").isEmpty());
+        assertTrue(reopened.findByStartRequestId("alice", "start-delete").isEmpty());
+        assertDoesNotThrow(() -> reopened.delete("alice", "s-delete"));
+        assertThrows(InterviewException.class, () -> reopened.save(snapshot));
+    }
+
+    @Test
+    void historyPagesUseStableCreatedAtAndIdOrderingWithoutRepeatsAcrossOwners() {
+        var store = store();
+        store.save(sample("alice", "same-a", "req-a", NOW.plusSeconds(600)));
+        store.save(sample("alice", "same-b", "req-b", NOW.plusSeconds(600)));
+        store.save(sample("alice", "same-c", "req-c", NOW.plusSeconds(600)));
+        store.save(sample("bob", "other", "req-o", NOW.plusSeconds(600)));
+
+        var first = store.list("alice", 2, null, NOW);
+        var second = store.list("alice", 2, first.nextCursor(), NOW);
+        assertEquals(List.of("same-c", "same-b"), first.items().stream().map(InterviewStore.HistoryItem::id).toList());
+        assertEquals(List.of("same-a"), second.items().stream().map(InterviewStore.HistoryItem::id).toList());
+        assertNull(second.nextCursor());
+        assertFalse(first.items().toString().contains("简历文本"));
+    }
+
+    @Test
+    void boundedExpiryCleanupMaintainsHistoryIndex() {
+        var store = store();
+        store.save(sample("cleanup", "old-a", "req-old-a", NOW.minusSeconds(1)));
+        store.save(sample("cleanup", "old-b", "req-old-b", NOW.minusSeconds(1)));
+        assertTrue(store.list("cleanup", 10, null, NOW).items().isEmpty());
+        assertEquals(1, store.deleteExpired(NOW, 1));
+        assertEquals(1, (int) List.of("old-a", "old-b").stream()
+                .filter(id -> store.find("cleanup", id).isPresent()).count());
+        assertEquals(1, store.deleteExpired(NOW, 1));
+        assertTrue(store.list("cleanup", 10, null, NOW).items().isEmpty());
+        assertTrue(store.find("cleanup", "old-a").isEmpty());
+        assertTrue(store.find("cleanup", "old-b").isEmpty());
+    }
+
+    @Test
+    void historyIndexInitializationSkipsCorruptLegacySnapshots() throws IOException {
+        Path ownerDir = dir.resolve("legacy");
+        Files.createDirectories(ownerDir);
+        Files.writeString(ownerDir.resolve("corrupt.json"), "{not valid json");
+        assertTrue(store().list("legacy", 20, null, NOW).items().isEmpty());
+        assertTrue(Files.isRegularFile(ownerDir.resolve("history-index.json")));
+    }
+
+    @Test
+    void countsExcludeExpiredAndDeletedSessionsAndRemainOwnerScoped() {
+        var store = store();
+        store.save(sample("alice", "live", "start-live", NOW.plusSeconds(86400)));
+        store.save(sample("alice", "expired", "start-expired", NOW.minusSeconds(1)));
+        store.save(sample("alice", "deleted", "start-deleted", NOW.plusSeconds(86400)));
+        store.save(sample("bob", "other-owner", "start-other", NOW.plusSeconds(86400)));
+        store.delete("alice", "deleted");
+
+        assertEquals(new InterviewStore.SessionCounts(1, 1), store.counts("alice", NOW));
+        assertEquals(new InterviewStore.SessionCounts(1, 1), store.counts("bob", NOW));
+    }
+
+    @Test
     void rejectsIllegalSessionIdPaths() {
         var snapshot = sample("alice", "s-1", "start-1", NOW.plusSeconds(86400));
         assertThrows(IllegalArgumentException.class, () -> store().find("alice", "../evil"));
@@ -154,6 +222,18 @@ class InterviewStoreTest {
     }
 
     @Test
+    void historyIndexWriteFailureKeepsCommittedSnapshotVisible() throws IOException {
+        Path owner = dir.resolve("alice");
+        Files.createDirectories(owner.resolve("history-index.json"));
+        var snapshot = sample("alice", "s-index-failure", "start-index-failure", NOW.plusSeconds(86400));
+
+        assertDoesNotThrow(() -> store().save(snapshot));
+        assertEquals(snapshot, store().find("alice", snapshot.sessionId()).orElseThrow());
+        assertTrue(store().list("alice", 20, null, NOW).items().stream()
+                .anyMatch(item -> item.id().equals(snapshot.sessionId())));
+    }
+
+    @Test
     void corruptedOrUnknownVersionFailsControlledWithoutOverwriting() throws IOException {
         store().save(sample("alice", "s-1", "start-1", NOW.plusSeconds(86400)));
         Path file = dir.resolve("alice").resolve("s-1.json");
@@ -181,6 +261,33 @@ class InterviewStoreTest {
 
         var reopened = new FileSystemInterviewStore(dir, mapper());
         assertEquals("s-1", reopened.findByStartRequestId("alice", "start-1").orElseThrow().sessionId());
+    }
+
+    @Test
+    void planPreviewRoundTripsAcrossRestartAndIsIsolatedByOwner() {
+        var source = new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, "mat-1");
+        var request = new InterviewPlanService.PlanRequest(source, "后端工程师", "JD",
+                InterviewPlan.CareerStage.CAMPUS, InterviewPlan.Level.STANDARD, InterviewPlan.Mode.QUICK,
+                3, InterviewPlanService.SpecialtyPreference.AUTO, "plan-request-1");
+        var resolved = new InterviewSourceResolver.ResolvedSource(source, "CV.txt", "简历", "fp-1");
+        var preview = new InterviewPlanService.PlanPreview("plan-1", 1, NOW.plusSeconds(900),
+                InterviewPlanService.PlanStatus.READY, null, null);
+        var stored = new InterviewPlanService.StoredPlan("alice", "plan-request-1", request,
+                new InterviewPlanService.PlanSource(resolved),
+                preview, "", "");
+
+        store().savePlan("alice", stored.withStart("start-request-1", "session-1"));
+
+        var reopened = new FileSystemInterviewStore(dir, mapper());
+        var started = stored.withStart("start-request-1", "session-1");
+        assertEquals(started, reopened.findPlan("alice", "plan-1").orElseThrow());
+        assertEquals(started, reopened.findPlanByRequestId("alice", "plan-request-1").orElseThrow());
+        assertTrue(reopened.findPlan("bob", "plan-1").isEmpty());
+        assertTrue(reopened.findPlanByRequestId("bob", "plan-request-1").isEmpty());
+        try {
+            String persisted = Files.readString(dir.resolve("alice/plans/plan-1.json"));
+            assertFalse(persisted.contains("简历"), "plan records keep source fingerprints, not resume text");
+        } catch (IOException e) { throw new AssertionError(e); }
     }
 
     @Test

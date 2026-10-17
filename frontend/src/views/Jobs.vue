@@ -56,6 +56,7 @@
               <div class="job-card-bottom">
                 <span class="job-salary">{{ job.salary }} <small>· 月薪</small></span>
                 <button class="job-card-action" :class="{ 'is-saved': job.saved }" type="button" @click="toggleFavorite(job)">{{ job.saved ? '已收藏' : '收藏岗位' }} <svg><use href="#i-arrow"/></svg></button>
+                <button class="job-card-action" type="button" @click="startInterviewForJob(job)">用这个岗位练习面试 <svg><use href="#i-arrow"/></svg></button>
               </div>
             </article>
 
@@ -69,7 +70,9 @@
 
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
+import { useRouter } from 'vue-router'
 import { addFavorite, fetchSources, importJob, matchJob, removeFavorite, runJobAgent, searchJobs } from '../api/jobs'
+import { newInterviewRoute } from '../interview/interviewNavigation.js'
 import { getAiKey, setAiKey } from '../api/client'
 import { getProfile } from '../utils/demoProfile'
 
@@ -77,6 +80,11 @@ import { getProfile } from '../utils/demoProfile'
 const SCORE_NOTICE_FALLBACK = '匹配度是资料贴合参考，不代表录取概率'
 
 const profile = ref(getProfile())
+const router = useRouter()
+
+function startInterviewForJob(job) {
+  if (job?.id) router.push(newInterviewRoute({ jobId: String(job.id) }))
+}
 
 const jobs = ref([])
 const loading = ref(false)

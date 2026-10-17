@@ -535,6 +535,7 @@ svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width:
 .conversation-message small, .conversation-role { color: #8a978a; font-size: 10px; }
 .message-speech { display: inline-flex; margin-top: 8px; font-size: 11px; }
 .conversation-message.is-pending { border-style: dashed; }
+.conversation-message.is-withdrawn { opacity: .72; border-color: #d8d1c5; background: #f5f2ec; }
 .conversation-message .algorithm-answer-text { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 4; }
 .conversation-latest { position: sticky; bottom: 8px; left: 50%; margin: 12px auto 0; padding: 8px 12px; border: 1px solid #dce7d6; border-radius: 20px; color: #526c4b; background: #fffefa; cursor: pointer; }
 .answer-editor { position: sticky; bottom: 0; z-index: 4; margin: 16px -22px 0; padding: 15px 22px 10px; border-top: 1px solid #e9ede4; background: rgba(255,254,250,.98); }

@@ -146,7 +146,7 @@ app:
     # 面试会话快照存放目录（相对 JVM 工作目录），重启后据此恢复。
     storage-dir: ${INTERVIEW_STORAGE_DIR:./data/interviews}
     # 阶段 A 新快照保留期：创建起 24 小时；历史功能交付后新会话默认 30 天。
-    retention-days: 1
+    retention-days: 30
     # 首题/后续出题：最多额外自动重试 5 次（总计最多 6 次模型请求）。
     max-retries: 5
     # 一次生成操作的总预算，含排队、每次调用与重试间隔。

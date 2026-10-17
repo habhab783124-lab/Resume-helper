@@ -23,3 +23,13 @@ test('represents an unconfirmed submission and generation status without fabrica
 test('finished sessions ignore a late active generation state', () => {
   assert.deepEqual(toConversationMessages({ ...session, status: 'FINISHED', currentQuestion: null }, null, 'GENERATING').map(item => item.id), ['q1:question', 'q1:answer', 'f1:question'])
 })
+
+test('only saved answers from a finished session or a closed QUICK group expose a root re-answer entry', () => {
+  const quick = { ...session, plan: { mode: 'QUICK' }, closedRootIds: ['q1'] }
+  const answer = toConversationMessages(quick).find(item => item.id === 'q1:answer')
+  assert.equal(answer.attemptEnabled, true)
+  assert.equal(answer.questionText, '主问题')
+  assert.equal(toConversationMessages({ ...quick, closedRootIds: [] }).find(item => item.id === 'q1:answer').attemptEnabled, false)
+  assert.equal(toConversationMessages({ ...quick, status: 'FINISHED' }).find(item => item.id === 'q1:answer').attemptEnabled, true)
+  assert.equal(toConversationMessages({ ...quick, plan: { mode: 'FULL' } }).find(item => item.id === 'q1:answer').attemptEnabled, false)
+})

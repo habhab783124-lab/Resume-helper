@@ -41,13 +41,17 @@ function mount(apiStub) {
     saveAnswer: apiStub.saveAnswer || (async (id, submission) => { lastSaveResult = await apiStub.answer(id, { questionId: submission.questionId, answer: submission.answer }); return lastSaveResult }),
     generate: apiStub.generate || (async () => lastSaveResult),
   }
+  const setupState = { source: ref(null), resumePreview: ref(null), targetRole: ref(''), jobDescription: ref(''), preferences: ref({}),
+    loadSource: async () => null, loadJob: async () => null, savePreparation() {}, restorePreparation() { return false },
+    clearPreparation() {}, switchScope() { return false } }
   const view = new Function(
-    'ref', 'computed', 'reactive', 'watch', 'nextTick', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', setupBody)(
+    'ref', 'computed', 'reactive', 'watch', 'nextTick', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'materialsApi', 'resumeApi', 'jobsApi', setupBody)(
     ref, computed, reactive, watch, nextTick, callback => mounted.push(callback), callback => unmounted.push(callback), () => api,
     drafts, () => '', () => 'demo-user',
     () => ({ query: {} }),
     () => ({ push: route => { events.push('route'); pushes.push(route) } }),
-    isNewInterviewRoute, () => fakeVoice, useInterviewPolling, useInterviewConversation, useInterviewFinish)
+    isNewInterviewRoute, () => fakeVoice, useInterviewPolling, useInterviewConversation, useInterviewFinish,
+    () => setupState, {}, {}, {})
   Object.assign(view, { pushes, events, mounted, unmounted, storeCalls })
   return view
 }

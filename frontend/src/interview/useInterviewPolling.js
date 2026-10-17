@@ -31,7 +31,8 @@ export function useInterviewPolling({ api, onSession = () => {}, onError = () =>
         const session = await api.getSession(sessionId, { signal: controller.signal })
         if (!running.value || generation !== current) return
         onSession(session)
-        if (session.status === 'FINISHED' || terminalGeneration.has(session.generation?.state)) {
+        const feedbackPending = Object.values(session.practiceFeedbacks || {}).some(item => ['QUEUED', 'RUNNING'].includes(item.status))
+        if (session.status === 'FINISHED' || terminalGeneration.has(session.generation?.state) && !feedbackPending) {
           stop()
           return
         }

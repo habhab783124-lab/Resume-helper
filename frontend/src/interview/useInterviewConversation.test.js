@@ -13,7 +13,7 @@ const savedSession = (sessionId = 's1', stateVersion = 2) => ({
   turns: [{ questionId: 'q1', question: '介绍项目', answer: '回答' }],
   generation: { generationId: 'g1', state: 'QUEUED', kind: 'NEXT', requestId: 'gen-1' }
 })
-function setup({ api = {}, draftStore = {} } = {}) {
+function setup({ api = {}, draftStore = {}, polling = null } = {}) {
   const calls = []; let id = 0
   const defaults = {
     saveAnswer: async (...args) => { calls.push(['saveAnswer', ...args]); return savedSession() },
@@ -21,7 +21,7 @@ function setup({ api = {}, draftStore = {} } = {}) {
     getSession: async (...args) => { calls.push(['getSession', ...args]); return savedSession() },
   }
   const drafts = { remove: (...args) => calls.push(['removeDraft', ...args]), save: (...args) => calls.push(['saveDraft', ...args]), ...draftStore }
-  const controller = useInterviewConversation({ api: { ...defaults, ...api }, drafts, ids: () => `id-${++id}` })
+  const controller = useInterviewConversation({ api: { ...defaults, ...api }, drafts, polling, ids: () => `id-${++id}` })
   controller.applySession(questionSession())
   controller.draft.value = '回答'
   return { controller, calls }
@@ -87,6 +87,18 @@ test('beginFinish fences a late generation response and cancelFinish resumes the
   assert.equal(controller.phase.value, 'GENERATING')
 })
 
+test('replacement submits a reason, preserves the source draft, and polls the accepted operation', async () => {
+  const calls = []
+  const replacementPending = { ...questionSession(), replacements: { q1: { status: 'RUNNING', requestId: 'id-1' } } }
+  const polling = { start: id => calls.push(['poll', id]) }
+  const { controller, calls: recorded } = setup({ api: { replace: async (...args) => { calls.push(['replace', ...args]); return replacementPending } }, polling })
+  controller.draft.value = '经历草稿'
+  assert.equal(await controller.replace('q1', '我没有参与此项目'), true)
+  assert.deepEqual(recorded.find(call => call[0] === 'saveDraft').slice(1), ['s1', 'q1', { text: '经历草稿' }])
+  assert.equal(calls.find(call => call[0] === 'replace')[2].reason, '我没有参与此项目')
+  assert.deepEqual(calls.find(call => call[0] === 'poll'), ['poll', 's1'])
+})
+
 test('double send is coalesced into one save and one generation', async () => {
   let release; const held = new Promise(resolve => { release = resolve })
   const { controller, calls } = setup({ api: { saveAnswer: async (...args) => { calls.push(['saveAnswer', ...args]); await held; return savedSession() } } })
@@ -127,4 +139,72 @@ test('same-session snapshots cannot move the authoritative state version backwar
   controller.applySession(questionSession('s1', 9))
   assert.equal(controller.applySession(questionSession('s1', 8)), false)
   assert.equal(controller.session.value.stateVersion, 9)
+})
+
+test('QUICK waits after saving an answer until the user explicitly requests the next question', async () => {
+  const quickSaved = { ...savedSession(), plan: { mode: 'QUICK' }, generation: null }
+  const next = { ...questionSession('s1', 3), plan: { mode: 'QUICK' }, currentQuestion: { questionId: 'q2', question: '下一题' },
+    turns: [...quickSaved.turns, { questionId: 'q2', question: '下一题', answer: null }] }
+  const { controller, calls } = setup({ api: {
+    saveAnswer: async (...args) => { calls.push(['saveAnswer', ...args]); return quickSaved },
+    generate: async (...args) => { calls.push(['generate', ...args]); return next }
+  } })
+  controller.session.value.plan = { mode: 'QUICK' }
+  await controller.send()
+  assert.equal(controller.session.value.currentQuestion, null)
+  assert.equal(controller.phase.value, 'ANSWERING')
+  assert.equal(calls.filter(call => call[0] === 'generate').length, 0)
+  await controller.retryGeneration()
+  assert.equal(controller.session.value.currentQuestion.questionId, 'q2')
+  assert.equal(calls.filter(call => call[0] === 'generate').length, 1)
+})
+
+test('skipping closes the selected question and FULL immediately requests a next generation', async () => {
+  const skipped = { ...questionSession('s1', 2), currentQuestion: null, revision: 3, generation: null,
+    turns: [{ questionId: 'q1', question: '当前题', answer: null }] }
+  const next = { ...questionSession('s1', 4), currentQuestion: { questionId: 'q2', question: '下一题' },
+    turns: [...skipped.turns, { questionId: 'q2', question: '下一题', answer: null }] }
+  const { controller, calls } = setup({ api: {
+    skip: async (...args) => { calls.push(['skip', ...args]); return skipped },
+    generate: async (...args) => { calls.push(['generate', ...args]); return next },
+  } })
+  assert.equal(await controller.skip('q1'), true)
+  assert.equal(calls[0][0], 'skip')
+  assert.equal(calls[0][2].questionId, 'q1')
+  assert.equal(calls[1][0], 'generate')
+  assert.equal(controller.session.value.currentQuestion.questionId, 'q2')
+})
+
+test('clarification requests an explanation for the current question without changing its draft', async () => {
+  let request
+  const { controller, calls } = setup({ api: {
+    clarify: async (...args) => { calls.push(['clarify', ...args]); request = args[1]; return {
+      ...questionSession('s1', 2),
+      clarifications: { q1: { requestId: request.requestId, status: 'RUNNING', text: null, error: null } },
+    } },
+  } })
+  controller.draft.value = '正在写的回答草稿'
+  assert.equal(await controller.clarify(), true)
+  assert.equal(calls.filter(call => call[0] === 'clarify').length, 1)
+  assert.equal(request.questionId, 'q1')
+  assert.equal(controller.draft.value, '正在写的回答草稿')
+  assert.equal(controller.session.value.currentQuestion.questionId, 'q1')
+})
+
+test('QUICK teaching feedback closes the saved root and starts polling its independent assessment', async () => {
+  const starts = []
+  const polling = { start: id => starts.push(id) }
+  const { controller, calls } = setup({ polling, api: { practiceFeedback: async (...args) => {
+    calls.push(['practiceFeedback', ...args])
+    return { ...savedSession('s1', 3), generation: { generationId: 'g1', state: 'SUCCEEDED' },
+      plan: { mode: 'QUICK' }, practiceFeedbacks: { q1: { requestId: args[1].requestId, status: 'QUEUED' } } }
+  } } })
+  controller.applySession({ ...savedSession(), generation: null, plan: { mode: 'QUICK' },
+    questionMetadata: { q1: { kind: 'MAIN' } } })
+  assert.equal(await controller.practiceFeedback('q1'), true)
+  const call = calls.find(item => item[0] === 'practiceFeedback')
+  assert.equal(call[1], 's1')
+  assert.deepEqual(call[2], { questionId: 'q1', requestId: 'id-1', expectedRevision: 2 })
+  assert.equal(controller.session.value.practiceFeedbacks.q1.status, 'QUEUED')
+  assert.deepEqual(starts, ['s1'])
 })

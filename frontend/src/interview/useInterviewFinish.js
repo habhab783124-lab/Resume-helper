@@ -1,12 +1,12 @@
-import { ref } from 'vue'
+import { ref, unref } from 'vue'
 
 export function useInterviewFinish({ isActive = () => false, voice = {}, open = ref(false) } = {}) {
   const finishing = ref(false)
   async function requestFinish() {
     if (!isActive() || finishing.value) return false
-    if (voice.recorderState?.value === 'recording') await voice.stopRecording?.({ transcribe: false })
-    else if (voice.recorderState?.value === 'requesting-mic') voice.cancelRecording?.()
-    if (voice.transcribing?.value) voice.cancelTranscription?.()
+    if (unref(voice.recorderState) === 'recording') await voice.stopRecording?.({ transcribe: false })
+    else if (unref(voice.recorderState) === 'requesting-mic') voice.cancelRecording?.()
+    if (unref(voice.transcribing)) voice.cancelTranscription?.()
     open.value = true
     return true
   }

@@ -4,9 +4,11 @@
     "model and speech checks use separate credentials at the selected backend",
     "settings survives reload and remains usable at390px without horizontal overflow",
     "no microphone or TTS request before explicit click",
-    "setup fixes 12+1 questions and explains the 80/20 split",
+    "new setup defaults to QUICK and exposes explicit FULL selection",
     "unified material response renders original resume text",
+    "FULL plan preview shows coverage, specialty and follow-up budget before confirmation",
     "start renders generated question and voice controls without scoring criteria",
+    "clarification explains task intent while preserving the typed draft and question",
     "stop and replay use cached native MP3 without second synthesis",
     "recording locks answer and submit while keeping finish available",
     "cancel releases native tracks and allows re-record",
@@ -25,6 +27,7 @@
     "restored FINISHED history retains canonical algorithm title and official source link",
     "report failure retains saved question-answer history",
     "GET retry renders weighted report and recovered target role",
+    "report content order and evidence-backed priority are visible",
     "report export menu exposes Markdown and PDF choices",
     "PDF export completes without a report error",
     "report score and feedback remain visible in print media",
@@ -40,10 +43,24 @@
     "generation failure keeps the saved answer in history and offers generation-only retry",
     "finish after generation failure explicitly preserves the accepted answer",
     "preserve finish includes the accepted answer in report session",
+    "manual generation retry resumes the saved answer without saving it again",
+    "two transient generation failures recover automatically without duplicate submit or generation requests",
+    "five automatic retries stop after six total failed attempts and preserve the accepted answer",
+    "expired generation budget stops before another automatic retry",
+    "non-retryable configuration failure makes exactly one attempt",
+    "finishing during automatic retry cancels it and preserves the accepted answer",
     "submit-and-finish saves answer before ending and routing",
     "discard finish does not submit unsent local draft",
+    "lost finish response reads back FINISHED state and routes with the accepted answer",
+    "ending during first-question generation cancels opening and keeps the empty session ended",
+    "finishing during recording keeps a local replay and does not auto-upload audio",
+    "discarding a local draft after recording ends without submitting it",
+    "finish requested during ASR retains source text and permits a review preview",
     "disabled ASR/TTS leaves ordinary text submission available",
+    "complete review summary quotes original answer and lists a concrete next action",
     "13 root weights sum to100 with algorithm20 and exact weighted total82",
+    "report offers independent re-answer versions without changing the original total score",
+    "report selection prepares a three-question focused plan and starts an independent round",
     "refresh reuses cached scoring via GET",
     "weighted report has no mobile horizontal overflow",
     "early finish labels answered scope and unanswered rows without zero scores",
@@ -62,16 +79,1447 @@
     "case report has13 roots, fixed20 percent and professional feedback without an algorithm link",
     "case retry targets only its missing assessment and retains fixed20 percent",
     "early non-coding report reserves specialty20 percent and has no complete total",
+    "FULL plan preview shows coverage, specialty and follow-up budget before confirmation",
     "a started round keeps its session across a reload instead of being lost to intent=new",
     "typed draft survives a settings round trip and a hard reload",
     "a failed submit keeps the question draft on disk and reports no storage problem",
+    "lost save response reuses the idempotency key and retains exactly one committed answer",
+    "unavailable local draft storage is disclosed without disabling text answering",
     "a newer draft from another tab prompts instead of overwriting the current input",
     "question speech sends only question ID route without answers or contracts",
+    "FULL plan preview shows coverage, specialty and follow-up budget before confirmation",
+    "material library entry reuses the stored source without uploading it again",
+    "FULL plan preview shows coverage, specialty and follow-up budget before confirmation",
+    "saved resume version entry previews the version without running resume extraction",
+    "job entry loads full JD into editable setup while direct entry remains available",
+    "QUICK saves each answer and waits for explicit next-question choice through completion",
+    "FULL skip immediately generates the next question without counting a completed answer",
+    "history lists, delete confirmation, refresh and logout draft cleanup",
     "application API calls carry common demo identity; backend probe sends no credentials",
     "text settings shared into report; speech carries no model/provider credentials",
     "no uncaught browser or mock-server errors"
   ],
   "errors": [],
+  "dialogs": [
+    {
+      "type": "confirm",
+      "message": "删除「Java 后端」这轮面试？"
+    }
+  ],
+  "browserRequests": [
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/clarifications"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/clarifications"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/questions/local-session-1-q1/speech"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/questions/local-session-1-q1/speech"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/transcriptions"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/transcriptions"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/transcriptions"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/transcriptions"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/transcriptions"
+    },
+    {
+      "failed": "net::ERR_ABORTED",
+      "requestId": "68170.1755"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/transcriptions"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-1"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/transcriptions"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/transcriptions"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/transcriptions"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/finish"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/finish"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-2/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-3"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-3"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-3/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-3/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-3/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-3/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-3/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4/generations"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-4"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5/generations"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-5"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-6"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-6"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-6/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-6/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-6/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-6/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-7"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-7"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-7/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-7/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-7/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-7/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/generations"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/finish"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/finish"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-8/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-9"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-9"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-9/finish"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-9/finish"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-9/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-9"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-9/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-10"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-10"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-10/finish"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-10/finish"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-10/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-10"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-10/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-11"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-11"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-11/finish"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-11/finish"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-11/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-11/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-11"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12"
+    },
+    {
+      "failed": "net::ERR_ABORTED",
+      "requestId": "68170.8049"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12/finish"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12/finish"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-12/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-13"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-13"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-13/finish"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-13/finish"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-13/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-13"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-13/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14/transcriptions"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14/transcriptions"
+    },
+    {
+      "failed": "net::ERR_ABORTED",
+      "requestId": "68170.8793"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14/transcriptions"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14/finish"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14/finish"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-14/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-15"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-15"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-15/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-15/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-15/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-15/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/attempts?questionId=local-session-16-q1"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/attempts?questionId=local-session-16-q1"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/attempts"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/attempts"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/practice-plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/practice-plans"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/plans/focused-1"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/plans/focused-1"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/generations"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-17"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-18/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-18"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-18/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-18"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-19/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-19"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-19/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-19"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-19/report/retry"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-19/report/retry"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-19/report/retry"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-20/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-20"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-20/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-20"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-21/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-21"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-21/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-21"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-22/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-22"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-22/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-22"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/answers"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-23"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-24/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-24"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-24/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-24"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-24/report/retry"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-24/report/retry"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-25/report?async=true"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-25"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-25/report?async=true"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-25"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-16"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-26"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-26"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-27"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-27"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-27"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-27"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-27/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-27/answers"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-27"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-28"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-28"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-28/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-28/answers"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-28/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-28/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-29"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-29"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-30"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-30"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/skip"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/skip"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/feedback"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/feedback"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/attempts?questionId=local-session-33-q2"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/attempts?questionId=local-session-33-q2"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/attempts"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/attempts"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/feedback"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-33/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/source/preview"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/plans"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/skip"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/skip"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/generations"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/answers"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/generations"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/replacements"
+    },
+    {
+      "method": "POST",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34/replacements"
+    },
+    {
+      "method": "OPTIONS",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34"
+    },
+    {
+      "method": "GET",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34"
+    },
+    {
+      "method": "DELETE",
+      "url": "http://127.0.0.1:63872/api/interviews/local-session-34"
+    }
+  ],
   "calls": [
     {
       "method": "GET",
@@ -109,15 +1557,70 @@
     },
     {
       "method": "POST",
-      "path": "/api/materials",
-      "bytes": 244,
+      "path": "/api/materials/text",
+      "bytes": 92,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/plans",
+      "bytes": 239,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        },
+        "targetRole": "",
+        "jobDescription": "",
+        "careerStage": "CAMPUS",
+        "level": "STANDARD",
+        "mode": "FULL",
+        "mainCount": 12,
+        "specialtyPreference": "AUTO",
+        "requestId": "27ce43ce-ca30-47c6-b291-4a8ee0240782"
+      },
       "identity": "demo-user",
       "hasTextSettings": true
     },
     {
       "method": "POST",
       "path": "/api/interviews",
-      "bytes": 130,
+      "bytes": 134,
+      "json": {
+        "allowAlgorithmRepeat": false,
+        "planId": "local-plan-1",
+        "planVersion": 1,
+        "requestId": "f89d43d2-f4bd-411e-b687-f39a387dbd97",
+        "async": true
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-1/clarifications",
+      "bytes": 86,
       "identity": "demo-user",
       "hasTextSettings": true
     },
@@ -137,7 +1640,7 @@
         "name": "answer.webm",
         "size": 13499,
         "questionId": "local-session-1-q1",
-        "requestId": "527a2e4c-088e-4b13-b447-ab875a72f8ab"
+        "requestId": "caa0e258-818c-4a1f-bf70-59d28ceca2c5"
       },
       "responded": true,
       "identity": "demo-user",
@@ -152,7 +1655,7 @@
         "name": "answer.webm",
         "size": 13499,
         "questionId": "local-session-1-q1",
-        "requestId": "e53ac6a0-9b1d-4704-98aa-8e342fef5cdf"
+        "requestId": "cc8574ac-9020-48b3-96cf-a9a37371bc5d"
       },
       "responded": true,
       "identity": "demo-user",
@@ -167,7 +1670,7 @@
         "name": "answer.webm",
         "size": 13499,
         "questionId": "local-session-1-q1",
-        "requestId": "774f3742-9179-4099-9db4-cb8b752370df"
+        "requestId": "883c62d4-25bb-4b67-a4b3-59812ebd11b7"
       },
       "responded": true,
       "identity": "demo-user",
@@ -179,7 +1682,7 @@
       "bytes": 125,
       "answer": {
         "questionId": "local-session-1-q1",
-        "submissionId": "701c5b70-0b3a-4352-bc33-1208f1be3989",
+        "submissionId": "53b5209c-c337-45d1-826c-b4e007b827cb",
         "answer": "编辑后确认的回答"
       },
       "identity": "demo-user",
@@ -201,7 +1704,7 @@
         "name": "answer.webm",
         "size": 13499,
         "questionId": "local-session-1-f1",
-        "requestId": "32971806-c4bd-412b-8c9e-b8787a231050"
+        "requestId": "997597f9-7fd6-43ff-ba7a-75afe204cec4"
       },
       "responded": true,
       "identity": "demo-user",
@@ -216,7 +1719,7 @@
         "name": "answer.webm",
         "size": 13499,
         "questionId": "local-session-1-f1",
-        "requestId": "ef680874-a1dd-4c03-aabc-d3da24da32ef"
+        "requestId": "638b14a1-6111-4e04-bf65-7314f943eb53"
       },
       "responded": true,
       "identity": "demo-user",
@@ -228,7 +1731,7 @@
       "bytes": 125,
       "answer": {
         "questionId": "local-session-1-f1",
-        "submissionId": "53398b35-f05c-480b-8598-2eb1e6d2d0d7",
+        "submissionId": "094c722b-d80a-468d-8ef7-2724f5968b8e",
         "answer": "取消后保留的文字"
       },
       "identity": "demo-user",
@@ -247,7 +1750,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q2",
-        "submissionId": "a2f8fc13-8e1d-4d0b-b670-2a9db47da8f8",
+        "submissionId": "492717b8-a91b-4c30-a8b1-f14997c82689",
         "answer": "主问题 2 的回答"
       },
       "identity": "demo-user",
@@ -266,7 +1769,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q3",
-        "submissionId": "55cb7eb8-dac8-4547-9d16-15deb934709a",
+        "submissionId": "56b26d38-9076-4edc-99bf-046af928c20e",
         "answer": "主问题 3 的回答"
       },
       "identity": "demo-user",
@@ -285,7 +1788,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q4",
-        "submissionId": "1001b54a-0abe-4146-9709-fe628c206cd7",
+        "submissionId": "473df06e-d8a6-4769-a423-b518062ae300",
         "answer": "主问题 4 的回答"
       },
       "identity": "demo-user",
@@ -304,7 +1807,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q5",
-        "submissionId": "dd3c0a13-6fb3-498d-b57c-ddda23b999df",
+        "submissionId": "7ae0f75f-d4b0-4e8d-b574-3276d2973d5f",
         "answer": "主问题 5 的回答"
       },
       "identity": "demo-user",
@@ -323,7 +1826,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q6",
-        "submissionId": "c1eaf03f-83f8-4d54-b83c-ce0436af02da",
+        "submissionId": "1f26e71f-52c3-4699-99da-302d183d72b1",
         "answer": "主问题 6 的回答"
       },
       "identity": "demo-user",
@@ -342,7 +1845,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q7",
-        "submissionId": "ffbbe61d-fbd8-48d4-a0fe-73f8b3a898de",
+        "submissionId": "bc4e9d3c-3eeb-4cf2-91da-b98d0ba0bb1d",
         "answer": "主问题 7 的回答"
       },
       "identity": "demo-user",
@@ -361,7 +1864,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q8",
-        "submissionId": "18dfe6f4-2757-4620-b5a2-81fcfc50148b",
+        "submissionId": "b7cf28b4-6d01-4ae3-94d4-811e7126a34e",
         "answer": "主问题 8 的回答"
       },
       "identity": "demo-user",
@@ -380,7 +1883,7 @@
       "bytes": 122,
       "answer": {
         "questionId": "local-session-1-q9",
-        "submissionId": "4bee55b1-6900-4102-9dcb-fa28f9d84901",
+        "submissionId": "71b2032d-c21f-48b0-aab2-ef9c40ca8db2",
         "answer": "主问题 9 的回答"
       },
       "identity": "demo-user",
@@ -399,7 +1902,7 @@
       "bytes": 124,
       "answer": {
         "questionId": "local-session-1-q10",
-        "submissionId": "bbc93643-17a5-4ea4-a715-1add4c504f1d",
+        "submissionId": "ed32332a-6ec8-435a-a688-3e9db2818598",
         "answer": "主问题 10 的回答"
       },
       "identity": "demo-user",
@@ -418,7 +1921,7 @@
       "bytes": 124,
       "answer": {
         "questionId": "local-session-1-q11",
-        "submissionId": "1b10f89a-4375-4205-942e-12965eeca838",
+        "submissionId": "8feb4684-6108-4984-9d75-19dc91887793",
         "answer": "主问题 11 的回答"
       },
       "identity": "demo-user",
@@ -437,7 +1940,7 @@
       "bytes": 124,
       "answer": {
         "questionId": "local-session-1-q12",
-        "submissionId": "3c835ac4-f526-458a-b22e-abdcc5ba3b57",
+        "submissionId": "88e7d51b-bacd-4232-b875-f5db5a1adc73",
         "answer": "主问题 12 的回答"
       },
       "identity": "demo-user",
@@ -456,7 +1959,7 @@
       "bytes": 204,
       "answer": {
         "questionId": "local-session-1-q13",
-        "submissionId": "929d6c1f-2358-47b1-98c4-c9dc8aa38404",
+        "submissionId": "22a0b95a-b7a6-40c9-ad85-cd501e6bcd1d",
         "answer": "使用哈希表，逐个查找差值。\nfunction twoSum(nums, target) { /* O(n) time, O(n) space */ }"
       },
       "identity": "demo-user",
@@ -523,6 +2026,19 @@
       "path": "/api/materials/local-material",
       "bytes": 0,
       "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
       "hasTextSettings": false
     },
     {
@@ -562,6 +2078,26 @@
     },
     {
       "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
       "path": "/api/interview-speech/capabilities",
       "bytes": 0,
       "identity": "demo-user",
@@ -577,13 +2113,13 @@
     {
       "method": "POST",
       "path": "/api/interviews/local-session-2/transcriptions",
-      "bytes": 13943,
+      "bytes": 14909,
       "upload": {
         "type": "audio/webm;codecs=opus",
         "name": "answer.webm",
-        "size": 13499,
+        "size": 14465,
         "questionId": "local-session-2-q1",
-        "requestId": "b29c5d69-7c9a-4ecc-92ab-1e589c6f98aa"
+        "requestId": "84bcbb2c-9a7a-43ba-8192-6639b1b5199d"
       },
       "responded": true,
       "identity": "demo-user",
@@ -592,13 +2128,13 @@
     {
       "method": "POST",
       "path": "/api/interviews/local-session-2/transcriptions",
-      "bytes": 13943,
+      "bytes": 14909,
       "upload": {
         "type": "audio/webm;codecs=opus",
         "name": "answer.webm",
-        "size": 13499,
+        "size": 14465,
         "questionId": "local-session-2-q1",
-        "requestId": "df3fc4bd-728a-4008-a2f2-f39d69607977"
+        "requestId": "1430661a-879d-4c54-8cab-20cee1541e93"
       },
       "responded": true,
       "identity": "demo-user",
@@ -617,7 +2153,7 @@
       "bytes": 116,
       "answer": {
         "questionId": "local-session-2-q1",
-        "submissionId": "0fc18908-9f56-4095-bd65-e4dbb8bf7c21",
+        "submissionId": "24c5987b-b4d2-440a-a6a8-a14e00e14414",
         "answer": "未提交草稿"
       },
       "identity": "demo-user",
@@ -667,22 +2203,27 @@
     },
     {
       "method": "POST",
-      "path": "/api/interviews/local-session-3/finish",
-      "bytes": 191,
+      "path": "/api/interviews/local-session-3/answers",
+      "bytes": 128,
+      "answer": {
+        "questionId": "local-session-3-q1",
+        "submissionId": "bc68c9d1-83fd-417e-bea8-dff412dbfcf9",
+        "answer": "等待手动继续的回答"
+      },
       "identity": "demo-user",
-      "hasTextSettings": false
+      "hasTextSettings": true
     },
     {
-      "method": "GET",
-      "path": "/api/interviews/local-session-3",
-      "bytes": 0,
+      "method": "POST",
+      "path": "/api/interviews/local-session-3/generations",
+      "bytes": 66,
       "identity": "demo-user",
-      "hasTextSettings": false
+      "hasTextSettings": true
     },
     {
-      "method": "GET",
-      "path": "/api/interviews/local-session-3/report",
-      "bytes": 0,
+      "method": "POST",
+      "path": "/api/interviews/local-session-3/generations",
+      "bytes": 66,
       "identity": "demo-user",
       "hasTextSettings": true
     },
@@ -702,8 +2243,27 @@
     },
     {
       "method": "POST",
-      "path": "/api/interviews/local-session-4/finish",
-      "bytes": 52,
+      "path": "/api/interviews/local-session-4/answers",
+      "bytes": 128,
+      "answer": {
+        "questionId": "local-session-4-q1",
+        "submissionId": "7f4ad92b-8b42-49bf-9975-6deb11e2a181",
+        "answer": "两次暂时失败后恢复"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-4/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-4",
+      "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
     },
@@ -716,10 +2276,10 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-4/report",
+      "path": "/api/interviews/local-session-4",
       "bytes": 0,
       "identity": "demo-user",
-      "hasTextSettings": true
+      "hasTextSettings": false
     },
     {
       "method": "GET",
@@ -738,11 +2298,11 @@
     {
       "method": "POST",
       "path": "/api/interviews/local-session-5/answers",
-      "bytes": 116,
+      "bytes": 122,
       "answer": {
         "questionId": "local-session-5-q1",
-        "submissionId": "cedd3327-fbf4-4c4b-8398-1b1291117296",
-        "answer": "纯文字回答"
+        "submissionId": "a8608ac6-30b8-422c-91e9-54517d168c00",
+        "answer": "六次失败后停止"
       },
       "identity": "demo-user",
       "hasTextSettings": true
@@ -756,10 +2316,52 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-6/report",
+      "path": "/api/interviews/local-session-5",
       "bytes": 0,
       "identity": "demo-user",
-      "hasTextSettings": true
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-5",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-5",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-5",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-5",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-5",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
     },
     {
       "method": "GET",
@@ -769,29 +2371,107 @@
       "hasTextSettings": false
     },
     {
-      "method": "GET",
-      "path": "/api/interviews/local-session-6/report",
-      "bytes": 0,
+      "method": "POST",
+      "path": "/api/interviews/local-session-6/answers",
+      "bytes": 119,
+      "answer": {
+        "questionId": "local-session-6-q1",
+        "submissionId": "9d12100d-aafe-48c0-84ab-e4a0c2193a97",
+        "answer": "预算到期停止"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-6/generations",
+      "bytes": 66,
       "identity": "demo-user",
       "hasTextSettings": true
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-6",
+      "path": "/api/interview-speech/capabilities",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/interviews/local-session-7/report",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": true
     },
     {
       "method": "GET",
       "path": "/api/interviews/local-session-7",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-7/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-7-q1",
+        "submissionId": "d7e96ae0-20f9-446c-8be2-c02e2d375ef4",
+        "answer": "配置失败不重试"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-7/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-8",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-8/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-8-q1",
+        "submissionId": "cea74d44-7f17-475d-95c0-470fe9581e28",
+        "answer": "重试等待时结束"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-8/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-8",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-8/finish",
+      "bytes": 52,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-8",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
@@ -805,30 +2485,31 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-8",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-9",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
     },
     {
       "method": "POST",
-      "path": "/api/interviews/local-session-8/report/retry",
-      "bytes": 65,
-      "retryQuestions": [
-        "local-session-8-q2"
-      ],
+      "path": "/api/interviews/local-session-9/finish",
+      "bytes": 191,
       "identity": "demo-user",
-      "hasTextSettings": true
+      "hasTextSettings": false
     },
     {
-      "method": "POST",
-      "path": "/api/interviews/local-session-8/report/retry",
-      "bytes": 65,
-      "retryQuestions": [
-        "local-session-8-q2"
-      ],
+      "method": "GET",
+      "path": "/api/interviews/local-session-9",
+      "bytes": 0,
       "identity": "demo-user",
-      "hasTextSettings": true
+      "hasTextSettings": false
     },
     {
       "method": "GET",
@@ -839,7 +2520,28 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-9",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-10",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-10/finish",
+      "bytes": 52,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-10",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
@@ -853,7 +2555,35 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-10",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-11",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-11/finish",
+      "bytes": 198,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-11/finish",
+      "bytes": 198,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-11",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
@@ -867,13 +2597,6 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-11",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": false
-    },
-    {
-      "method": "GET",
       "path": "/api/interview-speech/capabilities",
       "bytes": 0,
       "identity": "demo-user",
@@ -887,263 +2610,11 @@
       "hasTextSettings": false
     },
     {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q1",
-        "submissionId": "2f0a29f5-3504-4398-b24e-374fb687d6c1",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
+      "method": "GET",
+      "path": "/api/interviews/local-session-12",
+      "bytes": 0,
       "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-f1",
-        "submissionId": "cfb46459-e721-49a7-83cf-5380369bc787",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q2",
-        "submissionId": "60267291-b6b0-44ef-a597-5b63e014a35d",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q3",
-        "submissionId": "25271a05-c299-4b05-9f99-64dfb3b3f2ef",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q4",
-        "submissionId": "3fab4c9d-b135-4c58-ba3d-9c4ccee12ac7",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q5",
-        "submissionId": "4f5c3532-d45f-4c7a-a6b0-1cf18cfb5cab",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q6",
-        "submissionId": "28b00594-4518-4090-9c8a-f8609fb141c6",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q7",
-        "submissionId": "3b411921-78d5-4e5a-94b1-814b85e1400c",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q8",
-        "submissionId": "a17d127d-82ec-4827-9123-8349c070f5c5",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 195,
-      "answer": {
-        "questionId": "local-session-12-q9",
-        "submissionId": "8507edde-9a88-440a-b5bf-fa28d4ad4a5a",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 196,
-      "answer": {
-        "questionId": "local-session-12-q10",
-        "submissionId": "3f115bdb-f7b9-4d0f-80c3-009b32f26def",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 196,
-      "answer": {
-        "questionId": "local-session-12-q11",
-        "submissionId": "99ab2aa9-533a-44ed-9e58-0ea8f68ff82e",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 196,
-      "answer": {
-        "questionId": "local-session-12-q12",
-        "submissionId": "be061652-5bb5-4d3a-9bb7-e8dc7099b207",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/generations",
-      "bytes": 66,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "POST",
-      "path": "/api/interviews/local-session-12/answers",
-      "bytes": 196,
-      "answer": {
-        "questionId": "local-session-12-q13",
-        "submissionId": "37a9f5eb-24e9-478c-9e83-ef0b0068e91d",
-        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
-      },
-      "identity": "demo-user",
-      "hasTextSettings": true
+      "hasTextSettings": false
     },
     {
       "method": "GET",
@@ -1153,9 +2624,9 @@
       "hasTextSettings": false
     },
     {
-      "method": "GET",
-      "path": "/api/interview-speech/capabilities",
-      "bytes": 0,
+      "method": "POST",
+      "path": "/api/interviews/local-session-12/finish",
+      "bytes": 52,
       "identity": "demo-user",
       "hasTextSettings": false
     },
@@ -1175,10 +2646,10 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-13/report",
+      "path": "/api/interview-speech/capabilities",
       "bytes": 0,
       "identity": "demo-user",
-      "hasTextSettings": true
+      "hasTextSettings": false
     },
     {
       "method": "GET",
@@ -1189,27 +2660,24 @@
     },
     {
       "method": "POST",
-      "path": "/api/interviews/local-session-13/report/retry",
-      "bytes": 65,
-      "retryQuestions": [
-        "local-session-13-q13"
-      ],
+      "path": "/api/interviews/local-session-13/finish",
+      "bytes": 52,
       "identity": "demo-user",
-      "hasTextSettings": true
+      "hasTextSettings": false
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-14/report",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": true
-    },
-    {
-      "method": "GET",
-      "path": "/api/interviews/local-session-14",
+      "path": "/api/interviews/local-session-13",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-13/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
     },
     {
       "method": "GET",
@@ -1220,22 +2688,59 @@
     },
     {
       "method": "GET",
-      "path": "/api/interviews/local-session-6",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/materials/local-material",
+      "path": "/api/interviews/local-session-14",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false
     },
     {
       "method": "POST",
-      "path": "/api/interviews",
-      "bytes": 141,
+      "path": "/api/interviews/local-session-14/transcriptions",
+      "bytes": 13944,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-14-q1",
+        "requestId": "5f1882e6-db1a-4e3b-8ad1-2b5d1ba120c3"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-14/transcriptions",
+      "bytes": 13944,
+      "upload": {
+        "type": "audio/webm;codecs=opus",
+        "name": "answer.webm",
+        "size": 13499,
+        "questionId": "local-session-14-q1",
+        "requestId": "b9c7de1a-7afa-4ebe-990c-905bc35d3e77"
+      },
+      "responded": true,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-14/finish",
+      "bytes": 52,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-14",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-14/report",
+      "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": true
     },
@@ -1254,56 +2759,28 @@
       "hasTextSettings": false
     },
     {
-      "method": "GET",
-      "path": "/api/interview-speech/capabilities",
-      "bytes": 0,
+      "method": "POST",
+      "path": "/api/interviews/local-session-15/answers",
+      "bytes": 117,
+      "answer": {
+        "questionId": "local-session-15-q1",
+        "submissionId": "403f6506-f5f0-4ebe-a088-6800c36444dc",
+        "answer": "纯文字回答"
+      },
       "identity": "demo-user",
-      "hasTextSettings": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/interviews/local-session-16",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/interview-speech/capabilities",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/interviews/local-session-16",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/interview-speech/capabilities",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": false
-    },
-    {
-      "method": "GET",
-      "path": "/api/interviews/local-session-16",
-      "bytes": 0,
-      "identity": "demo-user",
-      "hasTextSettings": false
+      "hasTextSettings": true
     },
     {
       "method": "POST",
-      "path": "/api/interviews/local-session-16/answers",
-      "bytes": 126,
-      "answer": {
-        "questionId": "local-session-16-q1",
-        "submissionId": "3eaaec72-0de8-47d6-9370-2e573a740947",
-        "answer": "提交失败后应保留"
-      },
+      "path": "/api/interviews/local-session-15/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16/report",
+      "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": true
     },
@@ -1316,6 +2793,38 @@
     },
     {
       "method": "GET",
+      "path": "/api/interviews/local-session-16/attempts",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-16/attempts",
+      "bytes": 153,
+      "json": {
+        "questionId": "local-session-16-q1",
+        "requestId": "0a9fdc3d-a3bf-405c-8104-8e87e573a576",
+        "answer": "报告页重答：加入具体结果和验证证据。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-16/practice-plans",
+      "bytes": 87,
+      "json": {
+        "issueIds": [
+          "local-session-16-q1"
+        ],
+        "requestId": "80adc431-de5d-40ff-a075-2c09e8d92561"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
       "path": "/api/interview-speech/capabilities",
       "bytes": 0,
       "identity": "demo-user",
@@ -1323,7 +2832,1301 @@
     },
     {
       "method": "GET",
+      "path": "/api/interviews/plans/focused-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 131,
+      "json": {
+        "allowAlgorithmRepeat": false,
+        "planId": "focused-1",
+        "planVersion": 1,
+        "requestId": "b866951d-4ec8-4d9f-b4c6-6abd94638004",
+        "async": true
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-17/answers",
+      "bytes": 152,
+      "answer": {
+        "questionId": "local-session-17-q1",
+        "submissionId": "738b7b5d-93f6-41c9-bbc4-3f0255ea49b8",
+        "answer": "短练新回答 1：验证结果并说明依据。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-17/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-17/answers",
+      "bytes": 152,
+      "answer": {
+        "questionId": "local-session-17-q2",
+        "submissionId": "4434b138-ed10-466f-bd0f-f3aac5b02789",
+        "answer": "短练新回答 2：验证结果并说明依据。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-17/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-17/answers",
+      "bytes": 152,
+      "answer": {
+        "questionId": "local-session-17-q3",
+        "submissionId": "3b584223-e7f1-491e-9a06-0f9a0e366aeb",
+        "answer": "短练新回答 3：验证结果并说明依据。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-17/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-17/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
       "path": "/api/interviews/local-session-17",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-18/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-18",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-19/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-19",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-19/report/retry",
+      "bytes": 65,
+      "retryQuestions": [
+        "local-session-19-q2"
+      ],
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-19/report/retry",
+      "bytes": 65,
+      "retryQuestions": [
+        "local-session-19-q2"
+      ],
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-20/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-20",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-21/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-21",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-22/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-22",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-23",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q1",
+        "submissionId": "98fda7bf-d230-4fd7-b20c-e17089a73770",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-f1",
+        "submissionId": "a5324fbc-e3fb-45bb-af9a-a2c792801a1e",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q2",
+        "submissionId": "452f9102-555d-40eb-9e35-500bbb1b8a40",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q3",
+        "submissionId": "9e2c1bd4-bc6c-451e-8df0-69d3e5f5aed5",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q4",
+        "submissionId": "904303c0-0b00-45a8-82b9-b2b4fde95f54",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q5",
+        "submissionId": "60558fbb-32e6-46c1-897a-4181aa75149b",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q6",
+        "submissionId": "45134295-ff38-456c-8db8-1ae71fd921c8",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q7",
+        "submissionId": "bd08cdcf-2a79-4768-91c1-2c9ba25ed5df",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q8",
+        "submissionId": "505515a4-3e5c-42d4-ab38-2f95cdb3e52f",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 195,
+      "answer": {
+        "questionId": "local-session-23-q9",
+        "submissionId": "1384e3c2-982c-4ed9-b78e-36581cd3f3a0",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-23-q10",
+        "submissionId": "e7f9f9a4-c213-4a32-9316-8276b0f6ae4c",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-23-q11",
+        "submissionId": "fcb752fb-a4ee-4c18-a333-658fc6c0e830",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-23-q12",
+        "submissionId": "13f36371-774e-4a8a-9ec6-9559804d603d",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-23/answers",
+      "bytes": 196,
+      "answer": {
+        "questionId": "local-session-23-q13",
+        "submissionId": "7d17a10f-1aed-4739-bd07-973c0f0319b4",
+        "answer": "基于案例数据核对转化漏斗，优先检验下单环节，以对照组验证改进。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-23",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-23",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-23/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-24/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-24",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-24/report/retry",
+      "bytes": 65,
+      "retryQuestions": [
+        "local-session-24-q13"
+      ],
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-25/report",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-25",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-16",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/plans",
+      "bytes": 250,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        },
+        "targetRole": "Java 后端",
+        "jobDescription": "",
+        "careerStage": "CAMPUS",
+        "level": "STANDARD",
+        "mode": "FULL",
+        "mainCount": 12,
+        "specialtyPreference": "NONE",
+        "requestId": "b73947a6-3763-462b-b623-9c500171016f"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 134,
+      "json": {
+        "allowAlgorithmRepeat": false,
+        "planId": "local-plan-3",
+        "planVersion": 1,
+        "requestId": "3916087a-0e49-4c79-8cf2-19837314fc29",
+        "async": true
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-26",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-27",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-27",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-27",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-27/answers",
+      "bytes": 126,
+      "answer": {
+        "questionId": "local-session-27-q1",
+        "submissionId": "060fcdcc-9036-49e8-acc5-359ee7713e67",
+        "answer": "提交失败后应保留"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-27",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-28",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-28/answers",
+      "bytes": 132,
+      "answer": {
+        "questionId": "local-session-28-q1",
+        "submissionId": "fbec7d75-d98a-45da-9768-9b97e4d60043",
+        "answer": "保存已提交但响应丢失"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-28/answers",
+      "bytes": 132,
+      "answer": {
+        "questionId": "local-session-28-q1",
+        "submissionId": "fbec7d75-d98a-45da-9768-9b97e4d60043",
+        "answer": "保存已提交但响应丢失"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-28/generations",
+      "bytes": 66,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-29",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-30",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/plans",
+      "bytes": 250,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        },
+        "targetRole": "Java 后端",
+        "jobDescription": "",
+        "careerStage": "CAMPUS",
+        "level": "STANDARD",
+        "mode": "FULL",
+        "mainCount": 12,
+        "specialtyPreference": "NONE",
+        "requestId": "62ca5420-584c-4d11-8896-dc8f75cdcd35"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 134,
+      "json": {
+        "allowAlgorithmRepeat": false,
+        "planId": "local-plan-4",
+        "planVersion": 1,
+        "requestId": "44bd46bf-374e-4e31-8558-3bb3faecba4b",
+        "async": true
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/resume",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/resume/versions",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/resume/versions/version-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 53,
+      "json": {
+        "source": {
+          "kind": "RESUME_VERSION",
+          "id": "version-1"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/plans",
+      "bytes": 251,
+      "json": {
+        "source": {
+          "kind": "RESUME_VERSION",
+          "id": "version-1"
+        },
+        "targetRole": "Java 后端",
+        "jobDescription": "",
+        "careerStage": "CAMPUS",
+        "level": "STANDARD",
+        "mode": "FULL",
+        "mainCount": 12,
+        "specialtyPreference": "NONE",
+        "requestId": "df21419f-d476-444b-85f9-a862026b17bf"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 134,
+      "json": {
+        "allowAlgorithmRepeat": false,
+        "planId": "local-plan-5",
+        "planVersion": 1,
+        "requestId": "596fe899-107f-4cde-94c2-3c93e1c4b205",
+        "async": true
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/sources",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/jobs/search",
+      "bytes": 856,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/jobs/job-1",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/materials/text",
+      "bytes": 92,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/plans",
+      "bytes": 239,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        },
+        "targetRole": "",
+        "jobDescription": "",
+        "careerStage": "CAMPUS",
+        "level": "STANDARD",
+        "mode": "QUICK",
+        "mainCount": 5,
+        "specialtyPreference": "NONE",
+        "requestId": "312ac54f-ca1f-4996-8560-9dc8d290eb58"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 134,
+      "json": {
+        "allowAlgorithmRepeat": false,
+        "planId": "local-plan-6",
+        "planVersion": 1,
+        "requestId": "fcc7f20c-2eea-4352-84c6-d2d04a533d61",
+        "async": true
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/skip",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/generations",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-33-q2",
+        "submissionId": "a8873079-9f54-4c70-b705-479c8c5c4e25",
+        "answer": "快速练习回答 2"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/feedback",
+      "bytes": 108,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-33/attempts",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/attempts",
+      "bytes": 156,
+      "json": {
+        "questionId": "local-session-33-q2",
+        "requestId": "4864b2d5-cdfe-40c8-b476-f75206870b39",
+        "answer": "快速重答版本：补充测量周期和对照范围。"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/generations",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-33-q3",
+        "submissionId": "9b24f70c-5957-4aff-b94a-2103f51d51e0",
+        "answer": "快速练习回答 3"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/generations",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-33-q4",
+        "submissionId": "36de8f7d-2307-475f-b6a0-6751ecb0e4bf",
+        "answer": "快速练习回答 4"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/generations",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/answers",
+      "bytes": 122,
+      "answer": {
+        "questionId": "local-session-33-q5",
+        "submissionId": "45337375-c7ec-4256-82bc-9bbccf3090ac",
+        "answer": "快速练习回答 5"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/feedback",
+      "bytes": 108,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-33/generations",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interview-speech/capabilities",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/materials/text",
+      "bytes": 92,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/materials/local-material",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/source/preview",
+      "bytes": 52,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        }
+      },
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/plans",
+      "bytes": 239,
+      "json": {
+        "source": {
+          "kind": "MATERIAL",
+          "id": "local-material"
+        },
+        "targetRole": "",
+        "jobDescription": "",
+        "careerStage": "CAMPUS",
+        "level": "STANDARD",
+        "mode": "FULL",
+        "mainCount": 12,
+        "specialtyPreference": "NONE",
+        "requestId": "457a4c4d-5b5d-4bd7-a78d-7551c3028385"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews",
+      "bytes": 134,
+      "json": {
+        "allowAlgorithmRepeat": false,
+        "planId": "local-plan-7",
+        "planVersion": 1,
+        "requestId": "f0ac22c7-a8e8-44c0-89a0-22e9afd91ddb",
+        "async": true
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-34/skip",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-34/generations",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-34/answers",
+      "bytes": 114,
+      "answer": {
+        "questionId": "local-session-34-f1",
+        "submissionId": "9219630b-ec80-4391-b63b-4e136039b4dd",
+        "answer": "追问回答"
+      },
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-34/generations",
+      "bytes": 87,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "POST",
+      "path": "/api/interviews/local-session-34/replacements",
+      "bytes": 174,
+      "identity": "demo-user",
+      "hasTextSettings": true
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews/local-session-34",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "DELETE",
+      "path": "/api/interviews/local-session-34",
+      "bytes": 0,
+      "identity": "demo-user",
+      "hasTextSettings": false
+    },
+    {
+      "method": "GET",
+      "path": "/api/interviews",
       "bytes": 0,
       "identity": "demo-user",
       "hasTextSettings": false

@@ -14,6 +14,7 @@ import java.util.function.Supplier;
 @Service
 public class InterviewService {
     private static final Logger LOG = LoggerFactory.getLogger(InterviewService.class);
+    private static final Hot100Catalog HOT100 = new Hot100Catalog();
     public static final int MAIN_COUNT = 12, QUESTION_COUNT = 13;
     public enum Kind { MAIN, FOLLOW_UP, ALGORITHM, CASE_STUDY;
         public boolean isSpecialty() { return this == ALGORITHM || this == CASE_STUDY; }
@@ -51,19 +52,46 @@ public class InterviewService {
     @FunctionalInterface public interface RetrySleeper { void sleep(long delayMs) throws InterruptedException; }
     /** 回答保存的幂等载荷（计划 4.2）。 */
     public record Submission(String questionId, String submissionId, String answer) {}
+    public record ReplacementContext(String resume, String role, InterviewQuestion question) {}
     public record Session(String sessionId, String materialId, String targetRole, int questionCount,
                           String status, String finishReason, long revision, long stateVersion,
                           List<Turn> turns, Turn currentQuestion, String pendingAnswer,
                           InterviewSnapshot.Generation generation,
-                          Map<String, InterviewQuestion.Overview> questionMetadata, InterviewSpecialty specialty) {}
+                          Map<String, InterviewQuestion.Overview> questionMetadata, InterviewSpecialty specialty,
+                          InterviewPlan plan, InterviewSnapshot.Progress progress, Set<String> closedRootIds,
+                          Map<String, InterviewSnapshot.Clarification> clarifications,
+                          Set<String> withdrawnQuestionIds,
+                          Map<String, InterviewSnapshot.Replacement> replacements,
+                          Map<String, InterviewPracticeFeedback> practiceFeedbacks) {
+        public Session {
+            practiceFeedbacks = practiceFeedbacks == null ? Map.of() : Map.copyOf(practiceFeedbacks);
+        }
+        public Session(String sessionId, String materialId, String targetRole, int questionCount,
+                String status, String finishReason, long revision, long stateVersion, List<Turn> turns,
+                Turn currentQuestion, String pendingAnswer, InterviewSnapshot.Generation generation,
+                Map<String, InterviewQuestion.Overview> questionMetadata, InterviewSpecialty specialty,
+                InterviewPlan plan) {
+            this(sessionId, materialId, targetRole, questionCount, status, finishReason, revision, stateVersion,
+                    turns, currentQuestion, pendingAnswer, generation, questionMetadata, specialty, plan,
+                    InterviewSnapshot.Progress.empty(), Set.of(), Map.of(), Set.of(), Map.of(), Map.of());
+        }
+    }
 
     private static final class State {
         final String id, owner, materialId, resume, role;
-        final int count = QUESTION_COUNT;
+        int count = QUESTION_COUNT;
         Hot100Catalog.Problem selectedAlgorithm;
         InterviewSpecialty specialty;
         InterviewPlan plan;
         final Map<String, Context> contexts = new LinkedHashMap<>();
+        final Set<String> closedRootIds = new LinkedHashSet<>();
+        final Map<String, InterviewSnapshot.Clarification> clarifications = new LinkedHashMap<>();
+        final Set<String> withdrawnQuestionIds = new LinkedHashSet<>();
+        final Map<String, InterviewSnapshot.Replacement> replacements = new LinkedHashMap<>();
+        final Map<String, InterviewPracticeFeedback> practiceFeedbacks = new LinkedHashMap<>();
+        final Map<String, InterviewAttempt> attempts = new LinkedHashMap<>();
+        InterviewReviewSummary reviewSummary;
+        String reviewRequestId, reviewOperationId;
         final Instant createdAt;
         final Instant expires;
         final List<Turn> turns = new ArrayList<>();
@@ -88,7 +116,8 @@ public class InterviewService {
                             .findFirst().orElse(null);
             var metadata = new LinkedHashMap<String, InterviewQuestion.Overview>();
             var policy = new InterviewScoringPolicy();
-            var shares = weightShares(turns, questionContracts, contexts);
+            var activeTurns = turns.stream().filter(t -> !withdrawnQuestionIds.contains(t.questionId())).toList();
+            var shares = weightShares(activeTurns, questionContracts, contexts);
             contexts.forEach((id, context) -> {
                 var q = questionContracts.get(id);
                 if (q == null) return; // 恢复中或未冻结的题不进 metadata
@@ -97,14 +126,38 @@ public class InterviewService {
                         context.kind(), context.parentQuestionId(), context.mainQuestionIndex(), context.algorithm(), shares.get(id)));
             });
             return new Session(id, materialId, role, count, status, finishReason, revision, stateVersion,
-                    List.copyOf(turns), current, pending, generation, Map.copyOf(metadata), specialty);
+                    List.copyOf(turns), current, pending, generation, Map.copyOf(metadata), specialty, plan,
+                    progress(), Set.copyOf(closedRootIds), Map.copyOf(clarifications),
+                    Set.copyOf(withdrawnQuestionIds), Map.copyOf(replacements), Map.copyOf(practiceFeedbacks));
+        }
+
+        InterviewSnapshot.Progress progress() {
+            if (plan == null || !"experience-v1".equals(plan.policyVersion())) return InterviewSnapshot.Progress.empty();
+            int answered = 0, resolved = 0, skipped = 0, followUps = 0;
+            for (var entry : contexts.entrySet()) {
+                Context context = entry.getValue();
+                if (withdrawnQuestionIds.contains(entry.getKey())) continue;
+                if (context.kind() == Kind.FOLLOW_UP) followUps++;
+                if (context.kind() != Kind.MAIN) continue;
+                Turn turn = turns.stream().filter(t -> t.questionId().equals(entry.getKey())).findFirst().orElse(null);
+                boolean hasAnswer = turn != null && turn.answer() != null;
+                boolean wasSkipped = closedRootIds.contains(entry.getKey()) && !hasAnswer;
+                if (hasAnswer) answered++;
+                if (hasAnswer || closedRootIds.contains(entry.getKey())) resolved++;
+                if (wasSkipped) skipped++;
+            }
+            return new InterviewSnapshot.Progress(plan.mainCount(), resolved, answered, skipped,
+                    followUps, plan.followUpBudget());
         }
 
         /** 构建可落盘快照（计划 4.4 全字段）。运行期句柄（锁、Future、客户端）不进入。 */
         InterviewSnapshot toSnapshot() {
             var snapTurns = turns.stream().map(t -> new InterviewSnapshot.SnapshotTurn(
                     t.questionId(), t.question(), t.answer(),
-                    t.answer() != null ? InterviewSnapshot.AnswerStatus.ANSWERED : InterviewSnapshot.AnswerStatus.UNANSWERED,
+                    withdrawnQuestionIds.contains(t.questionId()) ? InterviewSnapshot.AnswerStatus.WITHDRAWN
+                            : t.answer() != null ? InterviewSnapshot.AnswerStatus.ANSWERED
+                            : isClosed(t.questionId()) ? InterviewSnapshot.AnswerStatus.SKIPPED
+                            : InterviewSnapshot.AnswerStatus.UNANSWERED,
                     submissionIds.get(t.questionId()))).toList();
             var snapContexts = new LinkedHashMap<String, InterviewSnapshot.QuestionContext>();
             contexts.forEach((id, c) -> snapContexts.put(id,
@@ -112,8 +165,17 @@ public class InterviewService {
             return new InterviewSnapshot(InterviewSnapshot.SCHEMA_VERSION, id, owner, materialId, resume, role, count,
                     status, finishReason, pending, revision, stateVersion, snapTurns, questionContracts, snapContexts,
                     selectedAlgorithm, specialty, assessments, cachedReport, generation, startRequestId,
-                    plan, InterviewSnapshot.Progress.empty(), Set.of(), createdAt, expires,
-                    scoringState, scoringOperationId, scoringRequestId, scoringError, scoringStateVersion);
+                    plan, progress(), Set.copyOf(closedRootIds), createdAt, expires,
+                    scoringState, scoringOperationId, scoringRequestId, scoringError, scoringStateVersion,
+                    clarifications, Set.copyOf(withdrawnQuestionIds), replacements, reviewSummary, reviewRequestId, reviewOperationId,
+                    practiceFeedbacks, attempts);
+        }
+
+        private boolean isClosed(String questionId) {
+            Context context = contexts.get(questionId);
+            String rootId = context != null && context.kind() == Kind.FOLLOW_UP
+                    ? context.parentQuestionId() : questionId;
+            return closedRootIds.contains(rootId);
         }
 
         /** 从快照重建纯数据 State；运行期句柄（reportLock）新建。 */
@@ -124,10 +186,46 @@ public class InterviewService {
             st.pending = s.pendingAnswer();
             st.revision = s.revision();
             st.stateVersion = s.stateVersion();
-            st.plan = s.plan();
+            st.plan = s.plan() == null
+                    ? InterviewPlan.legacyV3(new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL,
+                            s.materialId() == null ? "" : s.materialId()), s.targetRole())
+                    : s.plan();
+            st.count = s.questionCount();
+            st.closedRootIds.addAll(s.closedRootIds());
+            s.practiceFeedbacks().forEach((questionId, feedback) -> st.practiceFeedbacks.put(questionId,
+                    feedback.status() == InterviewPracticeFeedback.Status.QUEUED
+                            || feedback.status() == InterviewPracticeFeedback.Status.RUNNING
+                            ? new InterviewPracticeFeedback(feedback.requestId(), InterviewPracticeFeedback.Status.FAILED,
+                                    null, "服务重启导致反馈中断，可以继续下一题或重新查看反馈")
+                            : feedback));
+            s.attempts().forEach((attemptId, attempt) -> st.attempts.put(attemptId,
+                    attempt.status() == InterviewAttempt.Status.PENDING || attempt.status() == InterviewAttempt.Status.RUNNING
+                            ? new InterviewAttempt(attempt.attemptId(), attempt.requestId(), UUID.randomUUID().toString(), attempt.questionId(), attempt.version(),
+                                    attempt.answer(), InterviewAttempt.Status.FAILED, null, null, "", attempt.rubricVersion(),
+                                    "服务重启导致重答评分中断，答案已保存，可补评")
+                            : attempt));
+            st.withdrawnQuestionIds.addAll(s.withdrawnQuestionIds());
+            s.replacements().forEach((questionId, operation) -> st.replacements.put(questionId,
+                    operation.status() == InterviewSnapshot.ReplacementStatus.RUNNING
+                            ? new InterviewSnapshot.Replacement(operation.requestId(),
+                                    InterviewSnapshot.ReplacementStatus.FAILED, operation.reason(), null,
+                                    "服务重启导致换题中断，请重试")
+                            : operation));
+            s.clarifications().forEach((questionId, operation) -> st.clarifications.put(questionId,
+                    operation.status() == InterviewSnapshot.ClarificationStatus.RUNNING
+                            ? new InterviewSnapshot.Clarification(operation.requestId(),
+                                    InterviewSnapshot.ClarificationStatus.FAILED, null,
+                                    "服务重启导致解释中断，请重试")
+                            : operation));
             st.specialty = s.specialty();
             st.selectedAlgorithm = s.selectedAlgorithm();
             st.cachedReport = s.cachedReport();
+            st.reviewSummary = s.reviewSummary();
+            st.reviewRequestId = s.reviewRequestId(); st.reviewOperationId = s.reviewOperationId();
+            if (st.reviewSummary != null && st.reviewSummary.status() == InterviewReviewSummary.Status.PENDING) {
+                st.reviewSummary = new InterviewReviewSummary(InterviewReviewSummary.Status.UNAVAILABLE,
+                        st.reviewSummary.sourceVersion(), List.of(), "服务重启导致报告归纳中断，可重试。");
+            }
             st.scoringState = s.scoringState() == null ? "NOT_STARTED" : s.scoringState();
             st.scoringOperationId = s.scoringOperationId();
             st.scoringRequestId = s.scoringRequestId();
@@ -156,7 +254,7 @@ public class InterviewService {
             // currentQuestion：恢复时取最后一个未答题（与落盘前 snapshot 语义对齐）
             for (int i = st.turns.size() - 1; i >= 0; i--) {
                 var t = st.turns.get(i);
-                if (t.answer() == null) { st.currentQuestionId = t.questionId(); break; }
+                if (t.answer() == null && !st.withdrawnQuestionIds.contains(t.questionId()) && !st.isClosed(t.questionId())) { st.currentQuestionId = t.questionId(); break; }
             }
             return st;
         }
@@ -166,7 +264,10 @@ public class InterviewService {
             return new Backup(status, pending, finishReason, currentQuestionId, revision, stateVersion,
                     new ArrayList<>(turns), new LinkedHashMap<>(submissionIds), new LinkedHashMap<>(assessments),
                     cachedReport, generation, specialty, selectedAlgorithm, plan, scoringState, scoringOperationId,
-                    scoringRequestId, scoringError, scoringStateVersion);
+                    scoringRequestId, scoringError, scoringStateVersion, new LinkedHashSet<>(closedRootIds),
+                    new LinkedHashMap<>(clarifications), new LinkedHashSet<>(withdrawnQuestionIds),
+                    new LinkedHashMap<>(replacements), reviewSummary, reviewRequestId, reviewOperationId,
+                    new LinkedHashMap<>(practiceFeedbacks), new LinkedHashMap<>(attempts));
         }
         void restore(Backup b) {
             status = b.status; pending = b.pending; finishReason = b.finishReason;
@@ -179,6 +280,13 @@ public class InterviewService {
             scoringRequestId = b.scoringRequestId; scoringError = b.scoringError; scoringStateVersion = b.scoringStateVersion;
             specialty = b.specialty; selectedAlgorithm = b.selectedAlgorithm;
             plan = b.plan;
+            closedRootIds.clear(); closedRootIds.addAll(b.closedRootIds);
+            clarifications.clear(); clarifications.putAll(b.clarifications);
+            withdrawnQuestionIds.clear(); withdrawnQuestionIds.addAll(b.withdrawnQuestionIds);
+            replacements.clear(); replacements.putAll(b.replacements);
+            reviewSummary = b.reviewSummary; reviewRequestId = b.reviewRequestId; reviewOperationId = b.reviewOperationId;
+            practiceFeedbacks.clear(); practiceFeedbacks.putAll(b.practiceFeedbacks);
+            attempts.clear(); attempts.putAll(b.attempts);
         }
         private static final class Backup {
             final String status, pending, finishReason, currentQuestionId;
@@ -193,12 +301,24 @@ public class InterviewService {
             final InterviewPlan plan;
             final String scoringState, scoringOperationId, scoringRequestId, scoringError;
             final long scoringStateVersion;
+            final Set<String> closedRootIds;
+            final Map<String, InterviewSnapshot.Clarification> clarifications;
+            final Set<String> withdrawnQuestionIds;
+            final Map<String, InterviewSnapshot.Replacement> replacements;
+            final InterviewReviewSummary reviewSummary;
+            final String reviewRequestId, reviewOperationId;
+            final Map<String, InterviewPracticeFeedback> practiceFeedbacks;
+            final Map<String, InterviewAttempt> attempts;
             Backup(String status, String pending, String finishReason, String currentQuestionId,
                    long revision, long stateVersion, List<Turn> turns, Map<String, String> submissionIds,
                    Map<String, InterviewAssessment> assessments, InterviewAgent.InterviewReport cachedReport,
                    InterviewSnapshot.Generation generation, InterviewSpecialty specialty,
                    Hot100Catalog.Problem selectedAlgorithm, InterviewPlan plan, String scoringState,
-                   String scoringOperationId, String scoringRequestId, String scoringError, long scoringStateVersion) {
+                   String scoringOperationId, String scoringRequestId, String scoringError, long scoringStateVersion,
+                   Set<String> closedRootIds, Map<String, InterviewSnapshot.Clarification> clarifications,
+                   Set<String> withdrawnQuestionIds, Map<String, InterviewSnapshot.Replacement> replacements,
+                   InterviewReviewSummary reviewSummary, String reviewRequestId, String reviewOperationId,
+                   Map<String, InterviewPracticeFeedback> practiceFeedbacks, Map<String, InterviewAttempt> attempts) {
                 this.status = status; this.pending = pending; this.finishReason = finishReason;
                 this.currentQuestionId = currentQuestionId; this.revision = revision; this.stateVersion = stateVersion;
                 this.turns = turns; this.submissionIds = submissionIds; this.assessments = assessments;
@@ -207,6 +327,14 @@ public class InterviewService {
                 this.scoringState = scoringState; this.scoringOperationId = scoringOperationId;
                 this.scoringRequestId = scoringRequestId; this.scoringError = scoringError;
                 this.scoringStateVersion = scoringStateVersion;
+                this.closedRootIds = closedRootIds;
+                this.clarifications = new LinkedHashMap<>(clarifications);
+                this.withdrawnQuestionIds = new LinkedHashSet<>(withdrawnQuestionIds);
+                this.replacements = new LinkedHashMap<>(replacements);
+                this.reviewSummary = reviewSummary; this.reviewRequestId = reviewRequestId;
+                this.reviewOperationId = reviewOperationId;
+                this.practiceFeedbacks = new LinkedHashMap<>(practiceFeedbacks);
+                this.attempts = new LinkedHashMap<>(attempts);
             }
         }
     }
@@ -231,7 +359,8 @@ public class InterviewService {
         if (resume == null || resume.isBlank())
             throw new InterviewException(400, "这份简历没有可用的文字内容，请换一份，或改用「粘贴文本」");
         Instant now = clock.instant();
-        State state = new State(UUID.randomUUID().toString(), owner, materialId, resume, role, now, now.plusSeconds(86400));
+        State state = new State(UUID.randomUUID().toString(), owner, materialId, resume, role, now,
+                now.plusSeconds(Math.max(1, properties.getRetentionDays()) * 86400L));
         state.plan = InterviewPlan.legacyV3(
                 new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, materialId == null ? "" : materialId),
                 role);
@@ -264,6 +393,39 @@ public class InterviewService {
 
     /** Create or replay an idempotent empty opening session; the caller queues its model work. */
     public Session startAsync(String owner, String materialId, String resume, String targetRole, String requestId) {
+        var source = new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL,
+                materialId == null ? "" : materialId);
+        return startAsync(owner, new InterviewSourceResolver.ResolvedSource(source, "", resume, ""),
+                targetRole, requestId);
+    }
+
+    /** Create/replay from one owner-resolved immutable source value. */
+    public Session startAsync(String owner, InterviewSourceResolver.ResolvedSource source,
+                              String targetRole, String requestId) {
+        return startAsync(owner, source, null, targetRole, requestId);
+    }
+
+    /** Create/replay an experience-v1 session from a confirmed, immutable preview plan. */
+    public Session startAsync(String owner, InterviewSourceResolver.ResolvedSource source,
+                              InterviewPlan confirmedPlan, String requestId) {
+        return startAsync(owner, source, confirmedPlan, requestId, false);
+    }
+
+    public Session startAsync(String owner, InterviewSourceResolver.ResolvedSource source,
+                              InterviewPlan confirmedPlan, String requestId, boolean allowAlgorithmRepeat) {
+        if (confirmedPlan == null) throw new IllegalArgumentException("已确认计划不能为空");
+        return startAsync(owner, source, confirmedPlan, confirmedPlan.targetRole(), requestId, allowAlgorithmRepeat);
+    }
+
+    private Session startAsync(String owner, InterviewSourceResolver.ResolvedSource source,
+                               InterviewPlan confirmedPlan, String targetRole, String requestId) {
+        return startAsync(owner, source, confirmedPlan, targetRole, requestId, false);
+    }
+
+    private Session startAsync(String owner, InterviewSourceResolver.ResolvedSource source,
+                               InterviewPlan confirmedPlan, String targetRole, String requestId, boolean allowAlgorithmRepeat) {
+        String materialId = source.source().kind() == InterviewPlan.SourceKind.MATERIAL ? source.source().id() : null;
+        String resume = source.resumeText();
         String role = targetRole == null ? "" : targetRole.strip();
         if (role.length() > 200) throw new IllegalArgumentException("目标岗位不能超过 200 字");
         if (resume == null || resume.isBlank())
@@ -285,19 +447,49 @@ public class InterviewService {
             if (state != null) {
                 if (state.expires.isBefore(clock.instant()))
                     throw new InterviewException(404, "面试不存在或已过期，请重新开始");
-                if (!Objects.equals(state.materialId, materialId) || !state.resume.equals(resume)
-                        || !state.role.equals(role))
+                boolean sameResolvedSource = state.plan != null
+                        && Objects.equals(state.plan.source(), source.source())
+                        && Objects.equals(state.plan.sourceLabel(), source.sourceLabel())
+                        && Objects.equals(state.plan.sourceFingerprint(), source.sourceFingerprint());
+                boolean sameLegacySource = state.plan == null && Objects.equals(state.materialId, materialId)
+                        && state.resume.equals(resume);
+                if ((!sameResolvedSource && !sameLegacySource) || !state.resume.equals(resume) || !state.role.equals(role))
                     throw new InterviewException(409, "开始请求 ID 已用于不同的简历或岗位");
+                if (confirmedPlan != null && !confirmedPlan.equals(state.plan))
+                    throw new InterviewException(409, "开始请求 ID 已用于不同版本的面试计划");
             } else {
                 Instant now = clock.instant();
                 state = new State(UUID.randomUUID().toString(), owner, materialId, resume, role,
-                        now, now.plusSeconds(86400));
+                        now, now.plusSeconds(Math.max(1, properties.getRetentionDays()) * 86400L));
                 state.startRequestId = requestId;
-                state.plan = InterviewPlan.legacyV3(
-                        new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL,
-                                materialId == null ? "" : materialId), role);
+                if (confirmedPlan != null) {
+                    if (!confirmedPlan.source().equals(source.source())
+                            || !confirmedPlan.sourceFingerprint().equals(source.sourceFingerprint()))
+                        throw new InterviewException(409, "简历来源已变化，请重新预览计划");
+                    state.plan = confirmedPlan;
+                    state.count = confirmedPlan.plannedCount();
+                    if (confirmedPlan.specialty().kind() != InterviewPlan.SpecialtyKind.NONE) {
+                        state.specialty = new InterviewSpecialty(
+                                InterviewSpecialty.Kind.valueOf(confirmedPlan.specialty().kind().name()),
+                                confirmedPlan.specialty().focus(), confirmedPlan.specialty().reason());
+                        if (state.specialty.kind() == InterviewSpecialty.Kind.ALGORITHM)
+                            state.selectedAlgorithm = HOT100.select(algorithmDifficulty(confirmedPlan.level()), usedAlgorithmIds(owner, confirmedPlan.source()), allowAlgorithmRepeat);
+                    }
+                } else {
+                    var legacy = InterviewPlan.legacyV3(source.source(), role);
+                    state.plan = new InterviewPlan(legacy.policyVersion(), legacy.mode(), legacy.mainCount(),
+                            legacy.plannedCount(), legacy.followUpBudget(), legacy.maxFollowUpsPerMain(),
+                            legacy.level(), legacy.careerStage(), legacy.targetRole(), legacy.jobDescription(),
+                            legacy.specialty(), legacy.coverage(), source.source(), source.sourceLabel(),
+                            source.sourceFingerprint(), legacy.practiceTargets());
+                }
                 sessions.values().removeIf(s -> s.expires.isBefore(now));
-                if (sessions.size() >= 2000 || sessions.values().stream().filter(s -> s.owner.equals(owner)).count() >= 20)
+                InterviewStore.SessionCounts counts = store == null
+                        ? new InterviewStore.SessionCounts(sessions.values().stream().filter(s -> s.owner.equals(owner)
+                                && "ACTIVE".equals(s.status)).count(),
+                                sessions.values().stream().filter(s -> s.owner.equals(owner)).count())
+                        : store.counts(owner, now);
+                if (sessions.size() >= 2000 || counts.active() >= 20 || counts.total() >= 100)
                     throw new InterviewException(429, "暂存面试数量已达上限，请稍后再试");
                 sessions.put(state.id, state);
                 try { persist(state, null); }
@@ -348,6 +540,8 @@ public class InterviewService {
             if (!state.turns.get(last).questionId().equals(submission.questionId()))
                 throw new InterviewException(409, "题目已变更，请刷新面试记录");
             var backup = state.backup();
+            cancelClarification(state, clarificationRoot(state, submission.questionId()));
+            cancelReplacement(state, submission.questionId());
             Turn answered = new Turn(requested.questionId(), requested.question(), value);
             state.turns.set(last, answered);
             state.submissionIds.put(submission.questionId(), submission.submissionId());
@@ -363,6 +557,260 @@ public class InterviewService {
             state.revision++;
             persist(state, backup);
             return state.snapshot();
+        }
+    }
+
+    /** Closes one root question group atomically; it never creates an assessment or scores an answer. */
+    public Session closeRoot(String owner, String sessionId, String questionId, String requestId) {
+        return closeRoot(owner, sessionId, questionId, requestId, null);
+    }
+
+    public Session closeRoot(String owner, String sessionId, String questionId, String requestId,
+                             Long expectedRevision) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > 120)
+            throw new IllegalArgumentException("请求 ID 不能为空且不能超过 120 字");
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            if (!"ACTIVE".equals(state.status)) throw new InterviewException(409, "面试已结束，请开始新的面试");
+            String skipRequestKey = "skip-request:" + requestId;
+            String previousQuestionId = state.submissionIds.get(skipRequestKey);
+            if (previousQuestionId != null) {
+                if (!previousQuestionId.equals(questionId)) throw new InterviewException(409, "跳题请求 ID 已用于另一道题");
+                return state.snapshot();
+            }
+            Context requested = state.contexts.get(questionId);
+            if (requested == null) throw new InterviewException(404, "题目不存在");
+            if (requested.kind().isSpecialty()) throw new InterviewException(409, "专项题不能作为主问题组跳过");
+            String rootId = requested.kind() == Kind.FOLLOW_UP ? requested.parentQuestionId() : questionId;
+            Turn rootTurn = state.turns.stream().filter(turn -> turn.questionId().equals(rootId)).findFirst().orElse(null);
+            if (rootTurn == null) throw new InterviewException(404, "题目不存在");
+            boolean generationInFlight = state.generation != null && isActiveGeneration(state.generation.state());
+            if (rootTurn.answer() != null && requested.kind() != Kind.FOLLOW_UP && !generationInFlight)
+                throw new InterviewException(409, "已回答的主问题不能跳过");
+            if (state.closedRootIds.contains(rootId)) return state.snapshot();
+            if (expectedRevision != null && expectedRevision != state.revision)
+                throw new InterviewException(409, "状态已变更，请刷新面试记录");
+            String activeId = state.currentQuestionId;
+            if (activeId != null) {
+                Context active = state.contexts.get(activeId);
+                String activeRoot = active.kind() == Kind.FOLLOW_UP ? active.parentQuestionId() : activeId;
+                if (!rootId.equals(activeRoot)) throw new InterviewException(409, "只能关闭当前题组");
+            }
+            var backup = state.backup();
+            state.closedRootIds.add(rootId);
+            cancelClarification(state, rootId);
+            cancelReplacement(state, rootId);
+            state.submissionIds.put(skipRequestKey, questionId);
+            if (activeId != null) state.currentQuestionId = null;
+            if (state.generation != null && isActiveGeneration(state.generation.state()))
+                state.generation = withState(state.generation, InterviewSnapshot.GenerationState.CANCELLED,
+                        new InterviewFailure(InterviewFailure.Code.INTERRUPTED, false, "题组已关闭", null));
+            state.revision++;
+            persist(state, backup);
+            return state.snapshot();
+        }
+    }
+
+    public Session beginClarification(String owner, String sessionId, String questionId, String requestId,
+                                      long expectedRevision) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > 120)
+            throw new IllegalArgumentException("请求 ID 不能为空且不能超过 120 字");
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            Context context = state.contexts.get(questionId);
+            if (context == null) throw new InterviewException(404, "题目不存在");
+            String rootId = context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : questionId;
+            var previous = state.clarifications.get(rootId);
+            if (previous != null && previous.requestId().equals(requestId)) return state.snapshot();
+            requireCurrentAction(state, questionId, expectedRevision);
+            if (previous != null && previous.status() != InterviewSnapshot.ClarificationStatus.FAILED
+                    && previous.status() != InterviewSnapshot.ClarificationStatus.CANCELLED)
+                throw new InterviewException(409, "这组题目已经请求过澄清");
+            var backup = state.backup();
+            state.clarifications.put(rootId, new InterviewSnapshot.Clarification(requestId,
+                    InterviewSnapshot.ClarificationStatus.RUNNING, null, null));
+            state.revision++; state.stateVersion++;
+            persist(state, backup);
+            return state.snapshot();
+        }
+    }
+
+    public boolean completeClarification(String owner, String sessionId, String questionId, String requestId, String text) {
+        if (text == null || text.isBlank() || text.length() > 2000) return false;
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            String rootId = clarificationRoot(state, questionId);
+            var operation = state.clarifications.get(rootId);
+            if (operation == null || !operation.requestId().equals(requestId)
+                    || operation.status() != InterviewSnapshot.ClarificationStatus.RUNNING) return false;
+            if (!"ACTIVE".equals(state.status) || !questionId.equals(state.currentQuestionId)
+                    || state.closedRootIds.contains(rootId)) {
+                cancelClarification(state, rootId);
+                return false;
+            }
+            var backup = state.backup();
+            state.clarifications.put(rootId, new InterviewSnapshot.Clarification(requestId,
+                    InterviewSnapshot.ClarificationStatus.COMPLETE, text.strip(), null));
+            state.revision++; state.stateVersion++;
+            persist(state, backup);
+            return true;
+        }
+    }
+
+    public boolean failClarification(String owner, String sessionId, String questionId, String requestId, String error) {
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            String rootId = clarificationRoot(state, questionId);
+            var operation = state.clarifications.get(rootId);
+            if (operation == null || !operation.requestId().equals(requestId)
+                    || operation.status() != InterviewSnapshot.ClarificationStatus.RUNNING) return false;
+            if (!"ACTIVE".equals(state.status) || !questionId.equals(state.currentQuestionId)
+                    || state.closedRootIds.contains(rootId)) {
+                cancelClarification(state, rootId);
+                return false;
+            }
+            var backup = state.backup();
+            state.clarifications.put(rootId, new InterviewSnapshot.Clarification(requestId,
+                    InterviewSnapshot.ClarificationStatus.FAILED, null,
+                    error == null || error.isBlank() ? "题目解释暂不可用，请重试" : error));
+            state.revision++; state.stateVersion++;
+            persist(state, backup);
+            return true;
+        }
+    }
+
+    public Session beginReplacement(String owner, String sessionId, String questionId, String requestId,
+                                    long expectedRevision, String reason) {
+        String why = reason == null ? "" : reason.strip();
+        if (why.isEmpty() || why.length() > 300) throw new IllegalArgumentException("换题原因须为 1–300 字");
+        if (requestId == null || requestId.isBlank() || requestId.length() > 120)
+            throw new IllegalArgumentException("请求 ID 不能为空且不能超过 120 字");
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            var previous = state.replacements.get(questionId);
+            if (previous != null && previous.requestId().equals(requestId)) return state.snapshot();
+            if (!"ACTIVE".equals(state.status)) throw new InterviewException(409, "面试已结束，不能换题");
+            if (expectedRevision != state.revision) throw new InterviewException(409, "状态已变更，请刷新面试记录");
+            Context context = state.contexts.get(questionId);
+            if (context == null) throw new InterviewException(404, "题目不存在");
+            if (context.kind() != Kind.MAIN) throw new InterviewException(409, "只能替换未回答的主问题，专项题和追问不能换题");
+            if (!questionId.equals(state.currentQuestionId)) throw new InterviewException(409, "只能替换当前未回答的问题");
+            Turn source = state.turns.stream().filter(turn -> turn.questionId().equals(questionId)).findFirst().orElse(null);
+            if (source == null || source.answer() != null || state.closedRootIds.contains(questionId))
+                throw new InterviewException(409, "已回答或已跳过的题目不能换题");
+            if (state.replacements.values().stream().anyMatch(r -> questionId.equals(r.replacementQuestionId())))
+                throw new InterviewException(409, "这道主问题已经使用过换题机会");
+            if (previous != null && previous.status() == InterviewSnapshot.ReplacementStatus.RUNNING)
+                throw new InterviewException(409, "换题仍在处理中");
+            if (previous != null && previous.status() == InterviewSnapshot.ReplacementStatus.COMPLETE)
+                throw new InterviewException(409, "这道主问题已经使用过换题机会");
+            var backup = state.backup();
+            state.replacements.put(questionId, new InterviewSnapshot.Replacement(requestId,
+                    InterviewSnapshot.ReplacementStatus.RUNNING, why, null, null));
+            state.revision++; state.stateVersion++;
+            persist(state, backup);
+            return state.snapshot();
+        }
+    }
+
+    public boolean completeReplacement(String owner, String sessionId, String sourceQuestionId, String requestId,
+                                       InterviewQuestion replacementQuestion) {
+        if (replacementQuestion == null) return false;
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            var operation = state.replacements.get(sourceQuestionId);
+            if (operation == null || !operation.requestId().equals(requestId)
+                    || operation.status() != InterviewSnapshot.ReplacementStatus.RUNNING) return false;
+            if (!"ACTIVE".equals(state.status) || !sourceQuestionId.equals(state.currentQuestionId)
+                    || state.closedRootIds.contains(sourceQuestionId)) {
+                cancelReplacement(state, sourceQuestionId);
+                return false;
+            }
+            var original = state.questionContracts.get(sourceQuestionId);
+            if (original == null || !original.competency().equals(replacementQuestion.competency())
+                    || original.importance() != replacementQuestion.importance()
+                    || original.difficulty() != replacementQuestion.difficulty())
+                throw new InterviewException(502, "替换题未保持原考察方向与难度，请重试");
+            var backup = state.backup();
+            String replacementId = UUID.randomUUID().toString();
+            Context sourceContext = state.contexts.get(sourceQuestionId);
+            state.withdrawnQuestionIds.add(sourceQuestionId);
+            cancelClarification(state, sourceQuestionId);
+            state.questionContracts.put(replacementId, replacementQuestion);
+            state.contexts.put(replacementId, new Context(Kind.MAIN, null, sourceContext.mainQuestionIndex(), null));
+            state.turns.add(new Turn(replacementId, replacementQuestion.text(), null));
+            state.currentQuestionId = replacementId;
+            state.replacements.put(sourceQuestionId, new InterviewSnapshot.Replacement(requestId,
+                    InterviewSnapshot.ReplacementStatus.COMPLETE, operation.reason(), replacementId, null));
+            state.revision++; state.stateVersion++;
+            persist(state, backup);
+            return true;
+        }
+    }
+
+    public boolean failReplacement(String owner, String sessionId, String sourceQuestionId, String requestId, String error) {
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            var operation = state.replacements.get(sourceQuestionId);
+            if (operation == null || !operation.requestId().equals(requestId)
+                    || operation.status() != InterviewSnapshot.ReplacementStatus.RUNNING) return false;
+            if (!"ACTIVE".equals(state.status) || !sourceQuestionId.equals(state.currentQuestionId)
+                    || state.closedRootIds.contains(sourceQuestionId)) {
+                cancelReplacement(state, sourceQuestionId);
+                return false;
+            }
+            var backup = state.backup();
+            state.replacements.put(sourceQuestionId, new InterviewSnapshot.Replacement(requestId,
+                    InterviewSnapshot.ReplacementStatus.FAILED, operation.reason(), null,
+                    error == null || error.isBlank() ? "换题暂不可用，请重试" : error));
+            state.revision++; state.stateVersion++;
+            persist(state, backup);
+            return true;
+        }
+    }
+
+    public ReplacementContext replacementContext(String owner, String sessionId, String questionId) {
+        State state = find(owner, sessionId);
+        synchronized (state) {
+            Context context = state.contexts.get(questionId);
+            if (context == null || context.kind() != Kind.MAIN || !questionId.equals(state.currentQuestionId))
+                throw new InterviewException(409, "只能替换当前主问题");
+            return new ReplacementContext(state.resume, state.role, state.questionContracts.get(questionId));
+        }
+    }
+
+    private static void cancelReplacement(State state, String questionId) {
+        var operation = state.replacements.get(questionId);
+        if (operation == null) {
+            var entry = state.replacements.entrySet().stream()
+                    .filter(item -> questionId.equals(item.getValue().replacementQuestionId())).findFirst().orElse(null);
+            if (entry != null) operation = entry.getValue();
+        }
+        if (operation != null && operation.status() == InterviewSnapshot.ReplacementStatus.RUNNING) {
+            for (var entry : new ArrayList<>(state.replacements.entrySet()))
+                if (entry.getValue() == operation || entry.getValue().equals(operation))
+                    state.replacements.put(entry.getKey(), new InterviewSnapshot.Replacement(operation.requestId(),
+                            InterviewSnapshot.ReplacementStatus.CANCELLED, operation.reason(), null, null));
+        }
+    }
+
+    private static void requireCurrentAction(State state, String questionId, long expectedRevision) {
+        if (!"ACTIVE".equals(state.status)) throw new InterviewException(409, "面试已结束");
+        if (expectedRevision != state.revision) throw new InterviewException(409, "状态已变更，请刷新面试记录");
+        if (questionId == null || !questionId.equals(state.currentQuestionId))
+            throw new InterviewException(409, "只能澄清当前题目");
+    }
+
+    private static String clarificationRoot(State state, String questionId) {
+        Context context = state.contexts.get(questionId);
+        return context == null ? questionId : context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : questionId;
+    }
+
+    private static void cancelClarification(State state, String rootId) {
+        var operation = state.clarifications.get(rootId);
+        if (operation != null && operation.status() == InterviewSnapshot.ClarificationStatus.RUNNING) {
+            state.clarifications.put(rootId, new InterviewSnapshot.Clarification(operation.requestId(),
+                    InterviewSnapshot.ClarificationStatus.CANCELLED, null, null));
         }
     }
 
@@ -395,11 +843,20 @@ public class InterviewService {
                 List<Turn> history = new ArrayList<>(state.turns); history.set(last, answered);
                 String parentId = context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : questionId;
                 long followUpCount = state.contexts.values().stream().filter(c -> parentId.equals(c.parentQuestionId())).count();
+                long sessionFollowUpCount = state.contexts.values().stream().filter(c -> c.kind() == Kind.FOLLOW_UP).count();
+                boolean allowFollowUp = state.plan.allowsFollowUp(sessionFollowUpCount, followUpCount);
                 int nextIndex = context.mainQuestionIndex() + 1;
-                InterviewAgent.Proposal proposal = followUpCount < 2
-                        ? agent.prepareNext(state.resume, state.role, history, QUESTION_COUNT, nextIndex, true, ai)
-                        : nextIndex <= MAIN_COUNT ? agent.prepareNext(state.resume, state.role, history, QUESTION_COUNT, nextIndex, false, ai)
+                int mainCount = "experience-v1".equals(state.plan.policyVersion()) ? state.plan.mainCount() : MAIN_COUNT;
+                boolean hasSpecialty = state.plan.plannedCount() > mainCount;
+                InterviewAgent.Proposal proposal = allowFollowUp
+                        ? prepareNext(state.resume, state.role, history, mainCount, nextIndex, true, state.plan, ai)
+                        : nextIndex <= mainCount ? prepareNext(state.resume, state.role, history, mainCount, nextIndex, false, state.plan, ai)
                         : new InterviewAgent.Proposal(null, false);
+                if (proposal.followUp() && !allowFollowUp)
+                    throw new InterviewException(502, "模型生成的追问超出已确认计划",
+                            new InterviewFailure(InterviewFailure.Code.INVALID_OUTPUT, false,
+                                    "模型生成的追问超出已确认计划", null));
+                if (!proposal.followUp() && nextIndex <= mainCount) validateCoverage(state.plan, proposal);
                 Context nextContext;
                 InterviewQuestion question;
                 if (proposal.followUp()) {
@@ -408,17 +865,22 @@ public class InterviewService {
                     question = new InterviewQuestion(proposal.question().text(), parent.competency(), parent.importance(),
                             parent.difficulty(), parent.weightReason(), parent.criteria(), parent.rubricVersion());
                     nextContext = new Context(Kind.FOLLOW_UP, parentId, context.mainQuestionIndex(), null);
-                } else if (nextIndex == QUESTION_COUNT) {
-                    if (state.specialty.kind() == InterviewSpecialty.Kind.ALGORITHM) {
-                        question = agent.prepareAlgorithm(state.selectedAlgorithm, ai);
-                        nextContext = new Context(Kind.ALGORITHM, null, QUESTION_COUNT, state.selectedAlgorithm.overview());
-                    } else {
-                        question = agent.prepareCase(state.specialty, state.role, ai);
-                        nextContext = new Context(Kind.CASE_STUDY, null, QUESTION_COUNT, null);
-                    }
-                } else {
+                } else if (nextIndex <= mainCount) {
                     question = proposal.question();
                     nextContext = new Context(Kind.MAIN, null, nextIndex, null);
+                } else if (hasSpecialty) {
+                    if (state.specialty.kind() == InterviewSpecialty.Kind.ALGORITHM) {
+                        question = agent.prepareAlgorithm(state.selectedAlgorithm, ai);
+                        nextContext = new Context(Kind.ALGORITHM, null, mainCount + 1, state.selectedAlgorithm.overview());
+                    } else {
+                        question = agent.prepareCase(state.specialty, state.role, ai);
+                        nextContext = new Context(Kind.CASE_STUDY, null, mainCount + 1, null);
+                    }
+                } else {
+                    state.turns.set(last, answered); state.pending = null; state.status = "FINISHED";
+                    state.finishReason = "COMPLETED"; state.currentQuestionId = null;
+                    state.revision++; persist(state, backup);
+                    return state.snapshot();
                 }
                 String nextId = UUID.randomUUID().toString();
                 state.turns.set(last, answered);
@@ -454,6 +916,8 @@ public class InterviewService {
                 return state.snapshot();
             }
             var backup = state.backup();
+            for (String rootId : new ArrayList<>(state.clarifications.keySet())) cancelClarification(state, rootId);
+            for (String rootId : new ArrayList<>(state.replacements.keySet())) cancelReplacement(state, rootId);
             if (submission != null) {
                 String value = submission.answer() == null ? "" : submission.answer().strip();
                 if (submission.questionId() == null || submission.questionId().isBlank()
@@ -503,11 +967,22 @@ public class InterviewService {
      */
     public record GenerationResult(InterviewQuestion question, Kind kind, String parentQuestionId,
                                    int mainQuestionIndex, Hot100Catalog.Algorithm algorithm,
-                                   InterviewSpecialty specialty, Hot100Catalog.Problem selectedAlgorithm) {
-        public GenerationResult {
-            Objects.requireNonNull(question, "question");
-            Objects.requireNonNull(kind, "kind");
+                                   InterviewSpecialty specialty, Hot100Catalog.Problem selectedAlgorithm,
+                                   boolean completed) {
+        public GenerationResult(InterviewQuestion question, Kind kind, String parentQuestionId,
+                                int mainQuestionIndex, Hot100Catalog.Algorithm algorithm,
+                                InterviewSpecialty specialty, Hot100Catalog.Problem selectedAlgorithm) {
+            this(question, kind, parentQuestionId, mainQuestionIndex, algorithm, specialty, selectedAlgorithm, false);
         }
+        public GenerationResult {
+            if (!completed) {
+                Objects.requireNonNull(question, "question");
+                Objects.requireNonNull(kind, "kind");
+            } else if (question != null || kind != null) {
+                throw new IllegalArgumentException("完成结果不能携带下一题");
+            }
+        }
+        public static GenerationResult completion() { return new GenerationResult(null, null, null, 0, null, null, null, true); }
     }
 
     /**
@@ -531,7 +1006,12 @@ public class InterviewService {
                 if (!state.turns.isEmpty()) throw new InterviewException(409, "首题已生成，不能再认领首题操作");
             } else {
                 if (state.currentQuestionId != null) throw new InterviewException(409, "当前题尚未回答");
-                if (state.turns.isEmpty() || state.turns.get(state.turns.size() - 1).answer() == null)
+                if (state.turns.isEmpty())
+                    throw new InterviewException(409, "没有可推进的已保存回答");
+                Turn last = state.turns.get(state.turns.size() - 1);
+                Context context = state.contexts.get(last.questionId());
+                String rootId = context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : last.questionId();
+                if (last.answer() == null && !state.closedRootIds.contains(rootId))
                     throw new InterviewException(409, "没有可推进的已保存回答");
             }
             var backup = state.backup();
@@ -557,12 +1037,18 @@ public class InterviewService {
             if (!"ACTIVE".equals(state.status)) throw new InterviewException(409, "面试已结束，请开始新的面试");
             verifyActiveGeneration(state, generationId, expectedRevision);
             var backup = state.backup();
-            String questionId = UUID.randomUUID().toString();
-            state.questionContracts.put(questionId, result.question());
-            state.contexts.put(questionId, new Context(result.kind(), result.parentQuestionId(),
-                    result.mainQuestionIndex(), result.algorithm()));
-            state.turns.add(new Turn(questionId, result.question().text(), null));
-            state.currentQuestionId = questionId;
+            if (result.completed()) {
+                state.status = "FINISHED";
+                state.finishReason = "COMPLETED";
+                state.currentQuestionId = null;
+            } else {
+                String questionId = UUID.randomUUID().toString();
+                state.questionContracts.put(questionId, result.question());
+                state.contexts.put(questionId, new Context(result.kind(), result.parentQuestionId(),
+                        result.mainQuestionIndex(), result.algorithm()));
+                state.turns.add(new Turn(questionId, result.question().text(), null));
+                state.currentQuestionId = questionId;
+            }
             if (result.specialty() != null) state.specialty = result.specialty();
             if (result.selectedAlgorithm() != null) state.selectedAlgorithm = result.selectedAlgorithm();
             var generation = state.generation;
@@ -598,7 +1084,10 @@ public class InterviewService {
         Context context = null;
         InterviewQuestion parentContract = null;
         long followUpCount = 0;
+        long sessionFollowUpCount = 0;
+        boolean rootClosed = false;
         InterviewSpecialty specialty;
+        InterviewPlan plan;
         Hot100Catalog.Problem selected;
         synchronized (state) {
             verifyActiveGeneration(state, claim.generationId(), claim.expectedRevision());
@@ -608,8 +1097,9 @@ public class InterviewService {
             persist(state, backup);
             resume = state.resume;
             role = state.role;
-            history = List.copyOf(state.turns);
+            history = state.turns.stream().filter(turn -> !state.withdrawnQuestionIds.contains(turn.questionId())).toList();
             specialty = state.specialty;
+            plan = state.plan;
             selected = state.selectedAlgorithm;
             if (claim.kind() == InterviewSnapshot.GenerationKind.NEXT) {
                 Turn last = history.get(history.size() - 1);
@@ -617,9 +1107,18 @@ public class InterviewService {
                 String parentId = context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : last.questionId();
                 parentContract = state.questionContracts.get(parentId);
                 followUpCount = state.contexts.values().stream().filter(c -> parentId.equals(c.parentQuestionId())).count();
+                sessionFollowUpCount = state.contexts.values().stream().filter(c -> c.kind() == Kind.FOLLOW_UP).count();
+                rootClosed = state.closedRootIds.contains(parentId);
             }
         }
         if (claim.kind() == InterviewSnapshot.GenerationKind.OPENING) {
+            if (plan != null && "experience-v1".equals(plan.policyVersion())) {
+                InterviewQuestion question = withRetries(claim, InterviewSnapshot.GenerationStage.OPENING, ai,
+                        timeout -> agent.preparePlannedOpening(resume, plan, ai, timeout));
+                Hot100Catalog.Problem algorithm = plan.specialty().kind() == InterviewPlan.SpecialtyKind.ALGORITHM
+                        ? selected : null;
+                return new GenerationResult(question, Kind.MAIN, null, 1, null, specialty, algorithm);
+            }
             var opening = withRetries(claim, InterviewSnapshot.GenerationStage.OPENING, ai,
                     timeout -> agent.prepareOpening(resume, role, ai, timeout));
             Hot100Catalog.Problem algorithm = opening.specialty().kind() == InterviewSpecialty.Kind.ALGORITHM
@@ -631,14 +1130,24 @@ public class InterviewService {
         Turn last = history.get(history.size() - 1);
         Turn answered = new Turn(last.questionId(), last.question(), last.answer());
         int nextIndex = context.mainQuestionIndex() + 1;
-        boolean allowFollowUp = followUpCount < 2;
+        boolean planned = "experience-v1".equals(plan.policyVersion());
+        int mainCount = planned ? plan.mainCount() : MAIN_COUNT;
+        boolean hasSpecialty = planned
+                ? plan.plannedCount() > plan.mainCount()
+                : QUESTION_COUNT > MAIN_COUNT;
+        boolean allowFollowUp = !rootClosed && plan.allowsFollowUp(sessionFollowUpCount, followUpCount);
         InterviewAgent.Proposal proposal = allowFollowUp
                 ? withRetries(claim, InterviewSnapshot.GenerationStage.NEXT_DECISION, ai,
-                    timeout -> agent.prepareNext(resume, role, history, QUESTION_COUNT, nextIndex, true, ai, timeout))
-                : nextIndex <= MAIN_COUNT
+                    timeout -> prepareNext(resume, role, history, mainCount, nextIndex, true, plan, ai, timeout))
+                : nextIndex <= mainCount
                     ? withRetries(claim, InterviewSnapshot.GenerationStage.NEXT_DECISION, ai,
-                        timeout -> agent.prepareNext(resume, role, history, QUESTION_COUNT, nextIndex, false, ai, timeout))
+                        timeout -> prepareNext(resume, role, history, mainCount, nextIndex, false, plan, ai, timeout))
                     : new InterviewAgent.Proposal(null, false);
+        if (proposal.followUp() && !allowFollowUp)
+            throw new InterviewException(502, "模型生成的追问超出已确认计划",
+                    new InterviewFailure(InterviewFailure.Code.INVALID_OUTPUT, false,
+                            "模型生成的追问超出已确认计划", null));
+        if (!proposal.followUp() && nextIndex <= mainCount) validateCoverage(plan, proposal);
         if (proposal.followUp()) {
             InterviewQuestion q = proposal.question();
             InterviewQuestion frozen = new InterviewQuestion(q.text(), parentContract.competency(), parentContract.importance(),
@@ -646,22 +1155,71 @@ public class InterviewService {
             String parentId = context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : last.questionId();
             return new GenerationResult(frozen, Kind.FOLLOW_UP, parentId, context.mainQuestionIndex(), null, null, null);
         }
-        if (nextIndex == QUESTION_COUNT) {
+        if (nextIndex <= mainCount)
+            return new GenerationResult(proposal.question(), Kind.MAIN, null, nextIndex, null, null, null);
+        if (!hasSpecialty) return GenerationResult.completion();
+        if (nextIndex == mainCount + 1) {
             InterviewQuestion q = specialty.kind() == InterviewSpecialty.Kind.ALGORITHM
                     ? withRetries(claim, InterviewSnapshot.GenerationStage.SPECIALTY, ai,
                         timeout -> agent.prepareAlgorithm(selected, ai, timeout))
                     : withRetries(claim, InterviewSnapshot.GenerationStage.SPECIALTY, ai,
-                        timeout -> agent.prepareCase(specialty, role, ai, timeout));
+                        timeout -> agent.prepareCase(specialty, role, plan.level(), ai, timeout));
             return new GenerationResult(q,
                     specialty.kind() == InterviewSpecialty.Kind.ALGORITHM ? Kind.ALGORITHM : Kind.CASE_STUDY,
-                    null, QUESTION_COUNT, specialty.kind() == InterviewSpecialty.Kind.ALGORITHM ? selected.overview() : null,
+                    null, mainCount + 1, specialty.kind() == InterviewSpecialty.Kind.ALGORITHM ? selected.overview() : null,
                     null, null);
         }
-        return new GenerationResult(proposal.question(), Kind.MAIN, null, nextIndex, null, null, null);
+        throw new InterviewException(502, "生成题目数量超出已确认计划",
+                new InterviewFailure(InterviewFailure.Code.INVALID_OUTPUT, false, "生成题目数量超出已确认计划", null));
+    }
+
+    private Set<String> usedAlgorithmIds(String owner, InterviewPlan.ResumeSource source) {
+        Set<String> used = new HashSet<>();
+        if (store != null) store.findBySource(owner, source).stream()
+                .map(InterviewSnapshot::selectedAlgorithm).filter(Objects::nonNull)
+                .map(Hot100Catalog.Problem::id).forEach(used::add);
+        synchronized (sessions) {
+            sessions.values().stream().filter(state -> state.owner.equals(owner) && state.plan != null
+                            && source.equals(state.plan.source()) && state.selectedAlgorithm != null)
+                    .map(state -> state.selectedAlgorithm.id()).forEach(used::add);
+        }
+        return Set.copyOf(used);
+    }
+
+    static String algorithmDifficulty(InterviewPlan.Level level) {
+        if (level == null) throw new IllegalArgumentException("计划难度不能为空");
+        return switch (level) {
+            case FOUNDATION -> "EASY";
+            case STANDARD -> "MEDIUM";
+            case ADVANCED -> "HARD";
+        };
     }
 
     @FunctionalInterface
     private interface TimedStage<T> { T run(int timeoutSeconds); }
+
+    private InterviewAgent.Proposal prepareNext(String resume, String role, List<Turn> history, int total,
+            int nextIndex, boolean allowFollowUp, InterviewPlan plan, AiClient ai) {
+        if ("experience-v1".equals(plan.policyVersion()))
+            return agent.preparePlannedNext(resume, role, history, total, nextIndex, allowFollowUp, plan, ai);
+        return agent.prepareNext(resume, role, history, total, nextIndex, allowFollowUp, ai);
+    }
+
+    private InterviewAgent.Proposal prepareNext(String resume, String role, List<Turn> history, int total,
+            int nextIndex, boolean allowFollowUp, InterviewPlan plan, AiClient ai, int timeoutSeconds) {
+        if ("experience-v1".equals(plan.policyVersion()))
+            return agent.preparePlannedNext(resume, role, history, total, nextIndex, allowFollowUp, plan, ai, timeoutSeconds);
+        return agent.prepareNext(resume, role, history, total, nextIndex, allowFollowUp, ai, timeoutSeconds);
+    }
+
+    private static void validateCoverage(InterviewPlan plan, InterviewAgent.Proposal proposal) {
+        if (plan != null && "experience-v1".equals(plan.policyVersion())
+                && (proposal.coverageId() == null
+                    || plan.coverage().stream().noneMatch(c -> c.id().equals(proposal.coverageId()))))
+            throw new InterviewException(502, "模型选择了未确认的考察方向",
+                    new InterviewFailure(InterviewFailure.Code.INVALID_OUTPUT, false,
+                            "模型选择了未确认的考察方向", null));
+    }
 
     /** Retry one model stage in place; completed earlier stages are retained in this call's stack. */
     private <T> T withRetries(InterviewGenerationCoordinator.GenerationClaim claim,
@@ -766,6 +1324,388 @@ public class InterviewService {
     }
 
     public record ReportTask(InterviewAgent.InterviewReport report, String operationId, boolean enqueue) {}
+    public record ReviewTask(InterviewAgent.InterviewReport report, String operationId, boolean enqueue) {}
+    public record PracticeTask(Session session, String rootQuestionId, String requestId, boolean enqueue) {}
+    public record PracticeContext(String resume, String role, InterviewAgent.AssessmentInput input, List<Turn> history) {}
+    public record AttemptTask(InterviewAttempt attempt, boolean enqueue) {}
+    public record AttemptContext(String resume, String role, InterviewAgent.AssessmentInput input,
+            List<Turn> history, InterviewAssessment baseline, String rubricVersion, String operationId) {}
+
+    /** QUICK-only, atomic close-and-queue so no unprompted first answer can race with displayed feedback. */
+    public PracticeTask queuePracticeFeedback(String owner, String id, String questionId, String requestId, long expectedRevision) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > 120)
+            throw new IllegalArgumentException("反馈请求 ID 不能为空且不能超过 120 字");
+        State state = find(owner, id);
+        synchronized (state) {
+            if (state.plan == null || !"experience-v1".equals(state.plan.policyVersion())
+                    || state.plan.mode() != InterviewPlan.Mode.QUICK)
+                throw new InterviewException(409, "只有快速练习可以在题组结束后查看教学反馈");
+            if (!"ACTIVE".equals(state.status)) throw new InterviewException(409, "本轮已结束");
+            Context context = state.contexts.get(questionId);
+            if (context == null) throw new InterviewException(404, "题目不存在");
+            String rootId = context.kind() == Kind.FOLLOW_UP ? context.parentQuestionId() : questionId;
+            Turn root = state.turns.stream().filter(t -> t.questionId().equals(rootId)).findFirst().orElse(null);
+            if (root == null || root.answer() == null || context.kind().isSpecialty())
+                throw new InterviewException(409, "请先保存主问题回答，再查看题组反馈");
+            var previous = state.practiceFeedbacks.get(rootId);
+            if (previous != null && previous.requestId().equals(requestId))
+                return new PracticeTask(state.snapshot(), rootId, requestId, false);
+            if (previous != null && previous.status() != InterviewPracticeFeedback.Status.FAILED)
+                throw new InterviewException(409, "这个题组已经关闭或正在生成反馈");
+            if (state.closedRootIds.contains(rootId)) throw new InterviewException(409, "题组已关闭，不能再次查看反馈");
+            if (expectedRevision != state.revision) throw new InterviewException(409, "状态已变化，请刷新后重试");
+            var backup = state.backup();
+            state.closedRootIds.add(rootId);
+            state.currentQuestionId = null;
+            state.pending = null;
+            if (state.generation != null && isActiveGeneration(state.generation.state()))
+                state.generation = withState(state.generation, InterviewSnapshot.GenerationState.CANCELLED,
+                        new InterviewFailure(InterviewFailure.Code.INTERRUPTED, false, "题组已关闭并开始反馈", null));
+            state.practiceFeedbacks.put(rootId, new InterviewPracticeFeedback(requestId,
+                    InterviewPracticeFeedback.Status.QUEUED, null, ""));
+            state.revision++;
+            persist(state, backup);
+            return new PracticeTask(state.snapshot(), rootId, requestId, true);
+        }
+    }
+
+    public PracticeContext practiceContext(String owner, String id, String rootId, String requestId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var feedback = state.practiceFeedbacks.get(rootId);
+            if (feedback == null || !feedback.requestId().equals(requestId)
+                    || feedback.status() != InterviewPracticeFeedback.Status.RUNNING)
+                throw new InterviewException(409, "反馈任务已失效");
+            var root = state.turns.stream().filter(t -> t.questionId().equals(rootId)).findFirst().orElseThrow();
+            var followUps = state.turns.stream().filter(t -> {
+                Context c = state.contexts.get(t.questionId());
+                return c != null && rootId.equals(c.parentQuestionId()) && t.answer() != null;
+            }).toList();
+            var input = new InterviewAgent.AssessmentInput(root, state.questionContracts.get(rootId), followUps);
+            return new PracticeContext(state.resume, state.role, input, List.copyOf(state.turns));
+        }
+    }
+
+    public boolean startPracticeFeedback(String owner, String id, String rootId, String requestId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var old = state.practiceFeedbacks.get(rootId);
+            if (old == null || !old.requestId().equals(requestId) || old.status() != InterviewPracticeFeedback.Status.QUEUED) return false;
+            var backup = state.backup();
+            state.practiceFeedbacks.put(rootId, new InterviewPracticeFeedback(requestId, InterviewPracticeFeedback.Status.RUNNING, null, ""));
+            state.stateVersion++;
+            persist(state, backup);
+            return true;
+        }
+    }
+
+    public void completePracticeFeedback(String owner, String id, String rootId, String requestId, InterviewAssessment assessment) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var old = state.practiceFeedbacks.get(rootId);
+            if (old == null || !old.requestId().equals(requestId) || old.status() != InterviewPracticeFeedback.Status.RUNNING) return;
+            if (assessment == null) throw new InterviewException(502, "反馈结果为空");
+            var backup = state.backup();
+            state.assessments.put(rootId, assessment);
+            state.practiceFeedbacks.put(rootId, new InterviewPracticeFeedback(requestId, InterviewPracticeFeedback.Status.COMPLETE, assessment, ""));
+            state.stateVersion++;
+            persist(state, backup);
+        }
+    }
+
+    public void failPracticeFeedback(String owner, String id, String rootId, String requestId, String error) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var old = state.practiceFeedbacks.get(rootId);
+            if (old == null || !old.requestId().equals(requestId)
+                    || old.status() != InterviewPracticeFeedback.Status.RUNNING && old.status() != InterviewPracticeFeedback.Status.QUEUED) return;
+            var backup = state.backup();
+            state.practiceFeedbacks.put(rootId, new InterviewPracticeFeedback(requestId, InterviewPracticeFeedback.Status.FAILED, null,
+                    error == null || error.isBlank() ? "本题反馈暂不可用，可以继续下一题。" : error));
+            state.stateVersion++;
+            persist(state, backup);
+        }
+    }
+
+    public AttemptTask submitAttempt(String owner, String id, String questionId, String requestId, String answer) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > 120)
+            throw new IllegalArgumentException("重答请求 ID 不能为空且不能超过 120 字");
+        if (answer == null || answer.isBlank() || answer.strip().length() > 5000)
+            throw new IllegalArgumentException("重答须为 1–5000 字");
+        State state = find(owner, id);
+        synchronized (state) {
+            var duplicate = state.attempts.values().stream().filter(a -> a.requestId().equals(requestId)).findFirst();
+            if (duplicate.isPresent()) {
+                var old = duplicate.get();
+                if (!old.questionId().equals(questionId) || !old.answer().equals(answer.strip()))
+                    throw new InterviewException(409, "重答请求 ID 已用于另一份内容");
+                return new AttemptTask(old, false);
+            }
+            Context context = state.contexts.get(questionId);
+            if (context == null || context.kind() == Kind.FOLLOW_UP)
+                throw new InterviewException(404, "根问题不存在");
+            String rootId = questionId;
+            if ("ACTIVE".equals(state.status)) {
+                if (state.plan == null || state.plan.mode() != InterviewPlan.Mode.QUICK
+                        || !state.closedRootIds.contains(rootId))
+                    throw new InterviewException(409, "完整面试请结束后再重答；快速练习需先关闭本题组");
+            } else if (!"FINISHED".equals(state.status)) throw new InterviewException(409, "本轮状态不支持重答");
+            Turn original = state.turns.stream().filter(t -> t.questionId().equals(rootId)).findFirst().orElse(null);
+            if (original == null || original.answer() == null) throw new InterviewException(409, "首答尚未保存，不能创建重答");
+            int count = (int) state.attempts.values().stream().filter(a -> a.questionId().equals(rootId)).count();
+            if (count >= 5) throw new InterviewException(409, "每道题最多保存五版重答");
+            var contract = state.questionContracts.get(rootId);
+            if (contract == null) throw new InterviewException(409, "首题评分标准暂不可用，不能重答");
+            var attempt = new InterviewAttempt(UUID.randomUUID().toString(), requestId, UUID.randomUUID().toString(),
+                    rootId, count + 1, answer, InterviewAttempt.Status.PENDING, null, null, "",
+                    contract.rubricVersion(), "");
+            var backup = state.backup();
+            state.attempts.put(attempt.attemptId(), attempt);
+            state.stateVersion++;
+            persist(state, backup);
+            return new AttemptTask(attempt, true);
+        }
+    }
+
+    public InterviewAttempt getAttempt(String owner, String id, String attemptId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            InterviewAttempt attempt = state.attempts.get(attemptId);
+            if (attempt == null) throw new InterviewException(404, "重答记录不存在");
+            return attempt;
+        }
+    }
+
+    public List<InterviewAttempt> listAttempts(String owner, String id, String questionId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            if (!state.contexts.containsKey(questionId)) throw new InterviewException(404, "根问题不存在");
+            return state.attempts.values().stream().filter(attempt -> attempt.questionId().equals(questionId))
+                    .sorted(java.util.Comparator.comparingInt(InterviewAttempt::version)).toList();
+        }
+    }
+
+    public AttemptTask retryAttempt(String owner, String id, String attemptId, String requestId) {
+        if (requestId == null || requestId.isBlank() || requestId.length() > 120)
+            throw new IllegalArgumentException("补评请求 ID 不能为空且不能超过 120 字");
+        State state = find(owner, id);
+        synchronized (state) {
+            InterviewAttempt old = state.attempts.get(attemptId);
+            if (old == null) throw new InterviewException(404, "重答记录不存在");
+            String retryOperationId = UUID.nameUUIDFromBytes((attemptId + "\n" + requestId)
+                    .getBytes(java.nio.charset.StandardCharsets.UTF_8)).toString();
+            if (old.operationId().equals(retryOperationId)) return new AttemptTask(old, false);
+            if (old.status() == InterviewAttempt.Status.PENDING || old.status() == InterviewAttempt.Status.RUNNING)
+                return new AttemptTask(old, false);
+            if (old.status() != InterviewAttempt.Status.FAILED) throw new InterviewException(409, "只有评分失败的重答可以补评");
+            var backup = state.backup();
+            var retry = new InterviewAttempt(old.attemptId(), old.requestId(), retryOperationId, old.questionId(),
+                    old.version(), old.answer(), InterviewAttempt.Status.PENDING, null, null, "", old.rubricVersion(), "");
+            state.attempts.put(attemptId, retry);
+            state.stateVersion++;
+            persist(state, backup);
+            return new AttemptTask(retry, true);
+        }
+    }
+
+    public boolean startAttempt(String owner, String id, String attemptId, String operationId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var old = state.attempts.get(attemptId);
+            if (old == null || !old.operationId().equals(operationId) || old.status() != InterviewAttempt.Status.PENDING) return false;
+            var backup = state.backup();
+            state.attempts.put(attemptId, new InterviewAttempt(old.attemptId(), old.requestId(), old.operationId(), old.questionId(),
+                    old.version(), old.answer(), InterviewAttempt.Status.RUNNING, null, null, "", old.rubricVersion(), ""));
+            state.stateVersion++; persist(state, backup); return true;
+        }
+    }
+
+    public AttemptContext attemptContext(String owner, String id, String attemptId, String operationId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var attempt = state.attempts.get(attemptId);
+            if (attempt == null || !attempt.operationId().equals(operationId) || attempt.status() != InterviewAttempt.Status.RUNNING)
+                throw new InterviewException(409, "重答评分操作已失效");
+            Turn original = state.turns.stream().filter(t -> t.questionId().equals(attempt.questionId())).findFirst().orElseThrow();
+            var response = new Turn(original.questionId(), original.question(), attempt.answer());
+            var input = new InterviewAgent.AssessmentInput(response, state.questionContracts.get(attempt.questionId()), List.of());
+            return new AttemptContext(state.resume, state.role, input, List.copyOf(state.turns),
+                    state.assessments.get(attempt.questionId()), attempt.rubricVersion(), operationId);
+        }
+    }
+
+    public void completeAttempt(String owner, String id, String attemptId, String operationId, InterviewAssessment feedback) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var old = state.attempts.get(attemptId);
+            if (old == null || !old.operationId().equals(operationId) || old.status() != InterviewAttempt.Status.RUNNING) return;
+            if (feedback == null || !old.questionId().equals(feedback.questionId())) throw new InterviewException(502, "重答评分结果无效");
+            var comparison = InterviewAttemptComparison.compare(state.assessments.get(old.questionId()), feedback,
+                    state.questionContracts.get(old.questionId()).rubricVersion(), old.rubricVersion());
+            var backup = state.backup();
+            state.attempts.put(attemptId, new InterviewAttempt(old.attemptId(), old.requestId(), old.operationId(), old.questionId(),
+                    old.version(), old.answer(), InterviewAttempt.Status.COMPLETE, feedback, comparison,
+                    feedback.aiModel(), old.rubricVersion(), ""));
+            state.stateVersion++; persist(state, backup);
+        }
+    }
+
+    public void failAttempt(String owner, String id, String attemptId, String operationId, String error) {
+        State state = find(owner, id);
+        synchronized (state) {
+            var old = state.attempts.get(attemptId);
+            if (old == null || !old.operationId().equals(operationId)
+                    || old.status() != InterviewAttempt.Status.PENDING && old.status() != InterviewAttempt.Status.RUNNING) return;
+            var backup = state.backup();
+            state.attempts.put(attemptId, new InterviewAttempt(old.attemptId(), old.requestId(), old.operationId(), old.questionId(),
+                    old.version(), old.answer(), InterviewAttempt.Status.FAILED, null, null, "", old.rubricVersion(),
+                    error == null || error.isBlank() ? "重答评分暂不可用，可补评；答案已保存。" : error));
+            state.stateVersion++; persist(state, backup);
+        }
+    }
+    public record ReviewContext(Map<String, String> answers, Map<String, String> feedback,
+                                Set<String> scoredQuestionIds, long sourceVersion) {}
+
+    public record FocusedPracticeContext(InterviewPlan.ResumeSource source, String targetRole,
+            String jobDescription, InterviewPlan.Level level, InterviewPlan.CareerStage careerStage,
+            String sourceSessionId, List<InterviewPlan.PracticeTarget> targets) {}
+
+    /** Build focused targets only from the current, completed, evidence-validated review summary. */
+    public FocusedPracticeContext focusedPracticeContext(String owner, String id, List<String> issueIds) {
+        State state = find(owner, id);
+        synchronized (state) {
+            if (!"FINISHED".equals(state.status) || !"SUCCEEDED".equals(state.scoringState)
+                    || state.reviewSummary == null || state.reviewSummary.status() != InterviewReviewSummary.Status.COMPLETE
+                    || state.reviewSummary.sourceVersion() != state.scoringStateVersion)
+                throw new InterviewException(409, "需要先完成本轮报告重点归纳，再准备薄弱项练习");
+            if (issueIds == null || issueIds.isEmpty() || issueIds.size() > 3
+                    || issueIds.stream().anyMatch(value -> value == null || value.isBlank())
+                    || issueIds.stream().distinct().count() != issueIds.size())
+                throw new IllegalArgumentException("请选择 1–3 个不同的报告重点");
+            var selected = new LinkedHashMap<String, InterviewReviewSummary.PriorityIssue>();
+            for (var issue : state.reviewSummary.priorityIssues()) selected.put(issue.questionId(), issue);
+            if (!selected.keySet().containsAll(issueIds))
+                throw new IllegalArgumentException("练习目标必须来自本轮已验证报告重点");
+            var targets = issueIds.stream().map(selected::get).map(issue -> new InterviewPlan.PracticeTarget(
+                    issue.questionId(), issue.issue(), issue.suggestedAction(), List.of(issue.questionId()))).toList();
+            var original = state.plan;
+            var source = original == null
+                    ? new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, state.materialId)
+                    : original.source();
+            return new FocusedPracticeContext(source, state.role, original == null ? "" : original.jobDescription(),
+                    original == null ? InterviewPlan.Level.STANDARD : original.level(),
+                    original == null ? InterviewPlan.CareerStage.CAMPUS : original.careerStage(), id, targets);
+        }
+    }
+
+    public void validatePracticeSource(String owner, String id, List<InterviewPlan.PracticeTarget> targets) {
+        State state = find(owner, id);
+        synchronized (state) {
+            if (!"FINISHED".equals(state.status) || !"SUCCEEDED".equals(state.scoringState) || state.reviewSummary == null
+                    || state.reviewSummary.status() != InterviewReviewSummary.Status.COMPLETE
+                    || state.reviewSummary.sourceVersion() != state.scoringStateVersion)
+                throw new InterviewException(409, "来源报告重点已变化，请重新选择练习目标");
+            var expected = new LinkedHashMap<String, InterviewReviewSummary.PriorityIssue>();
+            state.reviewSummary.priorityIssues().forEach(issue -> expected.put(issue.questionId(), issue));
+            if (targets == null || targets.isEmpty() || targets.size() > 3 || targets.stream().anyMatch(target -> {
+                var issue = expected.get(target.issueId());
+                return issue == null || !issue.issue().equals(target.title())
+                        || !issue.suggestedAction().equals(target.action())
+                        || !target.sourceQuestionIds().equals(List.of(issue.questionId()));
+            })) throw new InterviewException(409, "来源报告重点已变化，请重新选择练习目标");
+        }
+    }
+
+    public ReviewTask queueReview(String owner, String id, String requestId, boolean retry) {
+        State state = find(owner, id);
+        synchronized (state) {
+            if (!"FINISHED".equals(state.status)) throw new InterviewException(409, "面试尚未结束，不能归纳报告重点");
+            var current = reportSnapshotLocked(state);
+            if (!"SUCCEEDED".equals(state.scoringState)) return new ReviewTask(current, state.reviewOperationId, false);
+            if (state.reviewSummary != null && state.reviewSummary.sourceVersion() == state.scoringStateVersion) {
+                if (state.reviewSummary.status() == InterviewReviewSummary.Status.COMPLETE
+                        || state.reviewSummary.status() == InterviewReviewSummary.Status.PENDING
+                        || (!retry && state.reviewSummary.status() == InterviewReviewSummary.Status.UNAVAILABLE))
+                    return new ReviewTask(current, state.reviewOperationId, false);
+                if (retry && Objects.equals(state.reviewRequestId, requestId)) return new ReviewTask(current, state.reviewOperationId, false);
+            }
+            var backup = state.backup();
+            state.reviewRequestId = requestId == null || requestId.isBlank() ? "review-get-" + id : requestId.strip();
+            state.reviewOperationId = UUID.randomUUID().toString();
+            state.reviewSummary = new InterviewReviewSummary(InterviewReviewSummary.Status.PENDING,
+                    state.scoringStateVersion, List.of(), "");
+            persist(state, backup);
+            return new ReviewTask(reportSnapshotLocked(state), state.reviewOperationId, true);
+        }
+    }
+
+    public boolean startReview(String owner, String id, String operationId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            return Objects.equals(state.reviewOperationId, operationId) && "FINISHED".equals(state.status)
+                    && "SUCCEEDED".equals(state.scoringState) && state.reviewSummary != null
+                    && state.reviewSummary.status() == InterviewReviewSummary.Status.PENDING
+                    && state.reviewSummary.sourceVersion() == state.scoringStateVersion;
+        }
+    }
+
+    public ReviewContext reviewContext(String owner, String id, String operationId) {
+        State state = find(owner, id);
+        synchronized (state) {
+            if (!Objects.equals(state.reviewOperationId, operationId) || state.reviewSummary == null
+                    || state.reviewSummary.status() != InterviewReviewSummary.Status.PENDING
+                    || state.reviewSummary.sourceVersion() != state.scoringStateVersion)
+                throw new InterviewException(409, "评分版本已变化，旧报告归纳已失效");
+            var feedbacks = assembleReport(state).turnFeedbacks().stream().filter(f -> "SCORED".equals(f.status())).toList();
+            var answers = new LinkedHashMap<String, String>(); var feedback = new LinkedHashMap<String, String>();
+            for (var item : feedbacks) {
+                if (item.questionId() == null || item.answer() == null) continue;
+                answers.put(item.questionId(), item.answer());
+                feedback.put(item.questionId(), "问题=" + item.question() + "；改进=" + item.improvement()
+                        + "；缺口=" + String.join("、", item.missingPoints()) + "；证据=" + String.join("、", item.evidence()));
+            }
+            return new ReviewContext(Map.copyOf(answers), Map.copyOf(feedback), Set.copyOf(answers.keySet()), state.scoringStateVersion);
+        }
+    }
+
+    public boolean completeReview(String owner, String id, String operationId,
+            List<InterviewReviewSummary.PriorityIssue> issues) {
+        State state = find(owner, id);
+        synchronized (state) {
+            if (!Objects.equals(state.reviewOperationId, operationId) || state.reviewSummary == null
+                    || state.reviewSummary.status() != InterviewReviewSummary.Status.PENDING
+                    || state.reviewSummary.sourceVersion() != state.scoringStateVersion || !"SUCCEEDED".equals(state.scoringState)) return false;
+            var context = reviewContext(owner, id, operationId);
+            var checked = InterviewReviewSummary.validate(issues,
+                    new InterviewReviewSummary.ValidationContext(context.answers(), context.scoredQuestionIds()));
+            var backup = state.backup();
+            state.reviewSummary = new InterviewReviewSummary(InterviewReviewSummary.Status.COMPLETE,
+                    context.sourceVersion(), checked, "");
+            persist(state, backup); return true;
+        }
+    }
+
+    public void failReview(String owner, String id, String operationId, String message) {
+        State state = find(owner, id);
+        synchronized (state) {
+            if (!Objects.equals(state.reviewOperationId, operationId) || state.reviewSummary == null
+                    || state.reviewSummary.status() != InterviewReviewSummary.Status.PENDING
+                    || state.reviewSummary.sourceVersion() != state.scoringStateVersion) return;
+            var backup = state.backup();
+            state.reviewSummary = new InterviewReviewSummary(InterviewReviewSummary.Status.UNAVAILABLE,
+                    state.scoringStateVersion, List.of(), message == null ? "报告重点归纳暂不可用，可重试。" : "报告重点归纳暂不可用，可重试。");
+            persist(state, backup);
+        }
+    }
+
+    private InterviewAgent.InterviewReport reportSnapshotLocked(State state) {
+        var report = assembleReport(state).withScoring(state.scoringState, state.scoringOperationId,
+                state.scoringStateVersion, state.scoringError);
+        var review = state.reviewSummary == null
+                ? new InterviewReviewSummary(InterviewReviewSummary.Status.PENDING, state.scoringStateVersion, List.of(), "")
+                : state.reviewSummary;
+        return report.withReview(review);
+    }
 
     /** Queue a durable scoring operation without holding the session monitor during model I/O. */
     public ReportTask queueReport(String owner, String id, String requestId, boolean retry) {
@@ -799,6 +1739,7 @@ public class InterviewService {
             state.scoringState = "QUEUED";
             state.scoringError = "";
             state.scoringStateVersion++;
+            state.reviewSummary = null; state.reviewOperationId = null; state.reviewRequestId = null;
             persist(state, backup);
             return new ReportTask(assembleReport(state).withScoring(state.scoringState, state.scoringOperationId,
                     state.scoringStateVersion, state.scoringError), state.scoringOperationId, true);
@@ -838,14 +1779,15 @@ public class InterviewService {
         State state = find(owner, id);
         synchronized (state) {
             if (!"FINISHED".equals(state.status)) throw new InterviewException(409, "面试尚未结束，不能查看报告");
-            return assembleReport(state).withScoring(state.scoringState, state.scoringOperationId,
-                    state.scoringStateVersion, state.scoringError);
+            return reportSnapshotLocked(state);
         }
     }
 
     private static InterviewAgent.InterviewReport assembleReport(State state) {
         return new InterviewReportAssembler().assemble(state.count, List.copyOf(state.turns),
-                Map.copyOf(state.questionContracts), Map.copyOf(state.assessments), Map.copyOf(state.contexts), state.finishReason);
+                Map.copyOf(state.questionContracts), Map.copyOf(state.assessments), Map.copyOf(state.contexts),
+                state.finishReason, state.plan, state.progress(), Set.copyOf(state.closedRootIds),
+                Set.copyOf(state.withdrawnQuestionIds));
     }
 
     public InterviewAgent.InterviewReport report(String owner, String id, Supplier<AiClient> client, boolean retry) {
@@ -945,5 +1887,25 @@ public class InterviewService {
                 throw new InterviewException(404, "面试不存在或已过期，请重新开始");
             return state;
         }
+    }
+
+    public void delete(String owner, String id) {
+        synchronized (sessions) {
+            State state = sessions.get(id);
+            if (state != null && !state.owner.equals(owner))
+                throw new InterviewException(404, "面试不存在或已过期，请重新开始");
+            if (state == null && store != null) {
+                var snapshot = store.find(owner, id);
+                if (snapshot.isEmpty() && !store.isDeleted(owner, id))
+                    throw new InterviewException(404, "面试不存在或已过期，请重新开始");
+            }
+            if (store != null) store.delete(owner, id);
+            sessions.remove(id);
+        }
+    }
+
+    public InterviewStore.HistoryPage history(String owner, int limit, String cursor) {
+        if (store == null) return new InterviewStore.HistoryPage(List.of(), null);
+        return store.list(owner, limit, cursor, clock.instant());
     }
 }

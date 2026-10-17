@@ -3,6 +3,16 @@ import assert from 'node:assert/strict'
 import { createInterviewApi } from './interview.js'
 
 const response = (data, status = 200) => new Response(JSON.stringify(data), { status })
+test('history listing forwards cursor and deletion targets exactly one session', async () => {
+  const calls = []
+  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { items: [], nextCursor: null } }) } })
+  await api.listHistory({ limit: 10, cursor: 'abc+/=' })
+  await api.deleteSession('one session')
+  assert.equal(calls[0][0], '/api/interviews?limit=10&cursor=abc%2B%2F%3D')
+  assert.equal(calls[0][1].method, 'GET')
+  assert.equal(calls[1][0], '/api/interviews/one%20session')
+  assert.equal(calls[1][1].method, 'DELETE')
+})
 test('session recovery forwards an optional abort signal and keeps existing reads compatible', async () => {
   const calls = []
   const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { sessionId: 's1' } }) } })
@@ -26,6 +36,18 @@ test('uses API origin, cookies and ephemeral AI headers with JSON bodies', async
   assert.equal(request[1].headers['X-AI-Base-Url'], 'https://model.example/v1')
   assert.equal(JSON.parse(request[1].body).materialId, 'm')
 })
+test('previews an owner-selected source without model credentials', async () => {
+  let request
+  const api = createInterviewApi({ fetchImpl: async (...args) => { request = args; return response({ success: true, data: {
+    source: { kind: 'RESUME_VERSION', id: 'v1' }, sourceLabel: 'Backend CV', resumeText: 'section\n- bullet', sourceFingerprint: 'abc'
+  } }) } })
+  const source = { kind: 'RESUME_VERSION', id: 'v1' }
+  const preview = await api.previewSource(source)
+  assert.equal(request[0], '/api/interviews/source/preview')
+  assert.deepEqual(JSON.parse(request[1].body), { source })
+  assert.equal(request[1].headers['X-AI-Api-Key'], undefined)
+  assert.equal(preview.sourceFingerprint, 'abc')
+})
 test('uploads multipart without overriding boundary and reads without AI credentials', async () => {
   const calls = []
   const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { material: { id: 'm' }, text: 'resume' } }) } })
@@ -45,6 +67,19 @@ test('sends turn and finish to their endpoints', async () => {
   assert.equal(calls[0][0], '/api/interviews/abc/turns')
   assert.equal(JSON.parse(calls[0][1].body).answer, 'hello')
   assert.equal(calls[1][0], '/api/interviews/abc/finish')
+})
+test('replacement sends the reason to the async, text-model endpoint with cancellation', async () => {
+  let request
+  const controller = new AbortController()
+  const api = createInterviewApi({ fetchImpl: async (...args) => { request = args; return response({ success: true, data: { status: 'ACTIVE' } }) } })
+  const body = { questionId: 'q1', requestId: 'r1', expectedRevision: 3, reason: '我没有参与这段经历' }
+  await api.replace('s /', body, controller.signal)
+  assert.equal(request[0], '/api/interviews/s%20%2F/replacements')
+  assert.deepEqual(JSON.parse(request[1].body), body)
+  assert.equal(request[1].headers['X-AI-Api-Key'], undefined)
+  assert.notEqual(request[1].signal, controller.signal)
+  controller.abort()
+  assert.equal(request[1].signal.aborted, false)
 })
 test('separated answer and generation APIs forward cancellation, text credentials and exact bodies', async () => {
   const calls = []; const controller = new AbortController()
@@ -78,6 +113,14 @@ test('finish sends optional body and forwards cancellation', async () => {
   assert.deepEqual(JSON.parse(request[1].body), body)
   assert.notEqual(request[1].signal, controller.signal)
   assert.equal(request[1].signal.aborted, false)
+})
+test('retryReview targets the separate summary operation and forwards a request ID', async () => {
+  let request
+  const api = createInterviewApi({ fetchImpl: async (...args) => { request = args; return response({ success: true, data: { reviewStatus: 'PENDING' } }) } })
+  await api.retryReview('review / id', { requestId: 'review-op-1' })
+  assert.equal(request[0], '/api/interviews/review%20%2F%20id/report/review/retry')
+  assert.deepEqual(JSON.parse(request[1].body), { requestId: 'review-op-1' })
+  assert.equal(request[1].headers['X-AI-Api-Key'], undefined)
 })
 test('short request timeout is distinct from model timeout and parses structured backend errors', async () => {
   const api = createInterviewApi({ requestTimeouts: { read: 5, write: 5 }, fetchImpl: async (_url, options) => new Promise((_resolve, reject) => {
@@ -209,4 +252,66 @@ test('async report requests expose scoring state and retries carry an idempotenc
   assert.equal(calls[0][1].method, 'GET')
   assert.equal(calls[1][1].method, 'POST')
   assert.deepEqual(JSON.parse(calls[1][1].body), { async: true, requestId: 'retry-1' })
+})
+
+
+test('prepares, reads and starts a planned interview with request fields', async () => {
+  const calls = []
+  const api = createInterviewApi({ baseUrl: 'https://svc.test', fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { status: 'READY', planId: 'p1' } }) } })
+  const plan = { source: { kind: 'MATERIAL', id: 'm1' }, mode: 'QUICK', mainCount: 3, requestId: 'r1' }
+  await api.preparePlan(plan); await api.getPlan('p1'); await api.startPlanned({ planId: 'p1', planVersion: 2, requestId: 'r2' })
+  assert.equal(calls[0][0], 'https://svc.test/api/interviews/plans')
+  assert.deepEqual(JSON.parse(calls[0][1].body), plan)
+  assert.equal(calls[1][0], 'https://svc.test/api/interviews/plans/p1')
+  assert.equal(calls[2][0], 'https://svc.test/api/interviews')
+  assert.deepEqual(JSON.parse(calls[2][1].body), { allowAlgorithmRepeat: false, planId: 'p1', planVersion: 2, requestId: 'r2', async: true })
+})
+
+test('prepares a focused practice plan from selected review issue IDs only', async () => {
+  const { setAiSettings } = await import('./requestContext.js')
+  setAiSettings({ apiKey: 'focused-key', model: 'focused-model' })
+  let request
+  const api = createInterviewApi({ fetchImpl: async (...args) => { request = args; return response({ success: true, data: { planId: 'p-focused' } }) } })
+  const body = { issueIds: ['q1', 'q2'], requestId: 'practice-1' }
+  await api.preparePracticePlan('s-source', body)
+  assert.equal(request[0], '/api/interviews/s-source/practice-plans')
+  assert.equal(request[1].method, 'POST')
+  assert.deepEqual(JSON.parse(request[1].body), body)
+  assert.equal(request[1].headers['X-AI-Api-Key'], 'focused-key')
+  setAiSettings({})
+})
+
+test('requests QUICK practice feedback by closing the root group with an idempotent request', async () => {
+  const { setAiSettings } = await import('./requestContext.js')
+  setAiSettings({ apiKey: 'feedback-key', model: 'feedback-model' })
+  let request
+  const api = createInterviewApi({ fetchImpl: async (...args) => { request = args; return response({ success: true, data: { practiceFeedbacks: {} } }) } })
+  const body = { questionId: 'root-1', requestId: 'feedback-1', expectedRevision: 8 }
+  await api.practiceFeedback('s1', body)
+  assert.equal(request[0], '/api/interviews/s1/feedback')
+  assert.equal(request[1].method, 'POST')
+  assert.deepEqual(JSON.parse(request[1].body), body)
+  assert.equal(request[1].headers['X-AI-Api-Key'], 'feedback-key')
+  setAiSettings({})
+})
+
+test('attempt API saves the answer first, reads a result and retries scoring on the same attempt ID', async () => {
+  const calls = []
+  const { setAiSettings } = await import('./requestContext.js')
+  setAiSettings({ apiKey: 'attempt-key', model: 'attempt-model' })
+  const api = createInterviewApi({ fetchImpl: async (...args) => { calls.push(args); return response({ success: true, data: { attemptId: 'a1', status: 'PENDING' } }) } })
+  await api.submitAttempt('s1', { questionId: 'q1', requestId: 'request-1', answer: '新回答' })
+  await api.listAttempts('s1', 'q1')
+  await api.getAttempt('s1', 'a1')
+  await api.retryAttempt('s1', 'a1', { requestId: 'retry-1' })
+  assert.equal(calls[0][0], '/api/interviews/s1/attempts')
+  assert.deepEqual(JSON.parse(calls[0][1].body), { questionId: 'q1', requestId: 'request-1', answer: '新回答' })
+  assert.equal(calls[0][1].headers['X-AI-Api-Key'], 'attempt-key')
+  assert.equal(calls[1][0], '/api/interviews/s1/attempts?questionId=q1')
+  assert.equal(calls[1][1].method, 'GET')
+  assert.equal(calls[2][0], '/api/interviews/s1/attempts/a1')
+  assert.equal(calls[2][1].method, 'GET')
+  assert.equal(calls[3][0], '/api/interviews/s1/attempts/a1/retry')
+  assert.deepEqual(JSON.parse(calls[3][1].body), { requestId: 'retry-1' })
+  setAiSettings({})
 })

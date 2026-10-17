@@ -49,6 +49,7 @@
                     <strong>{{ item.fileName }}</strong>
                     <span>{{ item.sizeText }} · {{ item.createdAt }}<template v-if="item.itemCount"> · 识别出 {{ item.itemCount }} 条</template></span>
                   </div>
+                  <button class="text-button" type="button" @click.stop="startInterviewWithMaterial(item)">用这份简历练习</button>
                   <span class="status-pill" :class="`status-${item.statusStyle}`"><i></i>{{ item.statusLabel }}</span>
                   <button class="icon-button" type="button" :aria-label="`删除 ${item.fileName}`" title="删除这份材料" @click.stop="remove(item)">✕</button>
                 </article>
@@ -143,6 +144,7 @@
 
 <script setup>
 import { computed, onMounted, ref } from 'vue'
+import { useRouter } from 'vue-router'
 import {
   deleteMaterial,
   fetchMaterial,
@@ -153,6 +155,12 @@ import {
 } from '../api/materials'
 import { getProfile, saveProfile as cacheProfile } from '../utils/demoProfile'
 import { hasAiKey } from '../api/client'
+import { newInterviewRoute } from '../interview/interviewNavigation.js'
+
+const router = useRouter()
+function startInterviewWithMaterial(item) {
+  if (item?.id) router.push(newInterviewRoute({ materialId: String(item.id) }))
+}
 
 /* ---------------------------------------------------------------------------
  * 为什么这里保存两次画像

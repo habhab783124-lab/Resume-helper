@@ -228,6 +228,7 @@ public class VolcengineSpeechClient implements SpeechClient {
      * 超时就关闭流并放弃这个半成品。
      */
     private SpeechAudio readTts(InputStream stream, String requestId, Duration deadline) {
+        long deadlineAtNanos = System.nanoTime() + Math.max(0L, deadline.toNanos());
         ExecutorService reader = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "tts-stream-reader");
             thread.setDaemon(true);
@@ -245,6 +246,13 @@ public class VolcengineSpeechClient implements SpeechClient {
             closeQuietly(stream);
             throw new InterviewException(504, "题目语音生成超时，请重试");
         } catch (ExecutionException e) {
+            // HttpClient can report the request deadline as an IOException from the
+            // stream reader just before Future#get reports TimeoutException.
+            if (System.nanoTime() >= deadlineAtNanos) {
+                log.warn("TTS 音频流消费超时 requestId={}", requestId);
+                closeQuietly(stream);
+                throw new InterviewException(504, "题目语音生成超时，请重试");
+            }
             if (e.getCause() instanceof InterviewException expected) {
                 throw expected;
             }
@@ -326,6 +334,7 @@ public class VolcengineSpeechClient implements SpeechClient {
 
     /** ASR 同样必须限制响应头到达之后的读取，避免占住 owner 与全局许可。 */
     private byte[] readAsrBody(InputStream stream, String requestId, Duration deadline) {
+        long deadlineAtNanos = System.nanoTime() + Math.max(0L, deadline.toNanos());
         ExecutorService reader = Executors.newSingleThreadExecutor(runnable -> {
             Thread thread = new Thread(runnable, "asr-response-reader");
             thread.setDaemon(true);
@@ -340,6 +349,14 @@ public class VolcengineSpeechClient implements SpeechClient {
             closeQuietly(stream);
             throw new InterviewException(504, "语音识别超时，请缩短录音后重试");
         } catch (ExecutionException e) {
+            // HttpClient may surface its request-body deadline as an IOException from
+            // the stream reader before Future#get reports TimeoutException. Preserve
+            // the deadline contract instead of mislabeling that race as HTTP 502.
+            if (System.nanoTime() >= deadlineAtNanos) {
+                log.warn("ASR 响应读取超时 requestId={}", requestId);
+                closeQuietly(stream);
+                throw new InterviewException(504, "语音识别超时，请缩短录音后重试");
+            }
             if (e.getCause() instanceof InterviewException expected) throw expected;
             throw new InterviewException(502, "语音服务返回异常，请重试");
         } catch (InterruptedException e) {

@@ -23,13 +23,6 @@ function hasOverallScore(r) {
     && Number.isFinite(r?.overallScore)
 }
 
-function scoreLevel(score) {
-  if (score >= 85) return '优秀 · 可以自信展现'
-  if (score >= 75) return '良好 · 有清晰的基础'
-  if (score >= 60) return '合格 · 方向对了，继续打磨'
-  return '需要加强 · 把建议落到实处'
-}
-
 function statusLabel(r) {
   const base = {
     COMPLETE: hasOverallScore(r) ? '评分已完成' : (r?.answeredCount > 0 ? '逐题反馈已完成' : '暂无评分'),
@@ -88,25 +81,29 @@ export function buildReportMarkdown(report, { session, role } = {}) {
   ]
   if (r.aiModel) meta.push(`评分模型：${r.aiModel}`)
   if (r.scoringVersion) meta.push(`评分版本：${r.scoringVersion}`)
+  meta.push(`重点归纳：${({ PENDING: '生成中', COMPLETE: '已完成', UNAVAILABLE: '暂不可用' })[r.reviewStatus] || '暂无'}`)
   meta.push(`生成时间：${new Date().toLocaleString('zh-CN')}`)
   lines.push(`> ${meta.join('  ·  ')}`, '')
 
-  if (hasOverallScore(r)) {
-    lines.push(`## 综合训练参考分`, '')
-    lines.push(`**${formatNumber(r.overallScore)} / 100** — ${scoreLevel(Number(r.overallScore))}`, '')
-    if (r.overallSummary) lines.push(r.overallSummary, '')
-  }
+  lines.push('## 覆盖范围', '', `计划 ${r.plannedCount ?? 0} 题；已回答 ${r.answeredCount ?? 0} 题；已评分 ${r.scoredCount ?? 0} 题；未回答 ${Math.max(0, (r.plannedCount ?? 0) - (r.answeredCount ?? 0))} 题。`, '')
+
+  lines.push('## 优先改进重点', '')
+  if (r.reviewStatus === 'COMPLETE' && r.priorityIssues?.length) {
+    const turns = reviewedTurns(r, session)
+    r.priorityIssues.slice(0, 3).forEach((issue, index) => {
+      const turn = turns.find(item => item.questionId === issue.questionId)
+      lines.push(`### ${String(index + 1).padStart(2, '0')} · ${turn?.question || `题目 ${issue.questionId}`}`, '', issue.issue,
+        '', `> 回答证据：${issue.evidenceQuote}`, '', `下一步：${issue.suggestedAction}`, '')
+    })
+  } else if (r.reviewStatus === 'PENDING') lines.push('评分完成后生成；逐题反馈仍可查看。', '')
+  else if (r.reviewStatus === 'UNAVAILABLE') lines.push(r.reviewError || '重点归纳暂不可用；已有逐题反馈仍有效。', '')
+  else lines.push('暂无优先改进重点。', '')
+
+  if (r.suggestions?.length) lines.push('## 下一步练习建议', '', bulletList(r.suggestions), '')
 
   if (r.strengths?.length) {
     lines.push('## 做得不错的地方', '', bulletList(r.strengths), '')
   }
-  if (r.gaps?.length) {
-    lines.push('## 下一次可以加强', '', bulletList(r.gaps), '')
-  }
-  if (r.suggestions?.length) {
-    lines.push('## 下一步练习建议', '', bulletList(r.suggestions), '')
-  }
-
   const turns = reviewedTurns(r, session)
   if (turns.length) {
     lines.push('## 逐题反馈', '')
@@ -168,6 +165,13 @@ export function buildReportMarkdown(report, { session, role } = {}) {
       }
     })
   }
+
+  lines.push('## 评分说明', '')
+  if (hasOverallScore(r)) lines.push(`**综合训练参考分：${formatNumber(r.overallScore)} / 100**`, '')
+  else lines.push('本次未覆盖或未评分的题目不计零分；暂无完整综合分。', '')
+  if (r.overallSummary) lines.push(r.overallSummary, '')
+  if (r.gaps?.length) lines.push('**逐题评分发现**', '', bulletList(r.gaps), '')
+  lines.push('题目权重在提问前冻结；追问并入父题。分数仅供训练参考，未经过外部校准。', '')
 
   return lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n'
 }

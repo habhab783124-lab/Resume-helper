@@ -29,7 +29,8 @@ public record InterviewPlan(
         ResumeSource source,
         String sourceLabel,
         String sourceFingerprint,
-        List<PracticeTarget> practiceTargets) {
+        List<PracticeTarget> practiceTargets,
+        String sourceSessionId) {
 
     public enum Mode { QUICK, FULL }
     public enum Level { FOUNDATION, STANDARD, ADVANCED }
@@ -48,6 +49,24 @@ public record InterviewPlan(
         sourceFingerprint = sourceFingerprint == null ? "" : sourceFingerprint;
         coverage = coverage == null ? List.of() : List.copyOf(coverage);
         practiceTargets = practiceTargets == null ? List.of() : List.copyOf(practiceTargets);
+        sourceSessionId = sourceSessionId == null ? "" : sourceSessionId;
+    }
+
+    public InterviewPlan(String policyVersion, Mode mode, int mainCount, int plannedCount, Integer followUpBudget,
+            int maxFollowUpsPerMain, Level level, CareerStage careerStage, String targetRole, String jobDescription,
+            Specialty specialty, List<Coverage> coverage, ResumeSource source, String sourceLabel,
+            String sourceFingerprint, List<PracticeTarget> practiceTargets) {
+        this(policyVersion, mode, mainCount, plannedCount, followUpBudget, maxFollowUpsPerMain, level, careerStage,
+                targetRole, jobDescription, specialty, coverage, source, sourceLabel, sourceFingerprint,
+                practiceTargets, "");
+    }
+
+    /** Enforces both the per-root cap and the session-wide allowance; legacy plans have no session cap. */
+    public boolean allowsFollowUp(long sessionFollowUps, long rootFollowUps) {
+        if (sessionFollowUps < 0 || rootFollowUps < 0)
+            throw new IllegalArgumentException("追问计数不能为负数");
+        return rootFollowUps < maxFollowUpsPerMain
+                && (followUpBudget == null || sessionFollowUps < followUpBudget);
     }
 
     /**
@@ -59,7 +78,7 @@ public record InterviewPlan(
                 InterviewService.MAIN_COUNT, InterviewService.QUESTION_COUNT,
                 null, 2, null, null, targetRole, "",
                 new Specialty(SpecialtyKind.NONE, "", ""), List.of(),
-                source, "", "", List.of());
+                source, "", "", List.of(), "");
     }
 
     public record Specialty(SpecialtyKind kind, String focus, String reason) {

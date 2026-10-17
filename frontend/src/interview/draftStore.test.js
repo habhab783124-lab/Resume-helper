@@ -116,3 +116,13 @@ test('remove clears a single question and keeps siblings', () => {
   assert.equal(drafts.load('s1', 'q1'), null)
   assert.equal(drafts.load('s1', 'q2').text, '乙')
 })
+
+test('removeSession clears every question draft for one session only', () => {
+  const storage = memoryStorage()
+  const drafts = createDraftStore({ storage, scope: { apiBaseUrl: 'http://api', userId: 'alice' } })
+  drafts.save('s1', 'q1', { text: '甲' }); drafts.save('s1', 'q2', { text: '乙' })
+  drafts.save('s2', 'q1', { text: '丙' })
+  assert.equal(drafts.removeSession('s1'), 2)
+  assert.equal(drafts.load('s1', 'q1'), null)
+  assert.equal(drafts.load('s2', 'q1').text, '丙')
+})

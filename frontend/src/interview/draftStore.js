@@ -106,6 +106,22 @@ export function createDraftStore(options = {}) {
     }
   }
 
+  function removeSession(sessionId) {
+    if (!sessionId) return 0
+    let removed = 0
+    const prefix = `${keyPrefix}|${scope.apiBaseUrl}|${scope.userId}|${sessionId}|`
+    try {
+      const doomed = []
+      for (let index = 0; index < storage.length; index += 1) {
+        const key = storage.key(index)
+        if (key?.startsWith(prefix)) doomed.push(key)
+      }
+      doomed.forEach(key => storage.removeItem(key))
+      removed = doomed.length
+    } catch { /* 本地存储不可用时不阻塞服务端删除。 */ }
+    return removed
+  }
+
   function clearScope() {
     let removed = 0
     try {
@@ -122,5 +138,5 @@ export function createDraftStore(options = {}) {
     return removed
   }
 
-  return { save, load, remove, clearScope, keyFor: (sessionId, questionId) => storageKey(scope, sessionId, questionId) }
+  return { save, load, remove, removeSession, clearScope, keyFor: (sessionId, questionId) => storageKey(scope, sessionId, questionId) }
 }

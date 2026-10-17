@@ -16,8 +16,8 @@ public class InterviewProperties {
     /** 快照存放目录；相对路径相对于 JVM 工作目录。 */
     private String storageDir = "./data/interviews";
 
-    /** 阶段 A 新快照的保留天数：创建起 24 小时，expiresAt 创建时冻结。 */
-    private int retentionDays = 1;
+    /** 新快照保留天数；expiresAt 在创建时冻结。 */
+    private int retentionDays = 30;
 
     /** 每次生成操作最多额外自动重试次数；总计最多 1 + maxRetries 次模型请求。 */
     private int maxRetries = 5;

@@ -8,11 +8,11 @@ import { isSpecialty, specialtyLabel, answerGuidance } from '../interview/specia
 const source = readFileSync(new URL('../views/Report.vue', import.meta.url), 'utf8')
 const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import\s.*$/gm, '').replace(/import\.meta\.env/g, '({})')
-  + '\nreturn { report, session, loading, retryBusy, error, hasOverallScore, needsScoring, scoreLevel, scoreColor, statusLabel, scopeLabel, reviewedTurns, loadReport, retryScoring, expandPrintDetails, restorePrintDetails, onExportMarkdown, onExportPdf, questionLabel, algorithmUrl };'
+  + '\nreturn { report, session, loading, retryBusy, reviewBusy: typeof reviewBusy === "undefined" ? null : reviewBusy, error, hasOverallScore, needsScoring, reviewStatusLabel: typeof reviewStatusLabel === "undefined" ? null : reviewStatusLabel, statusLabel, scopeLabel, reviewedTurns, loadReport, retryScoring, retryReview: typeof retryReview === "undefined" ? null : retryReview, expandPrintDetails, restorePrintDetails, onExportMarkdown, onExportPdf, questionLabel, algorithmUrl };'
 function mount(api, sessionId = 's1', browser = {}) {
   const mounted = [], unmounted = []
-  const view = new Function('ref', 'computed', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'window', 'document', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
-    ref, computed, fn => mounted.push(fn), fn => unmounted.push(fn), () => ({ query: { sessionId } }), () => ({ push() {} }), () => api, browser.window, browser.document, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance)
+  const view = new Function('ref', 'computed', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'window', 'document', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', body)(
+    ref, computed, () => {}, fn => mounted.push(fn), fn => unmounted.push(fn), () => ({ query: { sessionId } }), () => ({ push() {} }), () => api, browser.window, browser.document, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance)
   return { ...view, mounted, unmounted }
 }
 const feedback = (questionId, status = 'SCORED', score = 80) => ({ questionId, index: 1, question: `问题 ${questionId}`, answer: `回答 ${questionId}`, status, score,
@@ -25,18 +25,18 @@ const api = value => ({ report: async () => value, getSession: async () => ({ tu
 
 test('COMPLETE requires a finite numeric score and legal zero remains a score', async () => {
   const view = mount(api(result())); await view.loadReport()
-  assert.equal(view.hasOverallScore.value, true); assert.match(view.scoreLevel.value, /良好/)
+  assert.equal(view.hasOverallScore.value, true)
   view.report.value = result('COMPLETE', 0)
-  assert.equal(view.hasOverallScore.value, true); assert.match(view.scoreLevel.value, /需要加强/)
+  assert.equal(view.hasOverallScore.value, true)
   for (const score of [null, undefined, '80', NaN, Infinity]) {
     view.report.value = { ...result(), overallScore: score }
-    assert.equal(view.hasOverallScore.value, false); assert.equal(view.scoreLevel.value, ''); assert.equal(view.scoreColor.value, '')
+    assert.equal(view.hasOverallScore.value, false)
   }
 })
 test('partial, unavailable and empty never invent an overall score or level', async () => {
   for (const [status, label, retry] of [['PARTIAL', '待评分', true], ['UNAVAILABLE', '评分暂不可用', true], ['EMPTY', '暂无评分', false]]) {
     const view = mount(api(result(status, null))); await view.loadReport()
-    assert.equal(view.hasOverallScore.value, false); assert.equal(view.scoreLevel.value, ''); assert.equal(view.scoreColor.value, '')
+    assert.equal(view.hasOverallScore.value, false)
     assert.equal(view.statusLabel.value, label); assert.equal(view.needsScoring.value, retry)
   }
 })
@@ -89,7 +89,7 @@ test('template exposes all evidence dimensions, status guards and text-safe prin
   for (const field of ['dimensionScores', 'evidence', 'missingPoints', 'suggestedOutline', 'weightPercent', 'weightedContribution', 'weightReason']) assert.ok(source.includes(field))
   for (const dimension of ['CORRECTNESS', 'COVERAGE', 'REASONING', 'EVIDENCE', 'CLARITY']) assert.ok(source.includes(dimension))
   assert.match(source, /:key="fb.questionId"/); assert.doesNotMatch(source, /v-html|overallScore\s*\?\?\s*0|目前回答比较完整/)
-  assert.match(source, /出题前锁定相对权重/); assert.match(source, /主问题合计 80%/); assert.match(source, /专项题固定 20%/)
+  assert.match(source, /主问题合计 80%.*岗位专项题固定 20%/s)
   assert.match(source, /fb.followUps/); assert.match(source, /追问.*并入/)
   assert.match(source, /@media print/); assert.match(source, /export-menu/); assert.match(source, /onExportPdf/)
 })
@@ -135,4 +135,22 @@ test('PDF export helpers expand all question details then restore prior open sta
   // 导出 handler 已绑定（实际 DOM/依赖在 node 下不可用，仅校验契约）
   assert.equal(typeof view.onExportMarkdown, 'function')
   assert.equal(typeof view.onExportPdf, 'function')
+})
+
+test('review retry is independent from scoring retry and the report presents coverage, priorities, next steps, strengths, details, then scoring', async () => {
+  const value = { ...result('PARTIAL', null), scoringState: 'SUCCEEDED', reviewStatus: 'UNAVAILABLE', reviewError: '归纳不可用', priorityIssues: [] }
+  const calls = []
+  const view = mount({ report: async () => value, getSession: async () => ({ turns: [] }),
+    retryReview: async (_id, body) => { calls.push(['review', body]); return { ...value, reviewStatus: 'PENDING' } },
+    retryReport: async () => { calls.push(['scoring']); return value } })
+  await view.loadReport()
+  assert.equal(view.reviewStatusLabel.value, '重点归纳暂不可用')
+  await view.retryReview()
+  assert.deepEqual(calls.map(call => call[0]), ['review'])
+  assert.equal(view.report.value.scoringState, 'SUCCEEDED')
+  const order = ['report-coverage', 'priority-review', 'next-actions', 'positive-feedback', 'question-review', 'scoring-details']
+    .map(marker => source.indexOf(`data-testid="${marker}"`))
+  assert.ok(order.every(index => index >= 0))
+  assert.deepEqual(order, [...order].sort((a, b) => a - b))
+  assert.doesNotMatch(source, /优秀 · 可以自信展现|良好 · 有清晰的基础|需要加强 · 把建议落到实处/)
 })

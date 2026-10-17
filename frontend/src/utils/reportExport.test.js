@@ -44,7 +44,7 @@ test('COMPLETE 报告：含综合分、五维、追问、算法题链接', () =>
   assert.match(md, /已答 13\/13 题/)
   assert.match(md, /评分模型：demo-model/)
   assert.match(md, /82 \/ 100/)
-  assert.match(md, /良好 · 有清晰的基础/)
+  assert.doesNotMatch(md, /优秀|良好 ·|合格 ·|需要加强/)
   assert.match(md, /整体表现良好。/)
   assert.match(md, /讲讲你的项目。/)
   assert.match(md, /状态：已评分  ·  得分：80 \/ 100  ·  加权贡献：8 分/)
@@ -101,4 +101,17 @@ test('question/answer 缺失时从 session.turns 回填', () => {
   )
   assert.match(md, /回填题目/)
   assert.match(md, /回填回答/)
+})
+
+test('Markdown export puts evidence-backed priorities before next steps and preserves coverage and scoring detail', () => {
+  const md = buildReportMarkdown(baseReport({ reviewStatus: 'COMPLETE', priorityIssues: [
+    { questionId: 'q1', kind: 'EVIDENCE', evidenceQuote: '我做过一个系统', issue: '没有说明规模', suggestedAction: '补充真实用户规模' },
+  ], turnFeedbacks: [scoredFeedback()] }), { role: '后端工程师', session: { turns: [] } })
+  assert.match(md, /已答 13\/13 题.*已评分 13 题/)
+  assert.match(md, /重点归纳：已完成/)
+  assert.ok(md.indexOf('## 优先改进重点') < md.indexOf('## 下一步练习建议'))
+  assert.ok(md.indexOf('## 下一步练习建议') < md.indexOf('## 做得不错的地方'))
+  assert.ok(md.indexOf('## 做得不错的地方') < md.indexOf('## 逐题反馈'))
+  assert.match(md, /证据：.*我做过一个系统/)
+  assert.match(md, /加权贡献：8 分/)
 })

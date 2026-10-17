@@ -16,10 +16,15 @@ const body = /<script setup>([\s\S]*?)<\/script>/.exec(source)[1]
   .replace(/^import\s.*$/gm, '').replace(/import\.meta\.env/g, '({})')
   + '\nreturn { applySession, start, material, completed, completedRoots, currentMetadata, questionLabel, algorithmUrl };'
 function mount(api = {}) {
-  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', body)(
+  const setupState = { source: ref(null), resumePreview: ref(null), targetRole: ref(''), jobDescription: ref(''), preferences: ref({}), planCurrent: ref(true), planPreview: ref({}), planError: ref(''), preparingPlan: ref(false), confirmingPlan: ref(false),
+    preparePlan: async () => null, confirmPlan: async () => ({ sessionId: 's', status: 'ACTIVE', turns: [turn('q1', null)], currentQuestion: turn('q1', null), questionCount: 5, questionMetadata: metadata }),
+    loadSource: async () => null, loadJob: async () => null, savePreparation() {}, restorePreparation() { return false },
+    clearPreparation() {}, switchScope() { return false } }
+  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'materialsApi', 'resumeApi', 'jobsApi', body)(
     ref, computed, reactive, watch, () => {}, () => {}, () => ({ query: {} }), () => ({ push() {} }), () => api,
     () => ({ save() { return { saved: true } }, load() { return null }, remove() { return true }, clearScope() { return 0 }, keyFor() { return '' } }), () => '', () => 'demo-user',
-    () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance, useInterviewPolling, useInterviewConversation, useInterviewFinish)
+    () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance, useInterviewPolling, useInterviewConversation, useInterviewFinish,
+    () => setupState, {}, {}, {})
 }
 const turn = (id, answer = '已回答') => ({ questionId: id, question: id, answer })
 const metadata = {
@@ -46,18 +51,16 @@ test('algorithm source links accept official problem URLs only', () => {
     assert.equal(view.algorithmUrl({ url }), '')
   }
 })
-test('starting uses fixed 13-question configuration and setup explains 12+1 and weights', async () => {
-  const sent = []
-  const first = { sessionId: 's', status: 'ACTIVE', turns: [turn('q1', null)], currentQuestion: turn('q1', null), questionCount: 13, questionMetadata: metadata }
-  const view = mount({ start: async payload => { sent.push(payload); return first } })
+test('starting requires a current confirmed plan and setup exposes mode controls', async () => {
+  const view = mount()
   view.material.value = { materialId: 'm', text: '简历' }
   await view.start()
-  assert.equal(sent[0].questionCount, 13)
-  assert.match(setupSource, /12 道主问题/)
-  assert.match(setupSource, /1 道岗位专项题/)
-  assert.match(setupSource, /80%/)
-  assert.match(setupSource, /追问不计入/)
-  assert.doesNotMatch(source, /v-model="questionCount"/)
+  assert.equal(view.currentMetadata.value.kind, 'MAIN')
+  assert.match(setupSource, /value="QUICK"/)
+  assert.match(setupSource, /value="FULL"/)
+  assert.match(setupSource, /生成计划预览/)
+  assert.match(setupSource, /确认计划并开始/)
+  assert.match(source, /setup\.confirmPlan\(\)/)
 })
 
 test('non-coding sessions retain the case plan and label question13 without algorithm wording', () => {

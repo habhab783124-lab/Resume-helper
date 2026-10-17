@@ -47,6 +47,7 @@ const toolItems = [
   { path: '/resume', label: '简历工作台', icon: 'i-file' },
   { path: '/jobs', label: '岗位匹配', icon: 'i-briefcase', count: '8' },
   { path: '/interview', label: '模拟面试', icon: 'i-mic' },
+  { path: '/interview/history', label: '面试历史', icon: 'i-clock' },
   { path: '/report', label: '面试报告', icon: 'i-chart' }
 ]
 // 凭据与服务配置不属于求职流程，单独成组。

@@ -49,6 +49,20 @@ class InterviewPersistenceTest {
     }
 
     @Test
+    void newSessionsUseThirtyDaysAndChangingPolicyDoesNotRewriteSavedExpiry() {
+        var store = store();
+        var first = service(store);
+        var session = first.start("ttl-user", "ttl-material", RESUME, "Java 后端", 13, echoAi());
+        Instant originalExpiry = store.find("ttl-user", session.sessionId()).orElseThrow().expiresAt();
+        assertEquals(NOW.plusSeconds(30L * 86400), originalExpiry);
+
+        var longerPolicy = new InterviewProperties();
+        longerPolicy.setRetentionDays(60);
+        var restarted = new InterviewService(new InterviewAgent(), store, CLOCK, longerPolicy);
+        assertEquals(originalExpiry, store.find("ttl-user", session.sessionId()).orElseThrow().expiresAt());
+    }
+
+    @Test
     void serviceBRestoresSessionFromSameStoreDirectory() {
         var store = store();
         var a = service(store);
@@ -67,6 +81,43 @@ class InterviewPersistenceTest {
         // revision/stateVersion 已随保存递增并在恢复后保留
         assertTrue(restored.stateVersion() >= 2);
         assertEquals(answered.revision(), restored.revision());
+    }
+
+    @Test
+    void clarificationResultPersistsAndInterruptedRunningOperationBecomesRetryable() {
+        var store = store();
+        var a = service(store);
+        var session = a.start("alice", "mat-clarify", RESUME, "Java 后端", 13, echoAi());
+        String questionId = session.currentQuestion().questionId();
+        var running = a.beginClarification("alice", session.sessionId(), questionId, "clarify-persist", session.revision());
+        var b = service(store);
+        var interrupted = b.get("alice", session.sessionId()).clarifications().get(questionId);
+        assertEquals(InterviewSnapshot.ClarificationStatus.FAILED, interrupted.status());
+        assertTrue(interrupted.error().contains("重启"));
+        var retry = b.beginClarification("alice", session.sessionId(), questionId, "clarify-retry", running.revision());
+        assertTrue(b.completeClarification("alice", session.sessionId(), questionId, "clarify-retry", "只解释题意的文本"));
+        var c = service(store);
+        assertEquals("只解释题意的文本", c.get("alice", session.sessionId()).clarifications().get(questionId).text());
+    }
+
+    @Test
+    void pendingReviewPersistsAndRestartTurnsItIntoAnIndependentRetryableState() {
+        var store = store();
+        var a = service(store);
+        var session = a.start("alice", "mat-review", RESUME, "Java 后端", 13, echoAi());
+        a.finish("alice", session.sessionId(), "finish-review", null);
+        a.queueReport("alice", session.sessionId(), "report-review", false);
+        var pending = a.queueReview("alice", session.sessionId(), "review-pending", false);
+        assertTrue(pending.enqueue());
+
+        var b = service(store);
+        var restored = b.reportSnapshot("alice", session.sessionId());
+        assertEquals("SUCCEEDED", restored.scoringState(), "summary interruption must not reset scoring");
+        assertEquals("UNAVAILABLE", restored.reviewStatus(), "an abandoned summary becomes retryable after restart");
+        var retry = b.queueReview("alice", session.sessionId(), "review-after-restart", true);
+        assertTrue(retry.enqueue());
+        assertTrue(b.completeReview("alice", session.sessionId(), retry.operationId(), java.util.List.of()));
+        assertEquals("COMPLETE", service(store).reportSnapshot("alice", session.sessionId()).reviewStatus());
     }
 
     @Test
@@ -158,6 +209,24 @@ class InterviewPersistenceTest {
         assertEquals(InterviewService.MAIN_COUNT, snap.plan().mainCount());
         assertTrue(snap.stateVersion() >= 1);
         assertEquals(session.sessionId(), snap.sessionId());
+    }
+
+    @Test
+    void closedRootPersistsAndIsNotRestoredAsCurrentQuestion() {
+        var store = store();
+        var a = service(store);
+        var session = a.start("alice", "mat-1", RESUME, "Java 后端", 13, echoAi());
+        String rootId = session.currentQuestion().questionId();
+        var skipped = a.closeRoot("alice", session.sessionId(), rootId, "skip-persist-1");
+
+        var stored = store.find("alice", session.sessionId()).orElseThrow();
+        assertTrue(stored.closedRootIds().contains(rootId));
+        assertEquals(InterviewSnapshot.AnswerStatus.SKIPPED, stored.turns().get(0).answerStatus());
+
+        var restored = service(store).get("alice", session.sessionId());
+        assertTrue(restored.closedRootIds().contains(rootId));
+        assertNull(restored.currentQuestion());
+        assertEquals(skipped.revision(), restored.revision());
     }
 
     @Test

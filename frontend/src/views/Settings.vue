@@ -192,7 +192,7 @@ function clearConfig() {
           <input :disabled="modelBusy" v-model="model" type="text" spellcheck="false" autocomplete="off" placeholder="例如 deepseek-chat" /></label>
         <label class="field"><span>API Key</span>
           <div class="secret-input">
-            <input data-testid="model-key" :disabled="modelBusy" v-model="apiKey" :type="showApiKey ? 'text' : 'password'" spellcheck="false" autocomplete="off" placeholder="只填值，例如 sk-X4GFa95vkCwsCFTOgmrUGSIdgicXFhxw" />
+            <input data-testid="model-key" :disabled="modelBusy" v-model="apiKey" :type="showApiKey ? 'text' : 'password'" spellcheck="false" autocomplete="off" placeholder="只填值" />
             <button class="icon-button" type="button" :aria-label="showApiKey ? '隐藏 API Key' : '显示 API Key'" @click="showApiKey = !showApiKey"><svg><use href="#i-eye" /></svg></button>
           </div></label>
         <div class="settings-actions">
@@ -216,7 +216,7 @@ function clearConfig() {
       <div class="settings-form">
         <label class="field"><span>API Key</span>
           <div class="secret-input">
-            <input data-testid="speech-key" :disabled="speechBusy" v-model="speechKey" :type="showSpeechKey ? 'text' : 'password'" spellcheck="false" autocomplete="off" placeholder="只填值，例如 737a96a5-e116-4279-a25a-26389e9ea8cf" />
+            <input data-testid="speech-key" :disabled="speechBusy" v-model="speechKey" :type="showSpeechKey ? 'text' : 'password'" spellcheck="false" autocomplete="off" placeholder="只填值" />
             <button class="icon-button" type="button" :aria-label="showSpeechKey ? '隐藏语音 Key' : '显示语音 Key'" @click="showSpeechKey = !showSpeechKey"><svg><use href="#i-eye" /></svg></button>
           </div></label>
         <div class="settings-actions">

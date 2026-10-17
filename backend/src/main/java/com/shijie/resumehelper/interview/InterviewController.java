@@ -4,13 +4,16 @@ import com.shijie.resumehelper.common.ApiResponse;
 import com.shijie.resumehelper.common.ai.AiClient;
 import com.shijie.resumehelper.common.ai.AiClientResolver;
 import com.shijie.resumehelper.common.util.UserContext;
-import com.shijie.resumehelper.material.service.MaterialService;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.annotation.PreDestroy;
 import org.springframework.web.bind.annotation.*;
 
 import java.nio.charset.StandardCharsets;
 import java.time.Duration;
+import java.util.List;
+import java.util.Map;
 import java.util.UUID;
+import java.util.concurrent.CompletableFuture;
 
 /**
  * 模拟面试接口（功能三）。
@@ -33,76 +36,149 @@ import java.util.UUID;
 public class InterviewController {
 
     private final InterviewService interviews;
+    private final InterviewQuestionActionService questionActions;
     private final InterviewAgent agent;
     private final AiClientResolver clients;
-    /** 材料模块。这里只用来按 id 取简历原文，不碰它的上传逻辑。 */
-    private final MaterialService materials;
+    private final InterviewSourceResolver sources;
     private final InterviewGenerationCoordinator generations;
     private final InterviewGenerationRunner runner;
     private final InterviewReportRunner reportRunner;
+    private final InterviewPlanService plans;
+    private final InterviewPracticeService practice;
 
     public InterviewController(InterviewService interviews,
                                InterviewAgent agent,
                                AiClientResolver clients,
-                               MaterialService materials,
+                               InterviewSourceResolver sources,
                                InterviewGenerationCoordinator generations,
                                InterviewGenerationRunner runner,
-                               InterviewReportRunner reportRunner) {
+                               InterviewReportRunner reportRunner,
+                               InterviewPlanService plans) {
         this.interviews = interviews;
+        this.questionActions = new InterviewQuestionActionService(interviews);
         this.agent = agent;
         this.clients = clients;
-        this.materials = materials;
+        this.sources = sources;
         this.generations = generations;
         this.runner = runner;
         this.reportRunner = reportRunner;
+        this.plans = plans;
+        this.practice = new InterviewPracticeService(interviews, agent);
     }
 
     public record StartRequest(String materialId, String targetRole, Integer questionCount,
-                               String requestId, Boolean async) {}
+                               String requestId, Boolean async, InterviewPlan.ResumeSource source,
+                               String planId, Integer planVersion, Boolean allowAlgorithmRepeat) {}
+    public record SourcePreviewRequest(InterviewPlan.ResumeSource source) {}
+    public record FocusedPracticeRequest(List<String> issueIds, String requestId) {}
 
     public record AnswerRequest(String questionId, String answer) {}
 
     /** T04：仅保存回答的幂等载荷（计划 4.2）。 */
     public record AnswerSubmissionRequest(String questionId, String submissionId, String answer) {}
+    public record SkipRequest(String questionId, String requestId, long expectedRevision) {}
+    public record ClarificationRequest(String questionId, String requestId, long expectedRevision) {}
+    public record ReplacementRequest(String questionId, String requestId, long expectedRevision, String reason) {}
     public record ReportRetryRequest(Boolean async, String requestId) {}
+    public record ReviewRetryRequest(String requestId) {}
 
     public record FinishRequest(String requestId, AnswerSubmissionRequest submission) {}
 
     public record GenerationRequest(String requestId, InterviewSnapshot.GenerationKind kind,
                                     long expectedRevision) {}
+    public record PracticeFeedbackRequest(String questionId, String requestId, long expectedRevision) {}
+    public record AttemptSubmissionRequest(String questionId, String requestId, String answer) {}
+    public record AttemptRetryRequest(String requestId) {}
 
     @PostMapping("/ai/check")
     public ApiResponse<InterviewAgent.AiCheck> checkAi(HttpServletRequest request) {
         return ApiResponse.ok(agent.checkConnection(clients.resolve(request)));
     }
 
+    @DeleteMapping("/interviews/{id}")
+    public ApiResponse<Map<String, Boolean>> deleteInterview(@PathVariable String id, HttpServletRequest request) {
+        String owner = UserContext.resolve(request);
+        InterviewService.Session before = null;
+        try { before = interviews.get(owner, id); }
+        catch (InterviewException missing) { if (missing.status() != 404) throw missing; }
+        interviews.delete(owner, id); // publishes the tombstone before any task is cancelled
+        if (before != null && before.generation() != null) runner.cancel(before.generation().generationId());
+        reportRunner.cancelSession(id);
+        practice.cancelSession(id);
+        return ApiResponse.ok(Map.of("deleted", true));
+    }
+
+    @GetMapping("/interviews")
+    public ApiResponse<InterviewStore.HistoryPage> interviewHistory(
+            @RequestParam(defaultValue = "20") int limit,
+            @RequestParam(required = false) String cursor, HttpServletRequest request) {
+        return ApiResponse.ok(interviews.history(UserContext.resolve(request), limit, cursor));
+    }
+
+    @PostMapping("/interviews/source/preview")
+    public ApiResponse<InterviewSourceResolver.ResolvedSource> previewSource(
+            @RequestBody SourcePreviewRequest body, HttpServletRequest request) {
+        if (body == null || body.source() == null) throw new IllegalArgumentException("请选择一份简历");
+        return ApiResponse.ok(sources.resolve(UserContext.resolve(request), body.source()));
+    }
+
+    @PostMapping("/interviews/plans")
+    public ApiResponse<InterviewPlanService.PlanPreview> preparePlan(
+            @RequestBody InterviewPlanService.PlanRequest body, HttpServletRequest request) {
+        return ApiResponse.ok(plans.prepare(UserContext.resolve(request), body, clients.resolve(request)));
+    }
+
+    @PostMapping("/interviews/{id}/practice-plans")
+    public ApiResponse<InterviewPlanService.PlanPreview> preparePracticePlan(@PathVariable String id,
+            @RequestBody FocusedPracticeRequest body, HttpServletRequest request) {
+        String owner = UserContext.resolve(request);
+        if (body == null) throw new IllegalArgumentException("请选择报告重点");
+        var context = interviews.focusedPracticeContext(owner, id, body.issueIds());
+        var source = context.source();
+        var planRequest = new InterviewPlanService.PlanRequest(source, context.targetRole(), context.jobDescription(),
+                context.careerStage(), context.level(), InterviewPlan.Mode.QUICK, 3,
+                InterviewPlanService.SpecialtyPreference.NONE, body.requestId(), id, context.targets());
+        return ApiResponse.ok(plans.prepare(owner, planRequest, clients.resolve(request)));
+    }
+
+    @GetMapping("/interviews/plans/{planId}")
+    public ApiResponse<InterviewPlanService.PlanPreview> getPlan(@PathVariable String planId,
+                                                                 HttpServletRequest request) {
+        return ApiResponse.ok(plans.getPlan(UserContext.resolve(request), planId));
+    }
+
     @PostMapping("/interviews")
     public ApiResponse<InterviewService.Session> start(@RequestBody StartRequest body, HttpServletRequest request) {
-        if (body.materialId() == null || body.materialId().isBlank())
-            throw new IllegalArgumentException("请先上传简历");
+        if (body == null) throw new IllegalArgumentException("开始请求不能为空");
 
         String owner = UserContext.resolve(request);
-        if (materials.find(owner, body.materialId()).isEmpty())
-            throw new InterviewException(404, "找不到这份简历，可能已经被删除了，请重新上传");
-
-        String resume = materials.originalText(owner, body.materialId()).orElse("");
-        if (resume.isBlank())
-            // 扫描件会走这条路：材料确实存下来了，只是没有文字层。
-            // 给一句能指导下一步的提示，而不是笼统的「简历不存在」。
-            throw new InterviewException(400,
-                    "这份简历没有可用的文字内容（可能是扫描件或图片）。"
-                            + "请改用「粘贴文本」，或换一份可以直接复制文字的简历。");
-
         AiClient ai = clients.resolve(request);
-        if (ai == null || ai.isFallback() || !ai.available())
-            throw new InterviewException(503, "请填写模型 API Key 后开始面试");
         boolean async = Boolean.TRUE.equals(body.async());
         String requestId = body.requestId();
         if (async && (requestId == null || requestId.isBlank()))
             throw new IllegalArgumentException("异步开始面试必须提供 requestId");
         if (requestId == null || requestId.isBlank()) requestId = UUID.randomUUID().toString();
-        InterviewService.Session session = interviews.startAsync(owner, body.materialId(), resume,
-                body.targetRole(), requestId);
+
+        if (body.planId() != null && !body.planId().isBlank()) {
+            if (!async) throw new IllegalArgumentException("计划启动必须使用异步模式");
+            if (body.source() != null || (body.materialId() != null && !body.materialId().isBlank())
+                    || body.targetRole() != null || body.questionCount() != null)
+                throw new IllegalArgumentException("计划启动请求不能同时携带直接来源或覆盖计划字段");
+            if (body.planVersion() == null) throw new IllegalArgumentException("启动计划必须提供 planVersion");
+            if (ai == null || ai.isFallback() || !ai.available())
+                throw new InterviewException(503, "请填写模型 API Key 后开始面试");
+            InterviewService.Session planned = plans.startPlanned(owner, body.planId(), body.planVersion(), requestId, ai, Boolean.TRUE.equals(body.allowAlgorithmRepeat()));
+            return ApiResponse.ok(planned);
+        }
+
+        if (body.source() == null && (body.materialId() == null || body.materialId().isBlank()))
+            throw new IllegalArgumentException("请先上传简历");
+        InterviewPlan.ResumeSource source = body.source() != null ? body.source()
+                : new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, body.materialId());
+        var resolved = sources.resolve(owner, source);
+        if (ai == null || ai.isFallback() || !ai.available())
+            throw new InterviewException(503, "请填写模型 API Key 后开始面试");
+        InterviewService.Session session = interviews.startAsync(owner, resolved, body.targetRole(), requestId);
         startOpeningIfQueued(owner, session, ai);
         if (!async) {
             if (session.generation() != null)
@@ -138,6 +214,9 @@ public class InterviewController {
         }
         if (!"ACTIVE".equals(saved.status()) || saved.currentQuestion() != null)
             return ApiResponse.ok(saved);
+        if (saved.plan() != null && "experience-v1".equals(saved.plan().policyVersion())
+                && saved.plan().mode() == InterviewPlan.Mode.QUICK)
+            return ApiResponse.ok(saved); // QUICK waits for the user's next-step choice after saving.
 
         String requestId = saved.generation() != null
                 && (saved.generation().state() == InterviewSnapshot.GenerationState.QUEUED
@@ -158,6 +237,109 @@ public class InterviewController {
                                                             HttpServletRequest request) {
         return ApiResponse.ok(interviews.saveAnswer(UserContext.resolve(request), id,
                 new InterviewService.Submission(body.questionId(), body.submissionId(), body.answer())));
+    }
+
+    @PostMapping("/interviews/{id}/skip")
+    public ApiResponse<InterviewService.Session> skip(@PathVariable String id,
+                                                      @RequestBody SkipRequest body,
+                                                      HttpServletRequest request) {
+        String owner = UserContext.resolve(request);
+        var before = interviews.get(owner, id);
+        var skipped = questionActions.skip(owner, id, body.questionId(), body.requestId(), body.expectedRevision());
+        // Persist closure first; then stop any generation for the now closed question group.
+        if (before.generation() != null && switch (before.generation().state()) {
+            case QUEUED, RUNNING, RETRY_WAIT -> true;
+            default -> false;
+        }) runner.cancel(before.generation().generationId());
+        return ApiResponse.ok(skipped);
+    }
+
+    @PostMapping("/interviews/{id}/feedback")
+    public ApiResponse<InterviewService.Session> practiceFeedback(@PathVariable String id,
+            @RequestBody PracticeFeedbackRequest body, HttpServletRequest request) {
+        if (body == null) throw new IllegalArgumentException("反馈请求不能为空");
+        return ApiResponse.ok(practice.feedback(UserContext.resolve(request), id, body.questionId(),
+                body.requestId(), body.expectedRevision(), clients.resolve(request)));
+    }
+
+    @PostMapping("/interviews/{id}/attempts")
+    public ApiResponse<InterviewAttempt> submitAttempt(@PathVariable String id,
+            @RequestBody AttemptSubmissionRequest body, HttpServletRequest request) {
+        if (body == null) throw new IllegalArgumentException("重答内容不能为空");
+        return ApiResponse.ok(practice.submitAttempt(UserContext.resolve(request), id, body.questionId(),
+                body.requestId(), body.answer(), clients.resolve(request)));
+    }
+
+    @GetMapping("/interviews/{id}/attempts")
+    public ApiResponse<List<InterviewAttempt>> listAttempts(@PathVariable String id,
+            @RequestParam String questionId, HttpServletRequest request) {
+        return ApiResponse.ok(practice.listAttempts(UserContext.resolve(request), id, questionId));
+    }
+
+    @GetMapping("/interviews/{id}/attempts/{attemptId}")
+    public ApiResponse<InterviewAttempt> getAttempt(@PathVariable String id, @PathVariable String attemptId,
+            HttpServletRequest request) {
+        return ApiResponse.ok(practice.getAttempt(UserContext.resolve(request), id, attemptId));
+    }
+
+    @PostMapping("/interviews/{id}/attempts/{attemptId}/retry")
+    public ApiResponse<InterviewAttempt> retryAttempt(@PathVariable String id, @PathVariable String attemptId,
+            @RequestBody(required = false) AttemptRetryRequest body, HttpServletRequest request) {
+        String requestId = body == null || body.requestId() == null || body.requestId().isBlank()
+                ? UUID.randomUUID().toString() : body.requestId();
+        return ApiResponse.ok(practice.retryAttempt(UserContext.resolve(request), id, attemptId,
+                requestId, clients.resolve(request)));
+    }
+
+    @PostMapping("/interviews/{id}/clarifications")
+    public ApiResponse<InterviewService.Session> clarify(@PathVariable String id,
+            @RequestBody ClarificationRequest body, HttpServletRequest request) {
+        String owner = UserContext.resolve(request);
+        var before = interviews.get(owner, id);
+        var metadata = before.questionMetadata().get(body.questionId());
+        String rootId = metadata != null && metadata.kind() == InterviewService.Kind.FOLLOW_UP
+                ? metadata.parentQuestionId() : body.questionId();
+        var previous = before.clarifications().get(rootId);
+        if (previous != null && body.requestId().equals(previous.requestId())) return ApiResponse.ok(before);
+        AiClient ai = clients.resolve(request);
+        if (ai == null || ai.isFallback() || !ai.available())
+            throw new InterviewException(503, "请填写模型 API Key 后解释题目");
+        var accepted = questionActions.clarify(owner, id, body.questionId(), body.requestId(), body.expectedRevision());
+        String question = accepted.turns().stream().filter(turn -> turn.questionId().equals(body.questionId()))
+                .map(InterviewService.Turn::question).findFirst().orElseThrow(() -> new InterviewException(404, "题目不存在"));
+        CompletableFuture.runAsync(() -> {
+            try {
+                String explanation = agent.clarifyQuestion(question, ai);
+                interviews.completeClarification(owner, id, body.questionId(), body.requestId(), explanation);
+            } catch (RuntimeException failure) {
+                interviews.failClarification(owner, id, body.questionId(), body.requestId(), "题目解释暂不可用，请重试");
+            }
+        });
+        return ApiResponse.ok(accepted);
+    }
+
+    @PostMapping("/interviews/{id}/replacements")
+    public ApiResponse<InterviewService.Session> replace(@PathVariable String id,
+            @RequestBody ReplacementRequest body, HttpServletRequest request) {
+        String owner = UserContext.resolve(request);
+        var before = interviews.get(owner, id);
+        var previous = before.replacements().get(body.questionId());
+        if (previous != null && body.requestId().equals(previous.requestId())) return ApiResponse.ok(before);
+        AiClient ai = clients.resolve(request);
+        if (ai == null || ai.isFallback() || !ai.available())
+            throw new InterviewException(503, "请填写模型 API Key 后重新生成题目");
+        var accepted = questionActions.replace(owner, id, body.questionId(), body.requestId(),
+                body.expectedRevision(), body.reason());
+        var context = interviews.replacementContext(owner, id, body.questionId());
+        CompletableFuture.runAsync(() -> {
+            try {
+                var alternative = agent.prepareReplacement(context.resume(), context.role(), context.question(), body.reason(), ai);
+                interviews.completeReplacement(owner, id, body.questionId(), body.requestId(), alternative);
+            } catch (RuntimeException failure) {
+                interviews.failReplacement(owner, id, body.questionId(), body.requestId(), "替换题暂不可用，请检查模型后重试");
+            }
+        });
+        return ApiResponse.ok(accepted);
     }
 
     /** T06: accept a generation operation and return immediately for status polling. */
@@ -181,6 +363,9 @@ public class InterviewController {
                 InterviewSnapshot.GenerationKind.OPENING, session.revision());
         runner.start(claim, ai);
     }
+
+    @PreDestroy
+    public void closePracticeExecutor() { practice.close(); }
 
     private static void throwIfGenerationFailed(InterviewService.Session session) {
         var generation = session.generation();
@@ -237,5 +422,14 @@ public class InterviewController {
                     () -> clients.resolve(request), true));
         }
         return ApiResponse.ok(interviews.report(UserContext.resolve(request), id, () -> clients.resolve(request), true));
+    }
+
+    @PostMapping("/interviews/{id}/report/review/retry")
+    public ApiResponse<InterviewAgent.InterviewReport> retryReview(@PathVariable String id,
+            @RequestBody(required = false) ReviewRetryRequest body, HttpServletRequest request) {
+        String requestId = body == null || body.requestId() == null || body.requestId().isBlank()
+                ? UUID.randomUUID().toString() : body.requestId();
+        return ApiResponse.ok(reportRunner.retryReview(UserContext.resolve(request), id, requestId,
+                () -> clients.resolve(request)));
     }
 }

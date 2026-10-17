@@ -54,12 +54,70 @@ class InterviewReportApiTest {
             String system = call.getArgument(0);
             String prompt = call.getArgument(1);
             if (system.contains("当前模式：OPENING")) return question(QUESTION);
+            if (system.contains("报告编辑")) return "{\"issues\":[{\"questionId\":\"" +
+                    interviewsQuestionId(prompt) + "\",\"kind\":\"EVIDENCE\",\"evidenceQuote\":\"Redis\",\"issue\":\"未说明测试周期\",\"suggestedAction\":\"补充真实测试周期\"}]}";
             if (prompt.contains("selectedAlgorithm")) return algorithmFromPrompt(prompt);
             if (prompt.contains("\"inputs\"")) return assessmentsFromPrompt(prompt, 80);
             return question(QUESTION);
         });
         when(ai.name()).thenReturn("test-model");
+        when(ai.available()).thenReturn(true);
         when(resolver.resolve(any(HttpServletRequest.class))).thenReturn(ai);
+    }
+
+    @Test void focusedPracticeEndpointRejectsTargetsUntilCurrentEvidenceSummaryIsComplete() throws Exception {
+        var session = interviews.start(owner, "m1", "简历经历", "工程师", 3, (system, prompt) -> question(QUESTION));
+        mvc.perform(post("/api/interviews/" + session.sessionId() + "/practice-plans")
+                        .header(UserContext.HEADER, owner).contentType(org.springframework.http.MediaType.APPLICATION_JSON)
+                        .content("{\"issueIds\":[\"invented-question\"],\"requestId\":\"focused-before-review\"}"))
+                .andExpect(status().isConflict())
+                .andExpect(jsonPath("$.message").value("需要先完成本轮报告重点归纳，再准备薄弱项练习"));
+    }
+
+    @Test void reviewIsQueuedAfterScoringAndItsRetryNeverRescoresAnswers() throws Exception {
+        var session = completed(1);
+        AtomicInteger reviewCalls = new AtomicInteger();
+        when(ai.chat(anyString(), anyString(), eq(60))).thenAnswer(call -> {
+            String system = call.getArgument(0), prompt = call.getArgument(1);
+            if (system.contains("报告编辑")) {
+                if (reviewCalls.incrementAndGet() == 1) return "invalid review JSON";
+                return "{\"issues\":[{\"questionId\":\"" + session.turns().get(0).questionId()
+                        + "\",\"kind\":\"EVIDENCE\",\"evidenceQuote\":\"Redis\",\"issue\":\"未说明测试周期\",\"suggestedAction\":\"补充真实测试周期\"}]}";
+            }
+            if (prompt.contains("\"inputs\"")) return assessmentsFromPrompt(prompt, 80);
+            return question(QUESTION);
+        });
+        JsonNode report = asyncReport(session.sessionId());
+        long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
+        do {
+            Thread.sleep(25);
+            report = asyncReport(session.sessionId());
+        } while (!"UNAVAILABLE".equals(report.path("reviewStatus").asText()) && System.nanoTime() < deadline);
+        assertEquals("SUCCEEDED", report.path("scoringState").asText());
+        assertEquals("UNAVAILABLE", report.path("reviewStatus").asText());
+        assertEquals(1, reviewCalls.get());
+
+        mvc.perform(post("/api/interviews/" + session.sessionId() + "/report/review/retry")
+                        .header(UserContext.HEADER, owner).contentType("application/json")
+                        .content("{\"requestId\":\"review-retry-1\"}"))
+                .andExpect(status().isOk()).andExpect(jsonPath("$.data.reviewStatus").value("PENDING"));
+        deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(4);
+        do {
+            Thread.sleep(25);
+            report = asyncReport(session.sessionId());
+        } while (!"COMPLETE".equals(report.path("reviewStatus").asText()) && System.nanoTime() < deadline);
+        assertEquals("COMPLETE", report.path("reviewStatus").asText());
+        assertEquals(2, reviewCalls.get());
+        assertEquals(session.turns().get(0).questionId(), report.at("/priorityIssues/0/questionId").asText());
+        assertEquals("Redis", report.at("/priorityIssues/0/evidenceQuote").asText());
+        verify(ai, times(1)).chat(anyString(), argThat(prompt -> prompt.contains("\"inputs\"")), eq(60));
+        assertEquals("SUCCEEDED", report.path("scoringState").asText());
+    }
+
+    private static String interviewsQuestionId(String prompt) {
+        var matcher = java.util.regex.Pattern.compile("questionId=([^\\n]+)").matcher(prompt);
+        if (matcher.find()) return matcher.group(1);
+        return "missing-question";
     }
 
     @Test void activeAndOtherUsersAreRejectedBeforeResolvingCredentials() throws Exception {

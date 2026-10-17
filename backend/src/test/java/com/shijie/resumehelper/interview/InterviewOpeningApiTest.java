@@ -35,6 +35,7 @@ class InterviewOpeningApiTest {
     @Autowired MockMvc mvc;
     @Autowired ObjectMapper json;
     @Autowired InterviewService interviews;
+    @Autowired InterviewSourceResolver sources;
     @Autowired InterviewStore store;
     @Autowired InterviewAgent agent;
     @Autowired Clock clock;
@@ -80,13 +81,63 @@ class InterviewOpeningApiTest {
                             .content(body.replace("Java backend", "Product manager")))
                     .andExpect(status().isConflict());
 
-            var restarted = new InterviewService(agent, store, clock).startAsync(owner, materialId,
-                    "Java Redis project experience", "Java backend", "open-1");
+            var restarted = new InterviewService(agent, store, clock).startAsync(owner,
+                    sources.resolve(owner, new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, materialId)),
+                    "Java backend", "open-1");
             assertEquals(sessionId, restarted.sessionId());
             assertEquals(1, calls.get());
         } finally {
             release.countDown();
         }
+    }
+
+    @Test
+    void planPreviewHttpIsAsyncOwnerScopedAndGetDoesNotRegenerate() throws Exception {
+        String owner = "plan-http-" + java.util.UUID.randomUUID();
+        var materialResponse = mvc.perform(post("/api/materials/text").header(UserContext.HEADER, owner)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"title\":\"resume\",\"text\":\"运营项目与数据分析经历\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String materialId = json.readTree(materialResponse.getResponse().getContentAsString()).at("/data/material/id").asText();
+        var entered = new CountDownLatch(1);
+        var release = new CountDownLatch(1);
+        var calls = new AtomicInteger();
+        AiClient blocked = (system, prompt) -> {
+            calls.incrementAndGet(); entered.countDown();
+            try { assertTrue(release.await(5, TimeUnit.SECONDS)); }
+            catch (InterruptedException e) { Thread.currentThread().interrupt(); throw new RuntimeException(e); }
+            return "{\"coverage\":[{\"id\":\"analysis\",\"label\":\"数据分析\"}],"
+                    + "\"specialty\":{\"kind\":\"CASE_STUDY\",\"focus\":\"增长分析\",\"reason\":\"运营岗位\"}}";
+        };
+        when(resolver.resolve(any(HttpServletRequest.class))).thenReturn(blocked);
+        String body = "{\"source\":{\"kind\":\"MATERIAL\",\"id\":\"" + materialId
+                + "\"},\"targetRole\":\"运营\",\"jobDescription\":\"完整 JD\","
+                + "\"careerStage\":\"CAMPUS\",\"level\":\"STANDARD\",\"mode\":\"QUICK\","
+                + "\"mainCount\":3,\"specialtyPreference\":\"AUTO\",\"requestId\":\"plan-http-1\"}";
+        try {
+            var response = mvc.perform(post("/api/interviews/plans").header(UserContext.HEADER, owner)
+                            .contentType(MediaType.APPLICATION_JSON).content(body))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("GENERATING"))
+                    .andReturn();
+            assertTrue(entered.await(5, TimeUnit.SECONDS));
+            String planId = json.readTree(response.getResponse().getContentAsString()).at("/data/planId").asText();
+            mvc.perform(get("/api/interviews/plans/" + planId).header(UserContext.HEADER, owner))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("GENERATING"));
+            mvc.perform(get("/api/interviews/plans/" + planId).header(UserContext.HEADER, "someone-else"))
+                    .andExpect(status().isNotFound());
+            assertEquals(1, calls.get());
+            release.countDown();
+            for (int i = 0; i < 100 && !"READY".equals(interviewsPlanStatus(owner, planId)); i++) Thread.sleep(20);
+            mvc.perform(get("/api/interviews/plans/" + planId).header(UserContext.HEADER, owner))
+                    .andExpect(status().isOk()).andExpect(jsonPath("$.data.status").value("READY"))
+                    .andExpect(jsonPath("$.data.plan.coverage.length()").value(1));
+            assertEquals(1, calls.get(), "GET must not invoke the planner again");
+        } finally { release.countDown(); }
+    }
+
+    private String interviewsPlanStatus(String owner, String planId) {
+        try { return store.findPlan(owner, planId).orElseThrow().preview().status().name(); }
+        catch (RuntimeException ignored) { return ""; }
     }
 
     @Test

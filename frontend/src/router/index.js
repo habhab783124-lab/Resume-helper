@@ -2,6 +2,7 @@ import { createRouter, createWebHistory } from 'vue-router'
 import AppShell from '../layouts/AppShell.vue'
 import Dashboard from '../views/Dashboard.vue'
 import Interview from '../views/Interview.vue'
+import InterviewHistory from '../views/InterviewHistory.vue'
 import Jobs from '../views/Jobs.vue'
 import Login from '../views/Login.vue'
 import Materials from '../views/Materials.vue'
@@ -25,6 +26,7 @@ const routes = [
       { path: 'resume', name: 'Resume', component: Resume, meta: { title: '简历工作台' } },
       { path: 'jobs', name: 'Jobs', component: Jobs, meta: { title: '岗位匹配' } },
       { path: 'interview', name: 'Interview', component: Interview, meta: { title: '模拟面试' } },
+      { path: 'interview/history', name: 'InterviewHistory', component: InterviewHistory, meta: { title: '面试历史' } },
       { path: 'report', name: 'Report', component: Report, meta: { title: '面试报告' } },
       { path: 'settings', name: 'Settings', component: Settings, meta: { title: '设置' } }
     ]

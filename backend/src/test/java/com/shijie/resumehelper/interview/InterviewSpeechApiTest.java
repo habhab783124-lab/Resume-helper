@@ -66,6 +66,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
  */
 @SpringBootTest(webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT) @AutoConfigureMockMvc
 class InterviewSpeechApiTest {
+    private static final java.nio.file.Path INTERVIEW_STORAGE = java.nio.file.Path.of(
+            System.getProperty("java.io.tmpdir"), "resume-helper-speech-api-" + java.util.UUID.randomUUID());
 
     /**
      * 把 key 和工具路径钉死，capabilities 的断言不依赖部署机恰好装了 FFmpeg。
@@ -87,6 +89,7 @@ class InterviewSpeechApiTest {
         registry.add("app.interview.speech.ffmpeg-path", () -> placeholder);
         registry.add("app.interview.speech.ffprobe-path", () -> placeholder);
         registry.add("app.interview.speech.max-concurrent-requests", () -> 2);
+        registry.add("app.interview.storage-dir", INTERVIEW_STORAGE::toString);
     }
 
     /** 当前 JVM 的可执行文件路径，各平台都存在且可执行。 */

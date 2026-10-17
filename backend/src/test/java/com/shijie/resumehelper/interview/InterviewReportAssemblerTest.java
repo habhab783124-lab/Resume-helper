@@ -45,7 +45,12 @@ class InterviewReportAssemblerTest {
             contexts.put(id, new InterviewService.Context(i < 12 ? InterviewService.Kind.MAIN : InterviewService.Kind.ALGORITHM,
                     null, i + 1, i < 12 ? null : Hot100Catalog.problems().get(0).overview()));
         }
-        var report = new InterviewReportAssembler().assemble(13, history, frozen, results, contexts);
+        var fullPlan = new InterviewPlan("experience-v1", InterviewPlan.Mode.FULL, 12, 13, 6, 2,
+                InterviewPlan.Level.STANDARD, InterviewPlan.CareerStage.EXPERIENCED, "工程师", "",
+                new InterviewPlan.Specialty(InterviewPlan.SpecialtyKind.ALGORITHM, "算法", "岗位要求"), List.of(),
+                new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, "m1"), "简历", "fp", List.of());
+        var report = new InterviewReportAssembler().assemble(13, history, frozen, results, contexts,
+                "COMPLETED", fullPlan, new InterviewSnapshot.Progress(12, 12, 12, 0, 0, 6));
         assertEquals(new BigDecimal("42.4"), report.overallScore());
         assertEquals(new BigDecimal("80.00"), report.turnFeedbacks().subList(0, 12).stream()
                 .map(InterviewAgent.TurnFeedback::weightPercent).reduce(BigDecimal.ZERO, BigDecimal::add));
@@ -81,6 +86,19 @@ class InterviewReportAssemblerTest {
         assertEquals(new BigDecimal("48.00"), report.turnFeedbacks().get(1).weightPercent());
         assertEquals(new BigDecimal("32.00"), report.turnFeedbacks().get(0).weightPercent());
     }
+    @Test void skippedQuestionIsDistinctFromUnansweredAndNeverCreatesCompositeScore() {
+        var partial = List.of(new InterviewService.Turn("q1", "第一题", null),
+                new InterviewService.Turn("q2", "第二题", null));
+        var contexts = Map.of(
+                "q1", new InterviewService.Context(InterviewService.Kind.MAIN, null, 1, null),
+                "q2", new InterviewService.Context(InterviewService.Kind.MAIN, null, 2, null));
+        var report = new InterviewReportAssembler().assemble(5, partial, contracts, Map.of(), contexts,
+                "USER_ENDED", null, new InterviewSnapshot.Progress(5, 1, 0, 1, 0, 2), Set.of("q1"));
+        assertNull(report.overallScore());
+        assertEquals("SKIPPED", report.turnFeedbacks().get(0).status());
+        assertEquals("UNANSWERED", report.turnFeedbacks().get(1).status());
+        assertTrue(report.overallSummary().contains("已跳过 1 个题组"));
+    }
     @Test void noAnswerAndUnavailableScoringNeverProduceDefaultNumbers() {
         var empty = new InterviewReportAssembler().assemble(3,
                 List.of(new InterviewService.Turn("q1", "第一题", null)), contracts, Map.of());
@@ -88,5 +106,26 @@ class InterviewReportAssemblerTest {
         var unavailable = new InterviewReportAssembler().assemble(3, turns, contracts, Map.of());
         assertEquals("UNAVAILABLE", unavailable.reportStatus()); assertNull(unavailable.overallScore());
         assertTrue(unavailable.strengths().isEmpty());
+    }
+
+    @Test void completedQuickPlanHasNoCompositeScoreAndReportsItsActualScope() {
+        var plan = new InterviewPlan("experience-v1", InterviewPlan.Mode.QUICK, 3, 3, 2, 1,
+                InterviewPlan.Level.STANDARD, InterviewPlan.CareerStage.CAMPUS, "工程师", "",
+                new InterviewPlan.Specialty(InterviewPlan.SpecialtyKind.NONE, "", ""), List.of(),
+                new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, "m1"), "简历", "fp", List.of());
+        var contexts = new LinkedHashMap<String, InterviewService.Context>();
+        var assessments = new LinkedHashMap<String, InterviewAssessment>();
+        var questions = new LinkedHashMap<String, InterviewQuestion>();
+        for (int i = 0; i < turns.size(); i++) {
+            String id = turns.get(i).questionId();
+            contexts.put(id, new InterviewService.Context(InterviewService.Kind.MAIN, null, i + 1, null));
+            questions.put(id, contracts.get(id));
+            assessments.put(id, assessed(id, 80));
+        }
+        var report = new InterviewReportAssembler().assemble(3, turns, questions, assessments, contexts,
+                "COMPLETED", plan, new InterviewSnapshot.Progress(3, 3, 3, 0, 0, 2));
+        assertNull(report.overallScore());
+        assertTrue(report.overallSummary().contains("快速练习"));
+        assertFalse(report.overallSummary().contains("未完成主问题 9 道"));
     }
 }

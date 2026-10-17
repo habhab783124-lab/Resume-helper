@@ -51,7 +51,13 @@ public record InterviewSnapshot(
         String scoringOperationId,
         String scoringRequestId,
         String scoringError,
-        long scoringStateVersion) {
+        long scoringStateVersion,
+        Map<String, Clarification> clarifications,
+        Set<String> withdrawnQuestionIds,
+        Map<String, Replacement> replacements,
+        InterviewReviewSummary reviewSummary, String reviewRequestId, String reviewOperationId,
+        Map<String, InterviewPracticeFeedback> practiceFeedbacks,
+        Map<String, InterviewAttempt> attempts) {
 
     /** 当前唯一支持的文件结构版本；读取到其他版本必须报受控错误而不是猜测。 */
     public static final int SCHEMA_VERSION = 2;
@@ -69,8 +75,31 @@ public record InterviewSnapshot(
         questionContracts = orderedCopy(questionContracts);
         contexts = orderedCopy(contexts);
         assessments = orderedCopy(assessments);
+        clarifications = orderedCopy(clarifications);
+        withdrawnQuestionIds = withdrawnQuestionIds == null ? Set.of() : Set.copyOf(withdrawnQuestionIds);
+        replacements = orderedCopy(replacements);
+        practiceFeedbacks = orderedCopy(practiceFeedbacks);
+        attempts = orderedCopy(attempts);
         closedRootIds = closedRootIds == null ? Set.of() : Set.copyOf(closedRootIds);
         progress = progress == null ? Progress.empty() : progress;
+    }
+
+    /** Compatibility constructor for schema-v2 snapshots written before QUICK teaching feedback. */
+    public InterviewSnapshot(int schemaVersion, String sessionId, String owner, String materialId, String resumeText,
+            String targetRole, int questionCount, String status, String finishReason, String pendingAnswer,
+            long revision, long stateVersion, List<SnapshotTurn> turns, Map<String, InterviewQuestion> questionContracts,
+            Map<String, QuestionContext> contexts, Hot100Catalog.Problem selectedAlgorithm, InterviewSpecialty specialty,
+            Map<String, InterviewAssessment> assessments, InterviewAgent.InterviewReport cachedReport, Generation generation,
+            String startRequestId, InterviewPlan plan, Progress progress, Set<String> closedRootIds, Instant createdAt,
+            Instant expiresAt, String scoringState, String scoringOperationId, String scoringRequestId,
+            String scoringError, long scoringStateVersion, Map<String, Clarification> clarifications,
+            Set<String> withdrawnQuestionIds, Map<String, Replacement> replacements,
+            InterviewReviewSummary reviewSummary, String reviewRequestId, String reviewOperationId) {
+        this(schemaVersion, sessionId, owner, materialId, resumeText, targetRole, questionCount, status, finishReason,
+                pendingAnswer, revision, stateVersion, turns, questionContracts, contexts, selectedAlgorithm, specialty,
+                assessments, cachedReport, generation, startRequestId, plan, progress, closedRootIds, createdAt, expiresAt,
+                scoringState, scoringOperationId, scoringRequestId, scoringError, scoringStateVersion,
+                clarifications, withdrawnQuestionIds, replacements, reviewSummary, reviewRequestId, reviewOperationId, Map.of(), Map.of());
     }
 
     /** Reads/writes schema-v2 snapshots created before T18 introduced report job state. */
@@ -84,7 +113,7 @@ public record InterviewSnapshot(
         this(schemaVersion, sessionId, owner, materialId, resumeText, targetRole, questionCount, status, finishReason,
                 pendingAnswer, revision, stateVersion, turns, questionContracts, contexts, selectedAlgorithm, specialty,
                 assessments, cachedReport, generation, startRequestId, plan, progress, closedRootIds, createdAt, expiresAt,
-                "NOT_STARTED", null, null, null, 0);
+                "NOT_STARTED", null, null, null, 0, Map.of(), Set.of(), Map.of(), null, null, null, Map.of(), Map.of());
     }
 
     private static <V> Map<String, V> orderedCopy(Map<String, V> source) {
@@ -105,6 +134,17 @@ public record InterviewSnapshot(
         }
     }
     public enum AnswerStatus { UNANSWERED, ANSWERED, SKIPPED, WITHDRAWN }
+
+    public record Clarification(String requestId, ClarificationStatus status, String text, String error) {
+        public Clarification { Objects.requireNonNull(requestId); Objects.requireNonNull(status); }
+    }
+    public enum ClarificationStatus { RUNNING, COMPLETE, FAILED, CANCELLED }
+
+    public record Replacement(String requestId, ReplacementStatus status, String reason,
+                              String replacementQuestionId, String error) {
+        public Replacement { Objects.requireNonNull(requestId); Objects.requireNonNull(status); }
+    }
+    public enum ReplacementStatus { RUNNING, COMPLETE, FAILED, CANCELLED }
 
     /** 题目在会话中的结构位置，等价于运行期的 {@link InterviewService.Context}。 */
     public record QuestionContext(InterviewService.Kind kind, String parentQuestionId,

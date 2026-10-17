@@ -14,6 +14,8 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
   let epoch = 0
   let inFlight = null
   let operationController = null
+  let clarificationController = null
+  let replacementController = null
   let generationRequestId = null
   let currentScope = { apiBaseUrl: scope.apiBaseUrl || '', userId: scope.userId || '' }
   let pointerKey = makePointerKey(currentScope)
@@ -119,6 +121,7 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
       draft.value = ''
       submission.value = null
       if (session.value.status === 'FINISHED') return true
+      if (session.value.plan?.mode === 'QUICK') return true
       return runGeneration(expectedEpoch, requestController.signal)
     })().finally(() => {
       inFlight = null
@@ -127,13 +130,81 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
     return inFlight
   }
   async function retryGeneration() {
-    if (!session.value || !['GENERATION_FAILED', 'RETRY_WAIT'].includes(phase.value)) return false
+    const explicitQuickNext = session.value?.status === 'ACTIVE' && session.value?.plan?.mode === 'QUICK'
+      && !session.value.currentQuestion && phase.value === 'ANSWERING'
+    if (!session.value || (!explicitQuickNext && !['GENERATION_FAILED', 'RETRY_WAIT'].includes(phase.value))) return false
     polling?.stop?.()
     operationController?.abort()
     const controller = new AbortController()
     operationController = controller
     try { return await runGeneration(epoch, controller.signal) }
     finally { if (operationController === controller) operationController = null }
+  }
+  async function skip(questionId = session.value?.currentQuestion?.questionId) {
+    if (!active.value || !questionId || inFlight) return false
+    const expectedEpoch = epoch
+    const controller = new AbortController()
+    operationController = controller
+    try {
+      const value = await api.skip(session.value.sessionId, { questionId, requestId: ids(), expectedRevision: session.value.revision }, controller.signal)
+      if (!applySession(value, expectedEpoch)) return false
+      if (value.plan?.mode === 'QUICK') return true
+      return runGeneration(expectedEpoch, controller.signal)
+    } catch (cause) {
+      if (expectedEpoch === epoch) { phase.value = 'ANSWERING'; error.value = cause?.message || '跳过题目失败，请重试。' }
+      return false
+    } finally { if (operationController === controller) operationController = null }
+  }
+  async function practiceFeedback(questionId) {
+    if (!active.value || session.value?.plan?.mode !== 'QUICK' || inFlight) return false
+    const question = questionId || [...(session.value?.turns || [])].reverse().find(turn => turn.answer)?.questionId
+    if (!question) return false
+    const expectedEpoch = epoch
+    try {
+      const value = await api.practiceFeedback(session.value.sessionId, {
+        questionId: question, requestId: ids(), expectedRevision: session.value.revision,
+      })
+      if (!applySession(value, expectedEpoch)) return false
+      if (Object.values(value.practiceFeedbacks || {}).some(item => ['QUEUED', 'RUNNING'].includes(item.status)))
+        polling?.start?.(value.sessionId)
+      return true
+    } catch (cause) {
+      if (expectedEpoch === epoch) error.value = cause?.message || '查看本题反馈失败，可以继续下一题。'
+      return false
+    }
+  }
+  async function clarify(questionId = session.value?.currentQuestion?.questionId) {
+    if (!active.value || !questionId) return false
+    clarificationController?.abort()
+    const controller = new AbortController()
+    clarificationController = controller
+    const expectedEpoch = epoch
+    try {
+      const value = await api.clarify(session.value.sessionId, {
+        questionId, requestId: ids(), expectedRevision: session.value.revision,
+      }, controller.signal)
+      return applySession(value, expectedEpoch)
+    } catch (cause) {
+      if (expectedEpoch === epoch && !controller.signal.aborted) error.value = cause?.message || '题目解释暂不可用，请重试。'
+      return false
+    } finally { if (clarificationController === controller) clarificationController = null }
+  }
+  async function replace(questionId = session.value?.currentQuestion?.questionId, reason = '') {
+    if (!active.value || !questionId || !reason.trim() || reason.trim().length > 300 || inFlight) return false
+    const expectedEpoch = epoch
+    const controller = new AbortController()
+    replacementController?.abort()
+    replacementController = controller
+    drafts.save?.(session.value.sessionId, questionId, { text: draft.value })
+    try {
+      const value = await api.replace(session.value.sessionId, { questionId, requestId: ids(), expectedRevision: session.value.revision, reason: reason.trim() }, controller.signal)
+      if (!applySession(value, expectedEpoch)) return false
+      polling?.start?.(value.sessionId)
+      return true
+    } catch (cause) {
+      if (expectedEpoch === epoch && !controller.signal.aborted) error.value = cause?.message || '替换题暂不可用，请重试。'
+      return false
+    } finally { if (replacementController === controller) replacementController = null }
   }
   async function restore(id) {
     const expectedEpoch = ++epoch
@@ -157,6 +228,8 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
     const previousPhase = phase.value
     epoch += 1
     operationController?.abort()
+    clarificationController?.abort()
+    replacementController?.abort()
     operationController = null
     inFlight = null
     polling?.stop?.()
@@ -174,6 +247,8 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
   function switchScope(next = {}) {
     epoch += 1
     operationController?.abort()
+    clarificationController?.abort()
+    replacementController?.abort()
     operationController = null
     inFlight = null
     polling?.stop?.()
@@ -187,7 +262,7 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
     error.value = ''
     try { return storage?.getItem(pointerKey) || '' } catch { return '' }
   }
-  function dispose() { epoch += 1; operationController?.abort(); polling?.stop?.(); voice?.dispose?.() }
+  function dispose() { epoch += 1; operationController?.abort(); clarificationController?.abort(); replacementController?.abort(); polling?.stop?.(); voice?.dispose?.() }
 
-  return { session, draft, phase, error, submission, active, applySession, send, retryGeneration, restore, beginFinish, cancelFinish, switchScope, dispose }
+  return { session, draft, phase, error, submission, active, applySession, send, skip, clarify, replace, practiceFeedback, retryGeneration, restore, beginFinish, cancelFinish, switchScope, dispose }
 }

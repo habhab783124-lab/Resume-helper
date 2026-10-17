@@ -1,6 +1,6 @@
 <template>
 <section class="page active" id="page-resume" data-title="简历工作台">
-          <div class="page-intro resume-intro"><div><div class="eyebrow"><span class="eyebrow-line"></span>RESUME STUDIO / 03</div><h1>简历工作台</h1><p>把经历写得准确、有重点，也更容易被读懂。</p></div><div class="intro-actions"><button class="button button-outline" @click="printResume"><svg><use href="#i-download"/></svg>打印 / 导出 PDF</button><button class="button button-primary" :disabled="saving || isEmpty" @click="saveVersion">{{ saving ? '保存中…' : '保存版本' }}</button></div></div>
+          <div class="page-intro resume-intro"><div><div class="eyebrow"><span class="eyebrow-line"></span>RESUME STUDIO / 03</div><h1>简历工作台</h1><p>把经历写得准确、有重点，也更容易被读懂。</p></div><div class="intro-actions"><button class="button button-outline" @click="printResume"><svg><use href="#i-download"/></svg>打印 / 导出 PDF</button><button class="button button-outline" :disabled="saving || isEmpty" @click="saveVersionAndStart">保存版本并开始面试</button><button class="button button-primary" :disabled="saving || isEmpty" @click="saveVersion">{{ saving ? '保存中…' : '保存版本' }}</button></div></div>
 
           <p v-if="error" class="notice is-error" role="alert">{{ error }}</p>
           <p v-else-if="notice" class="notice" role="status">{{ notice }}</p>
@@ -97,6 +97,7 @@
                 <div class="version-info"><strong>{{ version.name }}</strong><span>{{ version.targetTitle || '未填目标职位' }} · {{ version.summaryText }} · {{ version.createdAt }}<template v-if="version.hasJd"> · 定向版</template></span></div>
                 <div class="version-actions">
                   <button class="text-button" type="button" @click="loadVersion(version.id)">载入</button>
+                  <button class="text-button" type="button" @click="startInterviewVersion(version.id)">用此版本练习</button>
                   <button class="text-button is-danger" type="button" @click="removeVersion(version)">删除</button>
                 </div>
               </article>
@@ -109,7 +110,8 @@
 
 <script setup>
 import { computed, onMounted, ref, watch } from 'vue'
-import { RouterLink } from 'vue-router'
+import { RouterLink, useRouter } from 'vue-router'
+import { newInterviewRoute } from '../interview/interviewNavigation.js'
 import {
   deleteResumeVersion,
   fetchResumeDraft,
@@ -121,6 +123,7 @@ import {
 import { getDemoSession } from '../utils/demoAuth'
 
 const draft = ref(null)
+const router = useRouter()
 const emptyMessage = ref('')
 const versions = ref([])
 const suggestions = ref([])
@@ -328,11 +331,22 @@ async function saveVersion() {
     })
     await refreshVersions()
     flash(`已保存为「${saved?.name || '新版本'}」。`)
+    return saved
   } catch (cause) {
     fail(cause)
+    return null
   } finally {
     saving.value = false
   }
+}
+
+async function saveVersionAndStart() {
+  const saved = await saveVersion()
+  if (saved?.id) router.push(newInterviewRoute({ resumeVersionId: saved.id }))
+}
+
+function startInterviewVersion(id) {
+  if (id) router.push(newInterviewRoute({ resumeVersionId: String(id) }))
 }
 
 async function loadVersion(id) {

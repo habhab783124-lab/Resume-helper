@@ -3,8 +3,14 @@ export function toConversationMessages(session, pendingSubmission = null, phase 
   const messages = []
   for (const turn of session.turns) {
     const kind = session.questionMetadata?.[turn.questionId]?.kind || 'MAIN'
-    if (turn.question) messages.push({ id: `${turn.questionId}:question`, role: 'assistant', questionId: turn.questionId, text: turn.question, status: 'complete', kind })
-    if (turn.answer != null) messages.push({ id: `${turn.questionId}:answer`, role: 'user', questionId: turn.questionId, text: turn.answer, status: 'complete', kind })
+    const status = session.withdrawnQuestionIds?.includes?.(turn.questionId) ? 'withdrawn' : 'complete'
+    if (turn.question) messages.push({ id: `${turn.questionId}:question`, role: 'assistant', questionId: turn.questionId, text: turn.question, status, kind })
+    if (turn.answer != null) {
+      const eligible = kind !== 'FOLLOW_UP' && (session.status === 'FINISHED'
+        || (session.plan?.mode === 'QUICK' && session.closedRootIds?.includes?.(turn.questionId)))
+      messages.push({ id: `${turn.questionId}:answer`, role: 'user', questionId: turn.questionId, text: turn.answer, status, kind,
+        attemptEnabled: eligible, questionText: turn.question })
+    }
     else if (pendingSubmission?.questionId === turn.questionId && pendingSubmission.answer) messages.push({ id: `${turn.questionId}:answer`, role: 'user', questionId: turn.questionId, text: pendingSubmission.answer, status: 'unconfirmed', kind })
   }
   const current = session.status === 'ACTIVE' ? session.currentQuestion : null
