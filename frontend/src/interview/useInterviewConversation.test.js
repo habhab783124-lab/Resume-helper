@@ -159,6 +159,50 @@ test('QUICK waits after saving an answer until the user explicitly requests the 
   assert.equal(calls.filter(call => call[0] === 'generate').length, 1)
 })
 
+test('sendVoice separates confirmed answer save from a failed next-question generation', async () => {
+  const next = { ...questionSession('s1', 3), plan: { mode: 'FULL' }, revision: 2,
+    currentQuestion: { questionId: 'q2', question: '下一题' },
+    turns: [{ questionId: 'q1', question: '介绍项目', answer: '回答' }, { questionId: 'q2', question: '下一题', answer: null }] }
+  const { controller, calls } = setup({ api: {
+    saveAnswer: async (...args) => { calls.push(['saveAnswer', ...args]); return next },
+    generate: async () => { throw new Error('generation failed') },
+  } })
+  const result = await controller.sendVoice({ questionId: 'q1', submissionId: 'voice-id', answer: '回答' })
+  assert.deepEqual(result, { outcome: 'SAVED', questionId: 'q1', submissionId: 'voice-id', generation: 'FAILED' })
+  assert.equal(calls.filter(call => call[0] === 'saveAnswer')[0][2].submissionId, 'voice-id')
+})
+
+test('sendVoice retries an unknown save with the same frozen submission ID', async () => {
+  let attempts = 0
+  const { controller, calls } = setup({ api: {
+    saveAnswer: async (...args) => { calls.push(['saveAnswer', ...args]); if (attempts++ === 0) throw new Error('offline'); return savedSession() },
+    getSession: async () => { throw new Error('readback unavailable') },
+  } })
+  const payload = { questionId: 'q1', submissionId: 'voice-id', answer: '回答' }
+  assert.equal((await controller.sendVoice(payload)).outcome, 'UNCERTAIN')
+  assert.equal((await controller.sendVoice(payload)).outcome, 'SAVED')
+  const savedCalls = calls.filter(call => call[0] === 'saveAnswer')
+  assert.equal(savedCalls[0][2].submissionId, savedCalls[1][2].submissionId)
+  assert.equal(savedCalls[0][2].answer, savedCalls[1][2].answer)
+})
+
+test('sendVoice rejects a different frozen payload while the first submission is in flight', async () => {
+  let releaseSave
+  const savedFirst = { ...savedSession(), turns: [{ questionId: 'q1', question: '介绍项目', answer: '第一份回答' }] }
+  const { controller, calls } = setup({ api: { saveAnswer: (...args) => {
+    calls.push(['saveAnswer', ...args])
+    return new Promise(resolve => { releaseSave = () => resolve(savedFirst) })
+  } } })
+  const first = { questionId: 'q1', submissionId: 'voice-1', answer: '第一份回答' }
+  const second = { questionId: 'q1', submissionId: 'voice-2', answer: '另一份回答' }
+  const pending = controller.sendVoice(first)
+  while (!releaseSave) await new Promise(resolve => setImmediate(resolve))
+  assert.deepEqual(await controller.sendVoice(second), { outcome: 'REJECTED', questionId: 'q1', submissionId: 'voice-2', generation: 'NONE' })
+  assert.equal(calls.filter(call => call[0] === 'saveAnswer').length, 1)
+  releaseSave()
+  assert.equal((await pending).outcome, 'SAVED')
+})
+
 test('skipping closes the selected question and FULL immediately requests a next generation', async () => {
   const skipped = { ...questionSession('s1', 2), currentQuestion: null, revision: 3, generation: null,
     turns: [{ questionId: 'q1', question: '当前题', answer: null }] }

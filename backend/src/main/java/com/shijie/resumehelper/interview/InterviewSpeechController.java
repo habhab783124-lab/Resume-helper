@@ -30,10 +30,13 @@ import org.springframework.web.multipart.MultipartFile;
 public class InterviewSpeechController {
     private final InterviewSpeechService speechService;
     private final SpeechClientResolver speechClients;
+    private final InterviewVoiceStreamService voiceStreams;
 
-    public InterviewSpeechController(InterviewSpeechService speechService, SpeechClientResolver speechClients) {
+    public InterviewSpeechController(InterviewSpeechService speechService, SpeechClientResolver speechClients,
+                                     InterviewVoiceStreamService voiceStreams) {
         this.speechService = speechService;
         this.speechClients = speechClients;
+        this.voiceStreams = voiceStreams;
     }
 
     private String owner(HttpServletRequest request) {
@@ -49,6 +52,22 @@ public class InterviewSpeechController {
     @PostMapping("/interview-speech/check")
     public ApiResponse<InterviewSpeechService.SpeechCheck> check(HttpServletRequest request) {
         return ApiResponse.ok(speechService.check(owner(request), speechClients.resolve(request)));
+    }
+
+    @PostMapping("/interviews/{id}/voice-sessions")
+    public ApiResponse<InterviewVoiceSessionRegistry.Ticket> createVoiceSession(
+            @PathVariable String id, HttpServletRequest request) {
+        return ApiResponse.ok(speechService.createVoiceSession(owner(request), id, speechClients.apiKey(request),
+                speechClients.resolveStreaming(request)));
+    }
+
+    @DeleteMapping("/interviews/{id}/voice-sessions/{voiceSessionId}")
+    public ApiResponse<java.util.Map<String, Boolean>> closeVoiceSession(
+            @PathVariable String id, @PathVariable String voiceSessionId, HttpServletRequest request) {
+        String owner = owner(request);
+        speechService.closeVoiceSession(owner, id, voiceSessionId);
+        voiceStreams.closeVoiceSession(owner, id, voiceSessionId);
+        return ApiResponse.ok(java.util.Map.of("closed", true));
     }
 
     @PostMapping("/interviews/{id}/questions/{questionId}/speech")

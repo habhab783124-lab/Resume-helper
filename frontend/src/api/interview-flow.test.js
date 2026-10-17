@@ -13,18 +13,24 @@ import { useInterviewFinish } from '../interview/useInterviewFinish.js'
 const viewSource = readFileSync(fileURLToPath(new URL('../views/Interview.vue', import.meta.url)), 'utf8')
 const headerSource = readFileSync(fileURLToPath(new URL('../components/interview/InterviewHeader.vue', import.meta.url)), 'utf8')
 const composerSource = readFileSync(fileURLToPath(new URL('../components/interview/InterviewComposer.vue', import.meta.url)), 'utf8')
+const voiceControlsSource = readFileSync(fileURLToPath(new URL('../components/interview/InterviewVoiceControls.vue', import.meta.url)), 'utf8')
 const finishDialogSource = readFileSync(fileURLToPath(new URL('../components/interview/InterviewFinishDialog.vue', import.meta.url)), 'utf8')
 const setupBody = /<script setup>([\s\S]*?)<\/script>/.exec(viewSource)[1]
   .replace(/^import\s.*$/gm, '')
   .replace(/import\.meta\.env/g, '({})')
   .trimEnd()
-  + '\nreturn { applySession, submitAnswer, finish, chooseFinish, viewReport, reset, upload, start, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, finishFlow, material };'
+  + '\nreturn { applySession, submitAnswer, finish, continueFinish, chooseFinish, viewReport, reset, upload, start, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, finishFlow, material };'
 
 function mount(apiStub) {
   const mounted = [], unmounted = [], pushes = [], events = [], storeCalls = []
   const fakeVoice = { busy: ref(false), preview: ref(null),
     syncContext() { events.push('sync') }, dispose() { events.push('dispose') }, loadCapabilities() { events.push('capabilities') },
     acceptPreview() { return false }, restorePreview() { return false }, cancelRecording() { events.push('cancel-recording') } }
+  let continuousActive = false
+  const continuousVoice = { isActive: () => continuousActive,
+    pause(reason) { events.push(`continuous-pause:${reason}`); continuousActive = false },
+    resume() { events.push('continuous-resume'); continuousActive = true },
+    start() {}, stop() {}, stopPlayback() {}, submitNow() {}, retrySegment() {}, discardSegment() {}, onDraftEdited() {}, syncContext() {}, dispose() {} }
   // 草稿存储用记录型替身：不碰真实 localStorage，又能断言「提交成功才清理」。
   const drafts = () => ({
     save: (sessionId, questionId, payload) => { storeCalls.push(['save', sessionId, questionId, payload]); return { saved: true } },
@@ -44,15 +50,17 @@ function mount(apiStub) {
   const setupState = { source: ref(null), resumePreview: ref(null), targetRole: ref(''), jobDescription: ref(''), preferences: ref({}),
     loadSource: async () => null, loadJob: async () => null, savePreparation() {}, restorePreparation() { return false },
     clearPreparation() {}, switchScope() { return false } }
+  const createInterviewVoiceAdapter = bridge => ({ api: bridge, conversation: bridge })
+  const useInterviewVoiceConversation = () => ({ state: { phase: 'OFF' }, ...continuousVoice })
   const view = new Function(
-    'ref', 'computed', 'reactive', 'watch', 'nextTick', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'materialsApi', 'resumeApi', 'jobsApi', setupBody)(
+    'ref', 'computed', 'reactive', 'watch', 'nextTick', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'materialsApi', 'resumeApi', 'jobsApi', 'createInterviewVoiceAdapter', 'useInterviewVoiceConversation', 'useVoiceCapture', 'createVoiceSocket', 'createPcmPlayer', 'voiceWorkletUrl', setupBody)(
     ref, computed, reactive, watch, nextTick, callback => mounted.push(callback), callback => unmounted.push(callback), () => api,
     drafts, () => '', () => 'demo-user',
     () => ({ query: {} }),
     () => ({ push: route => { events.push('route'); pushes.push(route) } }),
     isNewInterviewRoute, () => fakeVoice, useInterviewPolling, useInterviewConversation, useInterviewFinish,
-    () => setupState, {}, {}, {})
-  Object.assign(view, { pushes, events, mounted, unmounted, storeCalls })
+    () => setupState, {}, {}, {}, createInterviewVoiceAdapter, useInterviewVoiceConversation, () => {}, () => {}, () => {}, '/test-worklet.js')
+  Object.assign(view, { pushes, events, mounted, unmounted, storeCalls, continuousVoice, setContinuousActive: value => { continuousActive = value } })
   return view
 }
 
@@ -159,6 +167,17 @@ test('finish offers inline choices for a draft or unaccepted preview and continu
   await view.finish(); assert.equal(view.finishChoice.value, true); assert.equal(finished, 0)
   await view.chooseFinish('submit'); assert.equal(finished, 0); assert.match(view.error.value, /转写/)
 })
+
+test('ending while continuous voice is active pauses immediately and cancelling finish leaves it paused', async () => {
+  const view = mount({ finish: async () => finishedSession })
+  view.applySession(firstQuestion); view.setContinuousActive(true)
+  await view.finish()
+  assert.ok(view.events.includes('continuous-pause:finish'))
+  assert.equal(view.finishChoice.value, true)
+  view.continueFinish()
+  assert.equal(view.events.includes('continuous-resume'), false)
+  assert.equal(view.finishChoice.value, false)
+})
 test('submit and finish sends the current answer directly to finish without generating another question', async () => {
   let finished = 0, finishBody
   const view = mount({ answer: async () => { throw Object.assign(new Error('invalid'), { status: 400 }) }, getSession: async () => firstQuestion,
@@ -232,6 +251,9 @@ test('voice controls remain visible with explicit disabled reasons, inline finis
   assert.match(composerSource, /<audio[^>]+controls/)
   assert.match(composerSource, /火山引擎/)
   assert.match(composerSource, /5000.*精简/)
+  assert.match(composerSource, /停止录音后自动上传至火山引擎并转写/)
+  assert.match(voiceControlsSource, /停顿后展示转写.*倒计时结束自动提交/)
+  assert.match(voiceControlsSource, /回答仍保留/)
   assert.doesNotMatch(viewSource, /文字面试 · 不会录音/)
 })
 

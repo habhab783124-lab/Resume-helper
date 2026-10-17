@@ -58,3 +58,15 @@ test('clears stored settings without resurrecting previous values', async () => 
   globalThis.localStorage = store({ 'resume-helper-local-api-base-url': 'stale' }); globalThis.sessionStorage = store({ 'resume-helper-speech-key': 'stale' })
   assert.equal(ctx.getLocalApiBaseUrl(), ''); assert.equal(ctx.getSpeechSettings().speechKey, '')
 })
+test('speech settings changes emit an event with no credential payload', async () => {
+  const ctx = await context(store({}))
+  const original = globalThis.dispatchEvent
+  let received
+  globalThis.dispatchEvent = event => { received = event; return true }
+  try {
+    ctx.setSpeechSettings({ speechKey: 'secret-value' })
+    assert.equal(received.type, 'speech-settings-change')
+    assert.equal(received.detail, undefined)
+    assert.equal(JSON.stringify(received).includes('secret-value'), false)
+  } finally { globalThis.dispatchEvent = original }
+})

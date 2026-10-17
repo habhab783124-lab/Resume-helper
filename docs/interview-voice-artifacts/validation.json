@@ -1,0 +1,22 @@
+{
+  "date": "2026-10-17T17:18:18.411Z",
+  "checks": [
+    {
+      "check": "development AudioWorklet module, fake capture and seal barrier",
+      "frames": 5,
+      "totalSamples": 4352,
+      "sealed": true,
+      "micTracksStopped": true
+    },
+    {
+      "check": "production-preview AudioWorklet module, fake capture and seal barrier",
+      "frames": 5,
+      "totalSamples": 4352,
+      "sealed": true,
+      "micTracksStopped": true
+    }
+  ],
+  "limitations": [
+    "真实供应商 TTS/ASR 和真人耳机/扬声器未在此假设备 smoke 中验证"
+  ]
+}

@@ -56,3 +56,24 @@ test('read failures update connection state and never enqueue generation request
   poll.stop(); await work
   assert.equal(calls, 1)
 })
+
+test('getMaxDelayMs keeps the existing poll loop at one second during voice and restores backoff after voice stops', async () => {
+  const clock = fakeClock(); let voiceActive = false; let calls = 0
+  const api = { async getSession() { calls++; return { status: 'ACTIVE', generation: { state: 'RUNNING' } } } }
+  const poll = useInterviewPolling({ api, clock, getMaxDelayMs: () => voiceActive ? 1000 : 5000 })
+  const work = poll.start('s1')
+  await new Promise(resolve => setImmediate(resolve))
+  assert.equal(clock.timers.values().next().value.ms, 1000)
+  clock.tick(); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(clock.timers.values().next().value.ms, 2000)
+  voiceActive = true
+  clock.tick(); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(clock.timers.values().next().value.ms, 1000)
+  voiceActive = false
+  clock.tick(); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(clock.timers.values().next().value.ms, 1000)
+  clock.tick(); await new Promise(resolve => setImmediate(resolve))
+  assert.equal(clock.timers.values().next().value.ms, 2000)
+  assert.equal(calls, 5)
+  poll.stop(); await work
+})

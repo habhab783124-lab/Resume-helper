@@ -22,6 +22,13 @@ import { useInterviewSetup } from '../interview/useInterviewSetup.js'
 import * as materialsApi from '../api/materials.js'
 import * as resumeApi from '../api/resume.js'
 import * as jobsApi from '../api/jobs.js'
+import InterviewVoiceControls from '../components/interview/InterviewVoiceControls.vue'
+import { createInterviewVoiceAdapter } from '../interview/voice/interviewVoiceAdapter.ts'
+import { useInterviewVoiceConversation } from '../interview/voice/useInterviewVoiceConversation.ts'
+import { useVoiceCapture } from '../interview/voice/useVoiceCapture.ts'
+import { createVoiceSocket } from '../interview/voice/voiceSocket.ts'
+import { createPcmPlayer } from '../interview/voice/pcmPlayer.ts'
+import { voiceWorkletUrl } from '../interview/voice/voiceRuntime.ts'
 
 const route = useRoute()
 const router = useRouter()
@@ -37,7 +44,7 @@ const infoButton = ref(null)
 function openInfo(event) { infoButton.value = event?.currentTarget || null; infoOpen.value = true }
 function closeInfo() { infoOpen.value = false; nextTick(() => infoButton.value?.focus?.()) }
 let conversation
-const polling = useInterviewPolling({ api, onSession: value => applySession(value), onError: () => {
+const polling = useInterviewPolling({ api, getMaxDelayMs: () => realtimeVoice?.isActive() ? 1000 : 5000, onSession: value => applySession(value), onError: () => {
   if (!error.value) error.value = '会话状态暂时无法读取，正在等待连接恢复。'
 } })
 conversation = useInterviewConversation({ api, polling, storage: globalThis.sessionStorage,
@@ -115,11 +122,43 @@ function pauseRecordingReplay() {
 const voice = reactive(useInterviewVoice({ api, getContext: voiceContext,
   getDraft: () => answer.value, setDraft: text => { answer.value = text },
   syncSession: syncVoiceSession, pauseReplay: pauseRecordingReplay }))
+const realtimeVoiceState = ref(null)
+let realtimeVoice
+const realtimePorts = createInterviewVoiceAdapter({
+  readSession: () => conversation.session.value,
+  readDraft: () => conversation.draft.value,
+  readPendingSubmission: () => conversation.submission.value,
+  writeDraft: text => { conversation.draft.value = text },
+  sendVoice: payload => conversation.sendVoice(payload),
+  getSession: (id, options) => api.getSession(id, options),
+  transcribe: (id, body, signal) => api.transcribe(id, body, signal),
+  createVoiceSession: (id, signal) => api.createVoiceSession(id, signal),
+  closeVoiceSession: (id, voiceSessionId) => api.closeVoiceSession(id, voiceSessionId),
+  voiceSocketUrl: () => api.voiceSocketUrl(),
+})
+realtimeVoice = useInterviewVoiceConversation({
+  api: realtimePorts.api,
+  conversation: realtimePorts.conversation,
+  getScope: () => JSON.stringify([activeScope.apiBaseUrl, activeScope.userId]),
+  getQuestionKind: () => ['MAIN', 'FOLLOW_UP', 'ALGORITHM', 'CASE_STUDY'].includes(currentMetadata.value.kind) ? currentMetadata.value.kind : 'MAIN',
+  getVisible: () => globalThis.document?.visibilityState !== 'hidden',
+  audioContextFactory: () => new (globalThis.AudioContext || globalThis.webkitAudioContext)(),
+  workletUrl: voiceWorkletUrl,
+  captureFactory: options => useVoiceCapture({ ...options, WorkletNode: globalThis.AudioWorkletNode }),
+  socketFactory: options => createVoiceSocket(options),
+  playerFactory: options => createPcmPlayer(options),
+  saveDraft: text => { conversation.draft.value = text; scheduleDraftSave() },
+  onChange: state => { realtimeVoiceState.value = state },
+  onFailure: failure => { if (failure.code === 'VOICE_START_FAILED') error.value = failure.message },
+})
+realtimeVoiceState.value = { ...realtimeVoice.state }
 const finishButton = ref(null)
 const finishFlow = useInterviewFinish({ isActive: () => active.value, voice, open: finishChoice })
 const { finishing: finishFinishing } = finishFlow
-watch(session, () => { voice.syncContext(); applyQuestionDraft() }, { flush: 'sync' })
-const locked = computed(() => !!busy.value || voice.busy)
+watch(session, () => { voice.syncContext(); realtimeVoice.syncContext(); applyQuestionDraft() }, { flush: 'sync' })
+const locked = computed(() => !!busy.value || voice.busy || ['SUBMITTING', 'WAITING_QUESTION'].includes(realtimeVoiceState.value?.phase))
+const realtimeActive = computed(() => !!realtimeVoiceState.value && (realtimeVoiceState.value.captureActive
+  || realtimeVoiceState.value.transport !== 'CLOSED' || realtimeVoiceState.value.phase === 'SPEAKING'))
 watch(pending, () => voice.syncContext(), { flush: 'sync' })
 
 // 按题落在本机的草稿：300ms 防抖，离开页面或刷新立即落盘。
@@ -196,6 +235,7 @@ function onRequestContextChange() {
   const nextScope = { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() }
   if (nextScope.apiBaseUrl === activeScope.apiBaseUrl && nextScope.userId === activeScope.userId) return
   saveDraft()
+  void realtimeVoice.stop()
   polling.stop()
   voice.cancelRecording()
   const nextRestoreId = conversation.switchScope(nextScope)
@@ -341,11 +381,15 @@ function viewReport() {
   voice.dispose()
   router.push({ name: 'Report', query: { sessionId: session.value.sessionId } })
 }
-function finish() {
+async function finish() {
+  if (realtimeVoice.isActive()) await realtimeVoice.pause('finish')
   return finishFlow.requestFinish()
 }
 function requestFinish(event) { finishButton.value = event?.currentTarget || null; return finish() }
-function continueFinish() { finishFlow.continueInterview(); nextTick(() => finishButton.value?.focus?.()) }
+function continueFinish() {
+  finishFlow.continueInterview()
+  nextTick(() => finishButton.value?.focus?.())
+}
 async function endSession(submission = null) {
   if (!active.value || voice.busy) return false
   const key = JSON.stringify([session.value.sessionId, submission])
@@ -436,6 +480,7 @@ async function prepareNewRound() {
   }
 }
 function reset() {
+  void realtimeVoice.stop()
   voice.cancelRecording()
   remember('')
   session.value = null
@@ -455,6 +500,8 @@ onMounted(() => {
   globalThis.window?.addEventListener('pagehide', saveDraft)
   globalThis.window?.addEventListener('storage', onDraftStorage)
   globalThis.addEventListener?.('request-context-change', onRequestContextChange)
+  globalThis.addEventListener?.('speech-settings-change', onSpeechSettingsChange)
+  globalThis.document?.addEventListener('visibilitychange', onRealtimeVisibilityChange)
   try { restoreId.value = sessionStorage.getItem(storageKey) || sessionStorage.getItem(legacyStorageKey) || '' } catch { /* Storage is optional. */ }
   const requestedSessionId = typeof route.query.sessionId === 'string' ? route.query.sessionId.trim() : ''
   if (requestedSessionId) { restoreId.value = requestedSessionId; remember(requestedSessionId) }
@@ -494,12 +541,27 @@ onMounted(() => {
 })
 onUnmounted(() => {
   saveDraft()
+  realtimeVoice.dispose()
   conversation.dispose()
   globalThis.window?.removeEventListener('pagehide', saveDraft)
   globalThis.window?.removeEventListener('storage', onDraftStorage)
   globalThis.removeEventListener?.('request-context-change', onRequestContextChange)
+  globalThis.removeEventListener?.('speech-settings-change', onSpeechSettingsChange)
+  globalThis.document?.removeEventListener('visibilitychange', onRealtimeVisibilityChange)
   voice.dispose()
 })
+function onRealtimeVisibilityChange() {
+  if (globalThis.document?.visibilityState === 'hidden' && realtimeVoiceState.value?.phase !== 'OFF') void realtimeVoice.pause('hidden')
+}
+function onSpeechSettingsChange() {
+  if (realtimeVoice.isActive()) void realtimeVoice.pause('speech settings changed')
+}
+function updateAnswer(value) { answer.value = value; realtimeVoice.onDraftEdited() }
+function startRealtimeVoice() {
+  if (voice.busy) { error.value = '请先结束或取消当前手动录音，再开启连续语音。'; return }
+  voice.stopQuestion()
+  void realtimeVoice.start()
+}
 </script>
 
 <template>
@@ -562,7 +624,8 @@ onUnmounted(() => {
               <p v-if="!voice.ttsEnabled" class="voice-note">{{ voice.capabilityState === 'loading' ? '正在确认题目朗读能力，文字作答可直接继续。' : '题目朗读暂不可用，可阅读题目并用文字回答。' }}</p>
               <p v-if="voice.speechError" class="notice error" role="alert">{{ voice.speechError }}</p>
             </div>
-            <InterviewComposer v-model="answer" :locked="locked" :pending="pending" :kind="currentMetadata.kind" :guidance="answerGuidance(currentMetadata.kind)" :voice="voice" @send="submitAnswer" @audio="recordingAudio = $event" />
+            <InterviewVoiceControls v-if="realtimeVoiceState" :state="realtimeVoiceState" @start="startRealtimeVoice" @pause="realtimeVoice.pause('user')" @stop="realtimeVoice.stop" @stop-playback="realtimeVoice.stopPlayback" @submit-now="realtimeVoice.submitNow" @retry-segment="realtimeVoice.retrySegment" @discard-segment="realtimeVoice.discardSegment" />
+            <InterviewComposer :model-value="answer" :locked="locked" :continuous-active="realtimeActive" :pending="pending" :kind="currentMetadata.kind" :guidance="answerGuidance(currentMetadata.kind)" :voice="voice" @update:model-value="updateAnswer" @send="submitAnswer" @audio="recordingAudio = $event" />
           </template>
           <div v-if="active && !current && session.plan?.mode === 'QUICK' && phase === 'ANSWERING'" class="session-actions">
             <section v-if="quickPracticeFeedback" class="quick-practice-feedback" data-testid="quick-practice-feedback">

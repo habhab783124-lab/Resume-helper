@@ -55,6 +55,7 @@ export function setSpeechSettings(settings = {}) {
     if (speechMemory.speechKey) globalThis.sessionStorage?.setItem(speechStorageKey, speechMemory.speechKey)
     else globalThis.sessionStorage?.removeItem(speechStorageKey)
   } catch { /* Storage is optional; the current tab still retains its key. */ }
+  try { globalThis.dispatchEvent?.(new Event('speech-settings-change')) } catch { /* Non-browser runtimes have no event target. */ }
 }
 
 /** The local Java service address is a browser preference, separate from AI credentials. */

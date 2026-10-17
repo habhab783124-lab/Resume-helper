@@ -16,6 +16,29 @@ test('reads speech capabilities from the speech endpoint', async () => {
   assert.equal(request[1].credentials, 'include')
 })
 
+test('creates and closes short-lived voice tickets over speech-authenticated HTTP and builds a prefix-aware socket URL', async () => {
+  const requests = []
+  setSpeechSettings({ speechKey: '' })
+  const api = createInterviewApi({ baseUrl: 'https://speech.example.test/prefix', fetchImpl: async (...args) => {
+    requests.push(args)
+    return json({ success: true, data: { voiceSessionId: 'vs1', ticket: 'secret', ticketExpiresAt: '2026-10-18T01:00:00Z', websocketPath: '/api/interview-voice/ws', protocolVersion: 1 } })
+  } })
+  setSpeechSettings({ speechKey: 'speech-key' })
+  const ticket = await api.createVoiceSession('session/1')
+  await api.closeVoiceSession('session/1', ticket.voiceSessionId)
+
+  assert.equal(requests[0][0], 'https://speech.example.test/prefix/api/interviews/session%2F1/voice-sessions')
+  assert.equal(requests[0][1].method, 'POST')
+  assert.equal(requests[0][1].headers['X-Speech-Api-Key'], 'speech-key')
+  assert.equal(requests[1][0], 'https://speech.example.test/prefix/api/interviews/session%2F1/voice-sessions/vs1')
+  assert.equal(requests[1][1].method, 'DELETE')
+  assert.equal(requests[1][1].headers['X-Speech-Api-Key'], 'speech-key')
+  assert.equal(api.voiceSocketUrl({ href: 'https://app.example.test/' }), 'wss://speech.example.test/prefix/api/interview-voice/ws')
+  assert.equal(api.voiceSocketUrl({ href: 'http://app.example.test/' }), 'wss://speech.example.test/prefix/api/interview-voice/ws')
+  assert.ok(!api.voiceSocketUrl({ href: 'https://app.example.test/' }).includes('secret'))
+  setSpeechSettings({ speechKey: '' })
+})
+
 test('uploads the recording as multipart with cookies and an abort signal', async () => {
   let request
   const api = createInterviewApi({ fetchImpl: async (...args) => {

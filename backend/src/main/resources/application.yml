@@ -180,6 +180,16 @@ app:
       tts-timeout-seconds: 30
       conversion-timeout-seconds: 10
       max-concurrent-requests: 2
+    voice:
+      enabled: ${INTERVIEW_VOICE_ENABLED:false}
+      ticket-ttl-seconds: 60
+      connection-ttl-seconds: 1800
+      max-sessions: 32
+      max-sessions-per-owner: 4
+      first-audio-timeout-seconds: 15
+      upstream-idle-timeout-seconds: 15
+      stream-timeout-seconds: 180
+      max-stream-audio-bytes: 16777216
 
 logging:
   level:

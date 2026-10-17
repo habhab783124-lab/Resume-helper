@@ -1,4 +1,7 @@
+import { withRequestDeadline } from './requestDeadline.ts'
 import { getAiSettings, getSpeechSettings, getLocalApiBaseUrl, getUserId as sharedUserId } from './requestContext.js'
+
+const voiceWebSocketPath = '/api/interview-voice/ws'
 
 export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch, getUserId = sharedUserId,
   requestTimeouts = { read: 10000, write: 15000 } } = {}) {
@@ -21,35 +24,31 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
       headers['Content-Type'] = 'application/json'
       body = JSON.stringify(body)
     }
-    const controller = timeoutMs ? new AbortController() : null
-    let timedOut = false
-    let timer
-    const abort = () => controller?.abort(signal?.reason)
-    if (controller && signal) {
-      if (signal.aborted) abort()
-      else signal.addEventListener('abort', abort, { once: true })
-    }
-    if (controller) timer = setTimeout(() => { timedOut = true; controller.abort() }, timeoutMs)
-    let reply
-    try {
-      reply = await fetchImpl(`${root()}${path}`, { method, headers, body, credentials: 'include', signal: controller?.signal ?? signal })
-    } catch (cause) {
-      if (timedOut) throw Object.assign(new Error('浏览器请求未确认，请读取会话状态后再决定是否重试'), { code: 'BROWSER_UNCONFIRMED', retryable: true, cause })
-      throw cause
-    } finally {
-      clearTimeout(timer)
-      signal?.removeEventListener('abort', abort)
-    }
-    let envelope
-    try { envelope = await reply.json() } catch {
-      throw Object.assign(new Error(`服务返回了无效响应（HTTP ${reply.status}）`), { status: reply.status })
-    }
-    if (!reply.ok || envelope?.success !== true || envelope.data == null) {
-      throw Object.assign(new Error(envelope?.message || `请求失败（HTTP ${reply.status}）`), {
-        status: reply.status, code: envelope?.code, retryable: envelope?.retryable
+    return withRequestDeadline(async requestSignal => {
+      const reply = await fetchImpl(`${root()}${path}`, {
+        method, headers, body, credentials: 'include', signal: requestSignal,
       })
-    }
-    return envelope.data
+      let envelope
+      try {
+        envelope = await reply.json()
+      } catch (cause) {
+        if (requestSignal.aborted) throw cause
+        throw Object.assign(new Error(`服务返回了无效响应（HTTP ${reply.status}）`), {
+          status: reply.status, code: 'INVALID_RESPONSE', cause,
+        })
+      }
+      if (!reply.ok || envelope?.success !== true || envelope.data == null) {
+        const failure = envelope?.data ?? envelope
+        const retryAfterMs = Number.isFinite(failure?.retryAfterMs) ? failure.retryAfterMs : undefined
+        throw Object.assign(new Error(envelope?.message || `请求失败（HTTP ${reply.status}）`), {
+          status: reply.status,
+          ...(typeof failure?.code === 'string' ? { code: failure.code } : {}),
+          ...(typeof failure?.retryable === 'boolean' ? { retryable: failure.retryable } : {}),
+          ...(retryAfterMs !== undefined ? { retryAfterMs } : {}),
+        })
+      }
+      return envelope.data
+    }, { signal, ...(timeoutMs !== undefined ? { timeoutMs } : {}) })
   }
   const sessionPath = id => `/interviews/${encodeURIComponent(id)}`
 
@@ -126,6 +125,18 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
       method: 'POST', body, textModel: true, timeoutMs: requestTimeouts.write,
     }),
     getSpeechCapabilities: () => request('/interview-speech/capabilities', { speech: true }),
+    createVoiceSession: id => request(`${sessionPath(id)}/voice-sessions`, { method: 'POST', speech: true }),
+    closeVoiceSession: (id, voiceSessionId) => request(`${sessionPath(id)}/voice-sessions/${encodeURIComponent(voiceSessionId)}`, { method: 'DELETE', speech: true }),
+    voiceSocketUrl(locationImpl = globalThis.location) {
+      const base = getLocalApiBaseUrl() || baseUrl
+      const fallback = locationImpl?.href || 'http://localhost/'
+      const apiRoot = `${base.replace(/\/$/, '')}/api`
+      const target = new URL(`${apiRoot}${voiceWebSocketPath.slice('/api'.length)}`, fallback)
+      target.protocol = target.protocol === 'https:' || target.protocol === 'wss:' ? 'wss:' : 'ws:'
+      target.search = ''
+      target.hash = ''
+      return target.toString()
+    },
     transcribe: (id, { questionId, requestId, file }, signal) => {
       const body = new FormData()
       body.append('questionId', questionId)

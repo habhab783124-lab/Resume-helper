@@ -13,6 +13,8 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
   const active = computed(() => session.value?.status === 'ACTIVE')
   let epoch = 0
   let inFlight = null
+  let inFlightPayload = null
+  let lastVoiceResult = null
   let operationController = null
   let clarificationController = null
   let replacementController = null
@@ -67,67 +69,120 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
       return false
     }
   }
-  async function send() {
-    if (inFlight) return inFlight
+  async function performSubmission(payload, text, questionId, expectedEpoch, requestController) {
+    error.value = ''
+    phase.value = 'SAVING'
+    drafts.save?.(session.value.sessionId, questionId, { text })
+    let saved
+    try {
+      saved = await api.saveAnswer(session.value.sessionId, payload, requestController.signal)
+    } catch (saveError) {
+      if (saveError?.status >= 400 && saveError.status < 500 && saveError.status !== 409) {
+        lastVoiceResult = { outcome: 'REJECTED', questionId, submissionId: payload.submissionId, generation: 'NONE' }
+        if (expectedEpoch === epoch) {
+          submission.value = null
+          phase.value = 'ANSWERING'
+          error.value = saveError.message || '回答未被接受，请修改后重试。'
+        }
+        return false
+      }
+      try {
+        const recovered = await api.getSession(session.value.sessionId, { signal: requestController.signal })
+        if (expectedEpoch !== epoch) return false
+        applySession(recovered, expectedEpoch)
+        const turn = recovered.turns?.find(item => item.questionId === questionId)
+        if (turn?.answer !== text) throw saveError
+        saved = recovered
+      } catch {
+        if (expectedEpoch === epoch) {
+          phase.value = 'ANSWERING'
+          draft.value = text
+          error.value = saveError?.message || '回答是否保存尚未确认；原文和提交编号已保留，请重试或恢复会话。'
+          lastVoiceResult = { outcome: 'UNCERTAIN', questionId, submissionId: payload.submissionId, generation: 'NONE' }
+        }
+        return false
+      }
+    }
+    if (!applySession(saved, expectedEpoch)) {
+      lastVoiceResult = { outcome: 'STALE', questionId, submissionId: payload.submissionId, generation: 'NONE' }
+      return false
+    }
+    const savedTurn = saved.turns?.find(item => item.questionId === questionId)
+    if (savedTurn?.answer !== text) {
+      phase.value = 'ANSWERING'
+      draft.value = text
+      error.value = '服务端尚未确认回答已保存，请恢复会话后重试。'
+      lastVoiceResult = { outcome: 'UNCERTAIN', questionId, submissionId: payload.submissionId, generation: 'NONE' }
+      return false
+    }
+    drafts.remove?.(session.value.sessionId, questionId)
+    draft.value = ''
+    submission.value = null
+    if (session.value.status === 'FINISHED') {
+      lastVoiceResult = { outcome: 'FINISHED', questionId, submissionId: payload.submissionId, generation: 'NONE' }
+      return true
+    }
+    if (session.value.plan?.mode === 'QUICK') {
+      lastVoiceResult = { outcome: 'SAVED', questionId, submissionId: payload.submissionId, generation: 'NONE' }
+      return true
+    }
+    const generated = await runGeneration(expectedEpoch, requestController.signal)
+    lastVoiceResult = { outcome: 'SAVED', questionId, submissionId: payload.submissionId, generation: generated ? 'PENDING' : 'FAILED' }
+    return generated
+  }
+
+  async function send(frozenPayload = null) {
+    if (inFlight) {
+      if (frozenPayload && inFlightPayload?.questionId === frozenPayload.questionId
+          && inFlightPayload?.submissionId === frozenPayload.submissionId
+          && inFlightPayload?.answer === frozenPayload.answer) return inFlight
+      return false
+    }
     if (!active.value || !session.value?.currentQuestion) return false
-    const text = (submission.value?.answer ?? draft.value).trim()
-    if (!text || text.length > 5000) { error.value = text ? '回答不能超过 5000 字，请精简后提交。' : ''; return false }
+    if (frozenPayload && (frozenPayload.questionId !== session.value.currentQuestion.questionId
+        || typeof frozenPayload.answer !== 'string' || !frozenPayload.submissionId)) {
+      lastVoiceResult = { outcome: 'STALE', questionId: frozenPayload.questionId, submissionId: frozenPayload.submissionId, generation: 'NONE' }
+      return false
+    }
+    const text = (frozenPayload?.answer ?? submission.value?.answer ?? draft.value).trim()
+    if (!text || text.length > 5000) {
+      error.value = text ? '回答不能超过 5000 字，请精简后提交。' : ''
+      if (frozenPayload) lastVoiceResult = { outcome: 'REJECTED', questionId: frozenPayload.questionId, submissionId: frozenPayload.submissionId, generation: 'NONE' }
+      return false
+    }
     const questionId = session.value.currentQuestion.questionId
-    const payload = makeSubmission(questionId, text)
+    const payload = frozenPayload
+      ? (submission.value = { questionId, submissionId: frozenPayload.submissionId, answer: text })
+      : makeSubmission(questionId, text)
+    inFlightPayload = payload
+    lastVoiceResult = null
     const expectedEpoch = epoch
     const requestController = new AbortController()
     operationController = requestController
-    inFlight = (async () => {
-      error.value = ''
-      phase.value = 'SAVING'
-      drafts.save?.(session.value.sessionId, questionId, { text })
-      let saved
-      try {
-        saved = await api.saveAnswer(session.value.sessionId, payload, requestController.signal)
-      } catch (saveError) {
-        if (saveError?.status >= 400 && saveError.status < 500 && saveError.status !== 409) {
-          if (expectedEpoch === epoch) {
-            submission.value = null
-            phase.value = 'ANSWERING'
-            error.value = saveError.message || '回答未被接受，请修改后重试。'
-          }
-          return false
-        }
-        try {
-          const recovered = await api.getSession(session.value.sessionId, { signal: requestController.signal })
-          if (expectedEpoch !== epoch) return false
-          applySession(recovered, expectedEpoch)
-          const turn = recovered.turns?.find(item => item.questionId === questionId)
-          if (turn?.answer !== text) throw saveError
-          saved = recovered
-        } catch {
-          if (expectedEpoch === epoch) {
-            phase.value = 'ANSWERING'
-            draft.value = text
-            error.value = saveError?.message || '回答是否保存尚未确认；原文和提交编号已保留，请重试或恢复会话。'
-          }
-          return false
-        }
-      }
-      if (!applySession(saved, expectedEpoch)) return false
-      const savedTurn = saved.turns?.find(item => item.questionId === questionId)
-      if (savedTurn?.answer !== text) {
-        phase.value = 'ANSWERING'
-        draft.value = text
-        error.value = '服务端尚未确认回答已保存，请恢复会话后重试。'
-        return false
-      }
-      drafts.remove?.(session.value.sessionId, questionId)
-      draft.value = ''
-      submission.value = null
-      if (session.value.status === 'FINISHED') return true
-      if (session.value.plan?.mode === 'QUICK') return true
-      return runGeneration(expectedEpoch, requestController.signal)
-    })().finally(() => {
+    inFlight = performSubmission(payload, text, questionId, expectedEpoch, requestController).finally(() => {
       inFlight = null
+      inFlightPayload = null
       if (operationController === requestController) operationController = null
     })
     return inFlight
+  }
+  async function sendVoice(payload) {
+    if (!payload || typeof payload.questionId !== 'string' || typeof payload.submissionId !== 'string'
+        || typeof payload.answer !== 'string') {
+      return { outcome: 'REJECTED', questionId: payload?.questionId || '', submissionId: payload?.submissionId || '', generation: 'NONE' }
+    }
+    if (!active.value || session.value?.currentQuestion?.questionId !== payload.questionId) {
+      return { outcome: 'STALE', questionId: payload.questionId, submissionId: payload.submissionId, generation: 'NONE' }
+    }
+    if (!payload.answer.trim() || payload.answer.trim().length > 5000) {
+      return { outcome: 'REJECTED', questionId: payload.questionId, submissionId: payload.submissionId, generation: 'NONE' }
+    }
+    if (inFlight && (inFlightPayload?.questionId !== payload.questionId
+        || inFlightPayload?.submissionId !== payload.submissionId || inFlightPayload?.answer !== payload.answer)) {
+      return { outcome: 'REJECTED', questionId: payload.questionId, submissionId: payload.submissionId, generation: 'NONE' }
+    }
+    await send(payload)
+    return lastVoiceResult || { outcome: 'UNCERTAIN', questionId: payload.questionId, submissionId: payload.submissionId, generation: 'NONE' }
   }
   async function retryGeneration() {
     const explicitQuickNext = session.value?.status === 'ACTIVE' && session.value?.plan?.mode === 'QUICK'
@@ -264,5 +319,5 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
   }
   function dispose() { epoch += 1; operationController?.abort(); clarificationController?.abort(); replacementController?.abort(); polling?.stop?.(); voice?.dispose?.() }
 
-  return { session, draft, phase, error, submission, active, applySession, send, skip, clarify, replace, practiceFeedback, retryGeneration, restore, beginFinish, cancelFinish, switchScope, dispose }
+  return { session, draft, phase, error, submission, active, applySession, send, sendVoice, skip, clarify, replace, practiceFeedback, retryGeneration, restore, beginFinish, cancelFinish, switchScope, dispose }
 }

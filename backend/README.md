@@ -9,6 +9,7 @@
   会话快照已接入文件存储：`app.interview.storage-dir`（默认 `./data/interviews`，按用户分目录、临时文件原子替换）、
   `app.interview.retention-days`（新会话默认保留 30 天，创建时冻结 `expiresAt`）和出题重试参数均在 `application.yml` 配置。
   `app.interview.max-retries=5` 表示最多额外重试五次，因此一次生成最多发起六次模型请求；`app.interview.generation-deadline-seconds=120` 是从排队开始计算的整次操作预算，含模型调用和重试等待；单次调用默认上限 60 秒。网络、超时、上游暂不可用、限流等可重试错误按退避策略重试；配置、认证、额度、存储和输入错误不自动重试。达到预算后状态转为可见的失败，可由用户手动继续。
+  新增实时连续语音面试为 feature flag 能力，`INTERVIEW_VOICE_ENABLED` 默认为 `false`；关闭时保留原手动录音与文字路径。开发/生产 WebSocket 代理及真人设备验收状态见[连续语音验收记录](../docs/interview-voice-acceptance.md)。
   未到期快照在重启后可恢复已提交内容；在途生成与评分标记为失败以便人工重试，不在启动后使用已过期凭据自动调用模型。本地文件存储只支持单实例，不提供多节点共享/协调或异机备份。
   配置基线、故障重试、会话/草稿期限与单实例限制见仓库根目录的[运行限制与验收记录](../README.md#已知限制)、[面试接入文档](docs/文字面试接口与接入.md)及[当前验收记录](../docs/interview-chat-acceptance.md)。真实厂商、真人设备与目标系统验收状态见统一[剩余计划](../docs/superpowers/plans/2026-10-17-interview-unified-plan.md)。
 - **功能四：简历生成** —— 按画像生成内容、针对岗位描述给**逐条**改写建议、保存版本、打印导出 PDF

@@ -43,4 +43,8 @@ public class SpeechClientResolver {
     public SpeechClient resolve(HttpServletRequest request) {
         return new VolcengineSpeechClient(properties, mapper, apiKey(request));
     }
+
+    public StreamingSpeechClient resolveStreaming(HttpServletRequest request) {
+        return new VolcengineSpeechClient(properties, mapper, apiKey(request));
+    }
 }

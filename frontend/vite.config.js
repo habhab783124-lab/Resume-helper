@@ -14,6 +14,7 @@ const proxyTarget = process.env.VITE_PROXY_TARGET || 'http://localhost:8080'
 
 export default defineConfig({
   plugins: [vue()],
+  worker: { format: 'es' },
   server: {
     port: 5173,
     host: '0.0.0.0',
@@ -22,7 +23,8 @@ export default defineConfig({
       // 好处：开发时没有跨域问题；生产构建里 /api 也不会被当成前端路由。
       '/api': {
         target: proxyTarget,
-        changeOrigin: true
+        changeOrigin: true,
+        ws: true
       }
     }
   }

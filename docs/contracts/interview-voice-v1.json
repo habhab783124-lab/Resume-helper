@@ -1,0 +1,66 @@
+{
+  "version": 1,
+  "websocketPath": "/api/interview-voice/ws",
+  "pcmFrame": {
+    "headerBytes": 32,
+    "maxPayloadBytes": 4096,
+    "maxBufferedSamples": 48000,
+    "sampleRate": 24000,
+    "channels": 1,
+    "magicHex": "52565631",
+    "fixedVector": {
+      "streamId": 1,
+      "sequence": 0,
+      "sampleOffset": 0,
+      "samples": [
+        -32768,
+        0,
+        32767
+      ],
+      "frameHex": "525656310101000001000000000000000000000003000000060000000000000000800000ff7f"
+    }
+  },
+  "closeCodes": {
+    "normal": 1000,
+    "protocolError": 1002,
+    "internalError": 1011,
+    "ticketRejected": 4401,
+    "sessionExpired": 4408
+  },
+  "messages": {
+    "speech.started": {
+      "v": 1,
+      "type": "speech.started",
+      "requestId": "request-example",
+      "questionId": "question-example",
+      "streamId": 1,
+      "format": "pcm_s16le",
+      "sampleRate": 24000,
+      "channels": 1
+    },
+    "speech.ended": {
+      "v": 1,
+      "type": "speech.ended",
+      "requestId": "request-example",
+      "streamId": 1,
+      "lastSeq": 0,
+      "totalSamples": 3,
+      "totalBytes": 6
+    },
+    "speech.cancelled": {
+      "v": 1,
+      "type": "speech.cancelled",
+      "requestId": "request-example",
+      "streamId": 1
+    },
+    "speech.failed": {
+      "v": 1,
+      "type": "speech.failed",
+      "requestId": "request-example",
+      "streamId": 1,
+      "code": "UPSTREAM_UNAVAILABLE",
+      "message": "语音服务暂时不可用，请重试",
+      "retryable": true
+    }
+  }
+}

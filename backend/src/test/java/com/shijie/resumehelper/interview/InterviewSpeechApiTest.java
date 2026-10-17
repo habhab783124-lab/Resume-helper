@@ -23,16 +23,23 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.net.http.WebSocket;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.CountDownLatch;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 import java.util.concurrent.Future;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CompletionStage;
 
 import static org.junit.jupiter.api.Assertions.assertArrayEquals;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertNotNull;
+import static org.junit.jupiter.api.Assertions.assertNull;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyString;
@@ -42,6 +49,7 @@ import static org.mockito.Mockito.times;
 import static org.mockito.Mockito.verify;
 import static org.mockito.Mockito.verifyNoInteractions;
 import static org.mockito.Mockito.when;
+import static org.mockito.Mockito.doAnswer;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.multipart;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -89,6 +97,7 @@ class InterviewSpeechApiTest {
         registry.add("app.interview.speech.ffmpeg-path", () -> placeholder);
         registry.add("app.interview.speech.ffprobe-path", () -> placeholder);
         registry.add("app.interview.speech.max-concurrent-requests", () -> 2);
+        registry.add("app.interview.voice.enabled", () -> true);
         registry.add("app.interview.storage-dir", INTERVIEW_STORAGE::toString);
     }
 
@@ -116,12 +125,14 @@ class InterviewSpeechApiTest {
     @MockBean AudioNormalizer normalizer;
     @MockBean SpeechClientResolver speechClients;
     @MockBean SpeechClient speech;
+    @MockBean StreamingSpeechClient streamingSpeech;
 
     @BeforeEach
     void stubSpeechClients() {
         // resolver 是真实逻辑，这里换成 mock，这样每个用例都能控制自己拿到的 key 与客户端。
         when(speechClients.resolve(any(HttpServletRequest.class))).thenReturn(speech);
         when(speechClients.apiKey(any(HttpServletRequest.class))).thenReturn("speech-test-key");
+        when(speechClients.resolveStreaming(any(HttpServletRequest.class))).thenReturn(streamingSpeech);
     }
 
     private record Ref(String sessionId, String questionId) {}
@@ -169,6 +180,157 @@ class InterviewSpeechApiTest {
         when(normalizer.normalize(any())).thenReturn(new AudioNormalizer.NormalizedAudio(WAV, 3500));
         when(speech.transcribe(any(byte[].class), anyString()))
                 .thenReturn(new SpeechClient.Transcript("我负责缓存优化", 1200));
+    }
+
+    @Test
+    void voiceTicketIsBoundToTheInterviewOwnerAndCanBeClosed() throws Exception {
+        var owner = new MockHttpSession();
+        Ref ref = start(owner);
+        MvcResult created = mvc.perform(post("/api/interviews/" + ref.sessionId() + "/voice-sessions")
+                        .header("X-User-Id", owner.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.protocolVersion").value(1))
+                .andExpect(jsonPath("$.data.websocketPath").value("/api/interview-voice/ws"))
+                .andReturn();
+        String voiceSessionId = json.readTree(created.getResponse().getContentAsString())
+                .at("/data/voiceSessionId").asText();
+        mvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .delete("/api/interviews/" + ref.sessionId() + "/voice-sessions/" + voiceSessionId)
+                        .header("X-User-Id", owner.getId()))
+                .andExpect(status().isOk())
+                .andExpect(jsonPath("$.data.closed").value(true));
+    }
+
+    @Test
+    void websocketHelloStartsPcmStreamAndEndsExactlyOnce() throws Exception {
+        var owner = new MockHttpSession();
+        Ref ref = start(owner);
+        MvcResult created = mvc.perform(post("/api/interviews/" + ref.sessionId() + "/voice-sessions")
+                        .header("X-User-Id", owner.getId()))
+                .andExpect(status().isOk()).andReturn();
+        var ticket = json.readTree(created.getResponse().getContentAsString()).path("data");
+        BlockingQueue<String> text = new LinkedBlockingQueue<>();
+        BlockingQueue<byte[]> binary = new LinkedBlockingQueue<>();
+        WebSocket.Listener listener = new WebSocket.Listener() {
+            @Override public void onOpen(WebSocket webSocket) { webSocket.request(1); }
+            @Override public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+                text.add(data.toString()); webSocket.request(1); return CompletableFuture.completedFuture(null);
+            }
+            @Override public CompletionStage<?> onBinary(WebSocket webSocket, java.nio.ByteBuffer data, boolean last) {
+                byte[] frame = new byte[data.remaining()]; data.get(frame); binary.add(frame);
+                webSocket.request(1); return CompletableFuture.completedFuture(null);
+            }
+        };
+        doAnswer(invocation -> {
+            StreamingSpeechClient.PcmSink sink = invocation.getArgument(4);
+            sink.onFormat(new StreamingSpeechClient.AudioFormat("pcm_s16le", 24000, 1));
+            sink.onAudio(new byte[]{1, 0, 2, 0});
+            return new StreamingSpeechClient.StreamResult(2, 4);
+        }).when(streamingSpeech).streamQuestion(anyString(), anyString(), any(), any(), any());
+        WebSocket socket = HttpClient.newHttpClient().newWebSocketBuilder()
+                .buildAsync(URI.create("ws://127.0.0.1:" + port + InterviewVoiceConfiguration.PATH), listener)
+                .get(3, TimeUnit.SECONDS);
+        socket.sendText("{\"v\":1,\"type\":\"session.hello\",\"voiceSessionId\":\""
+                + ticket.path("voiceSessionId").asText() + "\",\"ticket\":\"" + ticket.path("ticket").asText() + "\"}", true)
+                .get(2, TimeUnit.SECONDS);
+        assertEquals("session.ready", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        String requestId = "22222222-2222-4222-8222-222222222222";
+        socket.sendText("{\"v\":1,\"type\":\"speech.start\",\"requestId\":\"" + requestId
+                + "\",\"questionId\":\"" + ref.questionId() + "\"}", true).get(2, TimeUnit.SECONDS);
+        assertEquals("speech.started", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        byte[] frame = binary.poll(2, TimeUnit.SECONDS);
+        assertNotNull(frame);
+        assertEquals(InterviewVoiceProtocol.HEADER_BYTES + 4, frame.length);
+        assertEquals("speech.ended", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        assertNull(text.poll(100, TimeUnit.MILLISECONDS), "an operation must emit a single terminal event");
+        socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(2, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void websocketCancelInterruptsActiveProviderAndEmitsOnlyCancelled() throws Exception {
+        var owner = new MockHttpSession(); Ref ref = start(owner);
+        MvcResult created = mvc.perform(post("/api/interviews/" + ref.sessionId() + "/voice-sessions")
+                        .header("X-User-Id", owner.getId())).andExpect(status().isOk()).andReturn();
+        var ticket = json.readTree(created.getResponse().getContentAsString()).path("data");
+        BlockingQueue<String> text = new LinkedBlockingQueue<>();
+        WebSocket.Listener listener = new WebSocket.Listener() {
+            @Override public void onOpen(WebSocket webSocket) { webSocket.request(1); }
+            @Override public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+                text.add(data.toString()); webSocket.request(1); return CompletableFuture.completedFuture(null);
+            }
+        };
+        doAnswer(invocation -> {
+            SpeechCancellation cancellation = invocation.getArgument(3);
+            while (!cancellation.isCancelled()) Thread.sleep(5);
+            cancellation.throwIfCancelled();
+            return new StreamingSpeechClient.StreamResult(1, 2);
+        }).when(streamingSpeech).streamQuestion(anyString(), anyString(), any(), any(), any());
+        WebSocket socket = HttpClient.newHttpClient().newWebSocketBuilder()
+                .buildAsync(URI.create("ws://127.0.0.1:" + port + InterviewVoiceConfiguration.PATH), listener)
+                .get(3, TimeUnit.SECONDS);
+        socket.sendText("{\"v\":1,\"type\":\"session.hello\",\"voiceSessionId\":\""
+                + ticket.path("voiceSessionId").asText() + "\",\"ticket\":\"" + ticket.path("ticket").asText() + "\"}", true)
+                .get(2, TimeUnit.SECONDS);
+        assertEquals("session.ready", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        String requestId = "33333333-3333-4333-8333-333333333333";
+        socket.sendText("{\"v\":1,\"type\":\"speech.start\",\"requestId\":\"" + requestId
+                + "\",\"questionId\":\"" + ref.questionId() + "\"}", true).get(2, TimeUnit.SECONDS);
+        assertEquals("speech.started", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        socket.sendText("{\"v\":1,\"type\":\"speech.cancel\",\"requestId\":\"" + requestId + "\"}", true)
+                .get(2, TimeUnit.SECONDS);
+        assertEquals("speech.cancelled", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        assertNull(text.poll(100, TimeUnit.MILLISECONDS));
+        socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(2, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void websocketWaitsForPlayedAckBeforeExceedingBufferedAudioWindow() throws Exception {
+        var owner = new MockHttpSession(); Ref ref = start(owner);
+        MvcResult created = mvc.perform(post("/api/interviews/" + ref.sessionId() + "/voice-sessions")
+                        .header("X-User-Id", owner.getId())).andExpect(status().isOk()).andReturn();
+        var ticket = json.readTree(created.getResponse().getContentAsString()).path("data");
+        BlockingQueue<String> text = new LinkedBlockingQueue<>();
+        BlockingQueue<byte[]> binary = new LinkedBlockingQueue<>();
+        WebSocket.Listener listener = new WebSocket.Listener() {
+            @Override public void onOpen(WebSocket webSocket) { webSocket.request(1); }
+            @Override public CompletionStage<?> onText(WebSocket webSocket, CharSequence data, boolean last) {
+                text.add(data.toString()); webSocket.request(1); return CompletableFuture.completedFuture(null);
+            }
+            @Override public CompletionStage<?> onBinary(WebSocket webSocket, java.nio.ByteBuffer data, boolean last) {
+                byte[] frame = new byte[data.remaining()]; data.get(frame); binary.add(frame);
+                webSocket.request(1); return CompletableFuture.completedFuture(null);
+            }
+        };
+        byte[] pcm = new byte[96_002]; // 48,001 samples: one sample beyond the ACK window.
+        doAnswer(invocation -> {
+            StreamingSpeechClient.PcmSink sink = invocation.getArgument(4);
+            sink.onFormat(new StreamingSpeechClient.AudioFormat("pcm_s16le", 24000, 1));
+            sink.onAudio(pcm);
+            return new StreamingSpeechClient.StreamResult(pcm.length / 2, pcm.length);
+        }).when(streamingSpeech).streamQuestion(anyString(), anyString(), any(), any(), any());
+        WebSocket socket = HttpClient.newHttpClient().newWebSocketBuilder()
+                .buildAsync(URI.create("ws://127.0.0.1:" + port + InterviewVoiceConfiguration.PATH), listener)
+                .get(3, TimeUnit.SECONDS);
+        socket.sendText("{\"v\":1,\"type\":\"session.hello\",\"voiceSessionId\":\""
+                + ticket.path("voiceSessionId").asText() + "\",\"ticket\":\"" + ticket.path("ticket").asText() + "\"}", true)
+                .get(2, TimeUnit.SECONDS);
+        assertEquals("session.ready", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        String requestId = "44444444-4444-4444-8444-444444444444";
+        socket.sendText("{\"v\":1,\"type\":\"speech.start\",\"requestId\":\"" + requestId
+                + "\",\"questionId\":\"" + ref.questionId() + "\"}", true).get(2, TimeUnit.SECONDS);
+        assertEquals("speech.started", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        byte[] first = binary.poll(2, TimeUnit.SECONDS);
+        assertNotNull(first);
+        assertNull(text.poll(100, TimeUnit.MILLISECONDS), "the provider must wait once the unplayed window is full");
+        var header = java.nio.ByteBuffer.wrap(first).order(java.nio.ByteOrder.LITTLE_ENDIAN);
+        long streamId = Integer.toUnsignedLong(header.getInt(8));
+        long sequence = Integer.toUnsignedLong(header.getInt(12));
+        long firstSamples = Integer.toUnsignedLong(header.getInt(20));
+        socket.sendText("{\"v\":1,\"type\":\"audio.ack\",\"streamId\":" + streamId
+                + ",\"receivedSeq\":" + sequence + ",\"playedSamples\":" + firstSamples + "}", true)
+                .get(2, TimeUnit.SECONDS);
+        assertEquals("speech.ended", json.readTree(text.poll(2, TimeUnit.SECONDS)).path("type").asText());
+        socket.sendClose(WebSocket.NORMAL_CLOSURE, "test complete").get(2, TimeUnit.SECONDS);
     }
 
     private String sessionJson(MockHttpSession owner, Ref ref) throws Exception {

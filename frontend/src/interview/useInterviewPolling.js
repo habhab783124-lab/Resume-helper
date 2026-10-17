@@ -2,7 +2,7 @@ import { ref } from 'vue'
 
 const terminalGeneration = new Set(['SUCCEEDED', 'FAILED', 'CANCELLED'])
 
-export function useInterviewPolling({ api, onSession = () => {}, onError = () => {}, clock = globalThis }) {
+export function useInterviewPolling({ api, onSession = () => {}, onError = () => {}, clock = globalThis, getMaxDelayMs = () => 5000 }) {
   const running = ref(false)
   let controller = null
   let timer = null
@@ -42,13 +42,16 @@ export function useInterviewPolling({ api, onSession = () => {}, onError = () =>
       } finally {
         controller = null
       }
+      const requestedMax = Number(getMaxDelayMs())
+      const maxDelay = Number.isFinite(requestedMax) ? Math.max(1000, requestedMax) : 5000
+      delay = Math.min(delay, maxDelay)
       await new Promise(resolve => {
         releaseTimer = resolve
         timer = clock.setTimeout(resolve, delay)
       })
       timer = null
       releaseTimer = null
-      delay = Math.min(delay + 1000, 5000)
+      delay = Math.min(delay + 1000, maxDelay)
     }
   }
 

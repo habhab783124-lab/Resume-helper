@@ -71,4 +71,15 @@ class SpeechClientResolverTest {
         assertNotNull(resolver.resolve(request(null)));
         assertNotNull(resolver.resolve(request(null)));
     }
+
+    @Test void resolveStreamingBuildsIndependentStreamingClientWithRequestKey() {
+        var resolver = new SpeechClientResolver(config(SERVER_KEY), new ObjectMapper());
+        var first = resolver.resolveStreaming(request(" user-one-key "));
+        var second = resolver.resolveStreaming(request("user-two-key"));
+        assertTrue(first instanceof VolcengineSpeechClient);
+        assertTrue(second instanceof VolcengineSpeechClient);
+        assertNotNull(first);
+        assertNotNull(second);
+        assertTrue(first != second);
+    }
 }

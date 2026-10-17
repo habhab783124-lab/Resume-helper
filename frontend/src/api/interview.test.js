@@ -315,3 +315,17 @@ test('attempt API saves the answer first, reads a result and retries scoring on 
   assert.deepEqual(JSON.parse(calls[3][1].body), { requestId: 'retry-1' })
   setAiSettings({})
 })
+test('API errors unwrap data fields and preserve typed retry metadata', async () => {
+  const api = createInterviewApi({ fetchImpl: async () => response({
+    success: false,
+    message: '稍后重试',
+    data: { code: 'RATE_LIMITED', retryable: true, retryAfterMs: 1000 },
+  }, 429) })
+  await assert.rejects(api.getSession('s'), error => {
+    assert.equal(error.status, 429)
+    assert.equal(error.code, 'RATE_LIMITED')
+    assert.equal(error.retryable, true)
+    assert.equal(error.retryAfterMs, 1000)
+    return true
+  })
+})

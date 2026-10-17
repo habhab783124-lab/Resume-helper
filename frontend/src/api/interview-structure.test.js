@@ -20,11 +20,13 @@ function mount(api = {}) {
     preparePlan: async () => null, confirmPlan: async () => ({ sessionId: 's', status: 'ACTIVE', turns: [turn('q1', null)], currentQuestion: turn('q1', null), questionCount: 5, questionMetadata: metadata }),
     loadSource: async () => null, loadJob: async () => null, savePreparation() {}, restorePreparation() { return false },
     clearPreparation() {}, switchScope() { return false } }
-  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'materialsApi', 'resumeApi', 'jobsApi', body)(
+  const createInterviewVoiceAdapter = bridge => ({ api: bridge, conversation: bridge })
+  const useInterviewVoiceConversation = () => ({ state: { phase: 'OFF' }, start() {}, pause() {}, stop() {}, stopPlayback() {}, submitNow() {}, retrySegment() {}, discardSegment() {}, resume() {}, isActive: () => false, onDraftEdited() {}, syncContext() {}, dispose() {} })
+  return new Function('ref', 'computed', 'reactive', 'watch', 'onMounted', 'onUnmounted', 'useRoute', 'useRouter', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useInterviewVoice', 'getAiSettings', 'setAiSettings', 'algorithmUrl', 'isSpecialty', 'specialtyLabel', 'answerGuidance', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'materialsApi', 'resumeApi', 'jobsApi', 'createInterviewVoiceAdapter', 'useInterviewVoiceConversation', 'useVoiceCapture', 'createVoiceSocket', 'createPcmPlayer', 'voiceWorkletUrl', body)(
     ref, computed, reactive, watch, () => {}, () => {}, () => ({ query: {} }), () => ({ push() {} }), () => api,
     () => ({ save() { return { saved: true } }, load() { return null }, remove() { return true }, clearScope() { return 0 }, keyFor() { return '' } }), () => '', () => 'demo-user',
     () => ({ syncContext() {}, busy: false }), () => ({}), () => {}, algorithmUrl, isSpecialty, specialtyLabel, answerGuidance, useInterviewPolling, useInterviewConversation, useInterviewFinish,
-    () => setupState, {}, {}, {})
+    () => setupState, {}, {}, {}, createInterviewVoiceAdapter, useInterviewVoiceConversation, () => {}, () => {}, () => {}, '/test-worklet.js')
 }
 const turn = (id, answer = '已回答') => ({ questionId: id, question: id, answer })
 const metadata = {

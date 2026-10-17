@@ -8,10 +8,7 @@ import org.springframework.web.multipart.MultipartFile;
 import java.io.File;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.util.Set;
 import java.util.UUID;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.Semaphore;
 import java.util.function.Supplier;
 
 /**
@@ -39,7 +36,12 @@ public class InterviewSpeechService {
 
     /** 本机语音能力开关与本项目限制。只代表配置完整和转码工具可执行，不宣称账户额度可用。 */
     public record Capabilities(boolean asrEnabled, boolean ttsEnabled,
-                               int maxRecordingSeconds, int maxAudioBytes) {}
+                               int maxRecordingSeconds, int maxAudioBytes,
+                               int voiceProtocolVersion, boolean ttsStreamingEnabled) {
+        public Capabilities(boolean asrEnabled, boolean ttsEnabled, int maxRecordingSeconds, int maxAudioBytes) {
+            this(asrEnabled, ttsEnabled, maxRecordingSeconds, maxAudioBytes, 1, false);
+        }
+    }
 
     /** 转写草稿；字段回带原值，供前端校验结果和本次操作确实对应。 */
     public record Transcription(String sessionId, String questionId, String requestId,
@@ -48,21 +50,23 @@ public class InterviewSpeechService {
     private final InterviewService interviews;
     private final AudioNormalizer normalizer;
     private final SpeechProperties properties;
-
-    /** 全局语音并发闸门；同一个 owner 的「最多 1 个」由 {@link #busyOwners} 单独限制。 */
-    private final Semaphore permits;
-    private final Set<String> busyOwners = ConcurrentHashMap.newKeySet();
+    private final SpeechRequestLimiter limiter;
+    private final InterviewVoiceProperties voiceProperties;
+    private final InterviewVoiceSessionRegistry voiceSessions;
 
     /** 连通性检查结果：能返回这个对象就说明本次实际发出的合成请求拿到了音频。 */
     public record SpeechCheck(String speaker, long audioBytes) {}
 
     public InterviewSpeechService(InterviewService interviews, AudioNormalizer normalizer,
-                                  SpeechProperties properties) {
+                                  SpeechProperties properties, SpeechRequestLimiter limiter,
+                                  InterviewVoiceProperties voiceProperties,
+                                  InterviewVoiceSessionRegistry voiceSessions) {
         this.interviews = interviews;
         this.normalizer = normalizer;
         this.properties = properties;
-        // 配成 0 或负数会让 tryAcquire 永远失败，语音变成永久 429，不如退回 1。
-        this.permits = new Semaphore(Math.max(1, properties.getMaxConcurrentRequests()));
+        this.limiter = limiter;
+        this.voiceProperties = voiceProperties;
+        this.voiceSessions = voiceSessions;
     }
 
     /**
@@ -78,14 +82,16 @@ public class InterviewSpeechService {
                 keyReady && toolsReady && notBlank(properties.getAsrResourceId()),
                 keyReady && notBlank(properties.getTtsResourceId()) && notBlank(properties.getTtsSpeaker()),
                 properties.getMaxDurationSeconds(),
-                properties.getMaxAudioBytes());
+                properties.getMaxAudioBytes(), 1,
+                voiceProperties.isEnabled() && keyReady && notBlank(properties.getTtsResourceId())
+                        && notBlank(properties.getTtsSpeaker()));
     }
 
     public Transcription transcribe(String owner, String sessionId, String questionId,
                                     String requestId, MultipartFile file, SpeechClient speech) {
         requireUuid(requestId);
         requireAnswerable(owner, sessionId, questionId);
-        return withPermit(owner, () -> {
+        return withPermit(owner, SpeechRequestLimiter.Lane.ASR, () -> {
             AudioNormalizer.NormalizedAudio audio = normalizer.normalize(file);
             SpeechClient.Transcript transcript = speech.transcribe(audio.wav(), requestId);
             // 识别期间用户可能已经切题、答完或结束：结果和当前题目对不上就不能当有效草稿。
@@ -103,7 +109,8 @@ public class InterviewSpeechService {
                 .filter(t -> questionId.equals(t.questionId()))
                 .findFirst()
                 .orElseThrow(() -> new InterviewException(409, UNKNOWN_QUESTION));
-        return withPermit(owner, () -> speech.synthesize(turn.question(), UUID.randomUUID().toString()));
+        return withPermit(owner, SpeechRequestLimiter.Lane.TTS,
+                () -> speech.synthesize(turn.question(), UUID.randomUUID().toString()));
     }
 
     /**
@@ -120,8 +127,23 @@ public class InterviewSpeechService {
     public SpeechCheck check(String owner, SpeechClient speech) {
         Supplier<SpeechClient.SpeechAudio> synthesize =
                 () -> speech.synthesize(CHECK_TEXT, UUID.randomUUID().toString());
-        SpeechClient.SpeechAudio audio = withPermit(owner, synthesize);
+        SpeechClient.SpeechAudio audio = withPermit(owner, SpeechRequestLimiter.Lane.TTS, synthesize);
         return new SpeechCheck(properties.getTtsSpeaker(), audio.bytes().length);
+    }
+
+    public InterviewVoiceSessionRegistry.Ticket createVoiceSession(String owner, String sessionId,
+                                                                    String apiKey, StreamingSpeechClient speech) {
+        InterviewService.Session session = interviews.get(owner, sessionId);
+        if (!"ACTIVE".equals(session.status()) || session.currentQuestion() == null || session.pendingAnswer() != null)
+            throw new InterviewException(409, STATE_CHANGED);
+        if (!capabilities(apiKey).ttsStreamingEnabled())
+            throw new InterviewException(503, "连续语音服务未配置");
+        return voiceSessions.issue(owner, sessionId, speech);
+    }
+
+    public boolean closeVoiceSession(String owner, String sessionId, String voiceSessionId) {
+        interviews.get(owner, sessionId);
+        return voiceSessions.close(owner, sessionId, voiceSessionId);
     }
 
     /** 只有本人、ACTIVE、题目就是当前题、且没有待重试回答时才允许转写。 */
@@ -142,21 +164,9 @@ public class InterviewSpeechService {
      * 同一个 owner 的语音请求串行执行，全局并发受 {@code max-concurrent-requests} 限制，
      * 拿不到就立刻 429——语音调用会真的花钱，排队等待只会让用户以为系统卡死。
      */
-    private <T> T withPermit(String owner, Supplier<T> work) {
-        if (!busyOwners.add(owner)) {
-            throw new InterviewException(429, BUSY);
-        }
-        boolean acquired = false;
-        try {
-            acquired = permits.tryAcquire();
-            if (!acquired) {
-                throw new InterviewException(429, BUSY);
-            }
+    private <T> T withPermit(String owner, SpeechRequestLimiter.Lane lane, Supplier<T> work) {
+        try (SpeechRequestLimiter.Lease ignored = limiter.tryAcquire(owner, lane)) {
             return work.get();
-        } finally {
-            // owner 标记在获取全局许可前就加入，获取失败不能释放不存在的许可。
-            if (acquired) permits.release();
-            busyOwners.remove(owner);
         }
     }
 

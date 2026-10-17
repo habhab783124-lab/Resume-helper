@@ -1,7 +1,7 @@
 <script setup>
 import { nextTick, ref, watch } from 'vue'
 import { insertIndent, shouldSend } from '../../interview/composerActions.js'
-const props = defineProps({ modelValue: { type: String, default: '' }, locked: Boolean, pending: { default: null }, kind: { type: String, default: 'MAIN' }, guidance: { type: String, default: '' }, voice: { type: Object, required: true } })
+const props = defineProps({ modelValue: { type: String, default: '' }, locked: Boolean, pending: { default: null }, kind: { type: String, default: 'MAIN' }, guidance: { type: String, default: '' }, voice: { type: Object, required: true }, continuousActive: Boolean })
 const emit = defineEmits(['update:modelValue', 'send', 'audio'])
 const textarea = ref(null), expandButton = ref(null), expanded = ref(false), indentCapture = ref(false)
 function onInput(event) {
@@ -41,7 +41,7 @@ watch(() => props.modelValue, async () => { await nextTick(); const el = textare
 
               <p v-if="pending != null" class="notice">回答已保留。重试会提交同一份回答；结束时会保留服务端已收到的回答。录音和转写不能覆盖待提交回答。</p>
               <div class="voice-panel">
-                <p class="voice-note">可选语音作答：点击后才会申请麦克风。录音由你主动识别时发送至火山引擎；转写先预览，确认后再写入草稿，不会自动提交回答。</p>
+                <p class="voice-note">手动录音：停止录音后自动上传至火山引擎并转写，先预览结果；确认文字后再写入草稿并提交。</p>
                 <p class="voice-note">录音上限 {{ voice.maxSeconds }} 秒 / {{ (voice.maxBytes / 1024 / 1024).toFixed(1) }} MiB。</p>
                 <p v-if="voice.capabilityState === 'loading'" role="status" class="voice-note">正在确认语音能力，可继续文字作答。</p>
                 <p v-else-if="voice.capabilityError" class="voice-note">{{ voice.capabilityError }}</p>
@@ -49,7 +49,7 @@ watch(() => props.modelValue, async () => { await nextTick(); const el = textare
                 <button v-if="voice.capabilityState !== 'loading' && (!voice.asrEnabled || !voice.ttsEnabled)" class="text-button" :disabled="locked" @click="voice.loadCapabilities">重试语音能力</button>
               <RouterLink to="/settings" class="text-button config-link" aria-label="去设置页配置大模型与语音">去配置 AI →</RouterLink>
                 <div class="voice-actions">
-                  <button data-testid="recording-start" class="button button-ghost" :disabled="locked || pending != null || !voice.asrEnabled" @click="voice.startRecording">{{ voice.blob ? '重新录音' : '开始录音' }}</button>
+                  <button data-testid="recording-start" class="button button-ghost" :disabled="locked || continuousActive || pending != null || !voice.asrEnabled" @click="voice.startRecording">{{ voice.blob ? '重新录音' : '开始录音' }}</button>
                   <button data-testid="recording-stop" class="button button-ghost" :disabled="voice.recorderState !== 'recording'" @click="voice.stopRecording">停止录音</button>
                   <button data-testid="recording-cancel" class="text-button" :disabled="!['requesting-mic', 'recording', 'recorded'].includes(voice.recorderState) && !voice.blob" @click="voice.cancelRecording">{{ voice.recorderState === 'recorded' ? '丢弃录音' : '取消录音' }}</button>
                 </div>
@@ -75,7 +75,7 @@ watch(() => props.modelValue, async () => { await nextTick(); const el = textare
               </div>
               <textarea id="interview-answer" :value="modelValue" ref="textarea" @input="onInput" :class="{ 'algorithm-answer': kind === 'ALGORITHM' }" rows="1" maxlength="5000" :disabled="locked || pending != null" :placeholder="guidance"></textarea>
               <p v-if="modelValue.length > 5000" class="notice error">回答超过 5000 字，请精简后提交；完整内容已保留。</p>
-              <div class="answer-tools"><span>{{ modelValue.length }} / 5000 字</span><button class="button button-primary" :disabled="locked || !(pending ?? modelValue.trim()) || (pending ?? modelValue).length > 5000" @click="emit('send')">{{ pending != null ? '重试提交' : '提交回答' }} →</button></div>
+              <div class="answer-tools"><span>{{ modelValue.length }} / 5000 字</span><button class="button button-primary" :disabled="locked || continuousActive || !(pending ?? modelValue.trim()) || (pending ?? modelValue).length > 5000" @click="emit('send')">{{ pending != null ? '重试提交' : '提交回答' }} →</button></div>
             
 </div>
 </template>

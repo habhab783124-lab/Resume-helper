@@ -13,6 +13,7 @@ import java.io.ByteArrayOutputStream;
 import java.io.Closeable;
 import java.io.IOException;
 import java.io.InputStream;
+import java.io.FilterInputStream;
 import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
@@ -20,6 +21,12 @@ import java.net.http.HttpResponse;
 import java.net.http.HttpTimeoutException;
 import java.time.Duration;
 import java.util.Base64;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.ScheduledFuture;
+import java.util.concurrent.Executors;
+import java.util.concurrent.atomic.AtomicReference;
 import java.util.concurrent.ExecutionException;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -48,7 +55,7 @@ import java.util.concurrent.TimeoutException;
  * 因此<b>不能注册成 Spring Bean</b>——带密钥的单例会让不同用户的请求共用同一把 key。
  * 内部复用的是静态 {@link #FIXED_HTTP}，所以频繁新建没有连接池开销。
  */
-public class VolcengineSpeechClient implements SpeechClient {
+public class VolcengineSpeechClient implements StreamingSpeechClient {
 
     private static final Logger log = LoggerFactory.getLogger(VolcengineSpeechClient.class);
 
@@ -68,6 +75,11 @@ public class VolcengineSpeechClient implements SpeechClient {
     private static final int MAX_ASR_RESPONSE_BYTES = 1024 * 1024;
     private static final int MAX_SYNTH_BYTES = 5 * 1024 * 1024;
     private static final String SYNTH_CONTENT_TYPE = "audio/mpeg";
+    private static final ScheduledExecutorService STREAM_WATCHDOG = Executors.newScheduledThreadPool(1, runnable -> {
+        Thread thread = new Thread(runnable, "tts-stream-watchdog");
+        thread.setDaemon(true);
+        return thread;
+    });
 
     private static final HttpClient FIXED_HTTP = HttpClient.newBuilder()
             .followRedirects(HttpClient.Redirect.NEVER)
@@ -216,6 +228,179 @@ public class VolcengineSpeechClient implements SpeechClient {
             throw new InterviewException(502, "题目语音生成失败，请稍后重试");
         }
         return readTts(stream, requestId, remainingBudget(startedAtNanos, properties.getTtsTimeoutSeconds()));
+    }
+
+    @Override
+    public StreamResult streamQuestion(String text, String requestId, StreamOptions options,
+                                       SpeechCancellation cancellation, PcmSink sink) {
+        if (text == null || text.isBlank()) throw new InterviewException(400, "没有可朗读的文字");
+        if (options == null || cancellation == null || sink == null) throw new IllegalArgumentException("语音流参数不能为空");
+        requireConfigured(requestId);
+        cancellation.throwIfCancelled();
+
+        HttpRequest request = HttpRequest.newBuilder()
+                .uri(URI.create(baseUrl + TTS_PATH))
+                .timeout(Duration.ofSeconds(options.totalTimeoutSeconds()))
+                .header("Content-Type", "application/json")
+                .header("X-Api-Key", apiKey)
+                .header("X-Api-Resource-Id", properties.getTtsResourceId())
+                .header("X-Api-Request-Id", requestId)
+                .POST(HttpRequest.BodyPublishers.ofByteArray(toJson(ttsBody(text, "pcm"))))
+                .build();
+
+        AtomicReference<InputStream> bodyRef = new AtomicReference<>();
+        AtomicReference<InterviewException> timeout = new AtomicReference<>();
+        CompletableFuture<HttpResponse<InputStream>> responseFuture = http.sendAsync(request, HttpResponse.BodyHandlers.ofInputStream());
+        AtomicReference<ScheduledFuture<?>> idleTimer = new AtomicReference<>();
+        Runnable closeActive = () -> {
+            responseFuture.cancel(true);
+            closeQuietly(bodyRef.get());
+            ScheduledFuture<?> idle = idleTimer.getAndSet(null);
+            if (idle != null) idle.cancel(false);
+        };
+        AutoCloseable cancelRegistration = cancellation.onCancel(closeActive);
+        ScheduledFuture<?> totalTimer = STREAM_WATCHDOG.schedule(() -> {
+            timeout.compareAndSet(null, new InterviewException(504, "题目语音生成超时，请重试"));
+            closeActive.run();
+        }, options.totalTimeoutSeconds(), TimeUnit.SECONDS);
+        ScheduledFuture<?> firstTimer = STREAM_WATCHDOG.schedule(() -> {
+            timeout.compareAndSet(null, new InterviewException(504, "题目语音首段超时，请重试"));
+            closeActive.run();
+        }, options.firstAudioTimeoutSeconds(), TimeUnit.SECONDS);
+
+        try {
+            HttpResponse<InputStream> response = responseFuture.get(options.totalTimeoutSeconds(), TimeUnit.SECONDS);
+            if (response.statusCode() < 200 || response.statusCode() >= 300) {
+                closeQuietly(response.body());
+                throw upstreamFailure(response.statusCode());
+            }
+            InputStream stream = response.body();
+            if (stream == null) throw new InterviewException(502, "题目语音生成失败，请稍后重试");
+            bodyRef.set(stream);
+            cancellation.throwIfCancelled();
+            sink.onFormat(new AudioFormat("pcm_s16le", 24000, 1));
+            scheduleIdle(options, idleTimer, timeout, closeActive);
+            return consumePcmStream(stream, options, cancellation, sink, firstTimer, idleTimer, timeout, closeActive);
+        } catch (InterruptedException e) {
+            Thread.currentThread().interrupt();
+            cancellation.throwIfCancelled();
+            throw new InterviewException(504, "题目语音生成中断，请重试");
+        } catch (java.util.concurrent.TimeoutException e) {
+            timeout.compareAndSet(null, new InterviewException(504, "题目语音生成超时，请重试"));
+            throw timeout.get();
+        } catch (CancellationException e) {
+            cancellation.throwIfCancelled();
+            InterviewException expired = timeout.get();
+            if (expired != null) throw expired;
+            throw new InterviewException(502, "题目语音生成失败，请稍后重试");
+        } catch (java.util.concurrent.ExecutionException e) {
+            cancellation.throwIfCancelled();
+            InterviewException expired = timeout.get();
+            if (expired != null) throw expired;
+            if (e.getCause() instanceof InterviewException expected) throw expected;
+            throw new InterviewException(502, "题目语音生成失败，请稍后重试");
+        } finally {
+            totalTimer.cancel(false);
+            firstTimer.cancel(false);
+            ScheduledFuture<?> idle = idleTimer.getAndSet(null);
+            if (idle != null) idle.cancel(false);
+            closeQuietly(bodyRef.get());
+            try { cancelRegistration.close(); } catch (Exception ignored) { }
+        }
+    }
+
+    private StreamResult consumePcmStream(InputStream stream, StreamOptions options, SpeechCancellation cancellation,
+            PcmSink sink, ScheduledFuture<?> firstTimer, AtomicReference<ScheduledFuture<?>> idleTimer,
+            AtomicReference<InterviewException> timeout, Runnable closeActive) {
+        long totalBytes = 0;
+        long totalSamples = 0;
+        int carry = -1;
+        boolean complete = false;
+        long maxJsonBytes = options.maxAudioBytes() > (Long.MAX_VALUE - 1_048_576L) / 2
+                ? Long.MAX_VALUE : options.maxAudioBytes() * 2 + 1_048_576L;
+        try (MappingIterator<JsonNode> parts = mapper.readerFor(JsonNode.class)
+                .readValues(new BoundedInputStream(stream, maxJsonBytes))) {
+            while (parts.hasNextValue()) {
+                cancellation.throwIfCancelled();
+                JsonNode part = parts.nextValue();
+                int code = businessCode(part);
+                String data = part.path("data").asText("");
+                if (code != 0 && code != SUCCESS_CODE && code != -1)
+                    throw ttsBusinessFailure(code);
+                if (!data.isEmpty()) {
+                    if (code != 0 && code != SUCCESS_CODE) throw ttsBusinessFailure(code);
+                    byte[] decoded = decodeAudioData(data);
+                    if ((long) decoded.length + totalBytes > options.maxAudioBytes())
+                        throw new InterviewException(502, "题目音频超过大小限制");
+                    totalBytes += decoded.length;
+                    int start = 0;
+                    int evenLength = (decoded.length + (carry >= 0 ? 1 : 0)) & ~1;
+                    if (evenLength > 0) {
+                        byte[] even = new byte[evenLength];
+                        int writeAt = 0;
+                        if (carry >= 0) { even[writeAt++] = (byte) carry; carry = -1; }
+                        int copy = Math.min(decoded.length, evenLength - writeAt);
+                        System.arraycopy(decoded, 0, even, writeAt, copy);
+                        writeAt += copy;
+                        start = copy;
+                        if (writeAt < evenLength) {
+                            even[writeAt++] = decoded[start++];
+                        }
+                        if (writeAt == evenLength) {
+                            cancellation.throwIfCancelled();
+                            cancelTimer(idleTimer);
+                            sink.onAudio(even);
+                            totalSamples += even.length / 2;
+                        }
+                    }
+                    if (start < decoded.length) carry = Byte.toUnsignedInt(decoded[start]);
+                    if (totalSamples > 0) firstTimer.cancel(false);
+                }
+                scheduleIdle(options, idleTimer, timeout, closeActive);
+                if (code == SUCCESS_CODE) { complete = true; break; }
+            }
+        } catch (IOException e) {
+            cancellation.throwIfCancelled();
+            InterviewException expired = timeout.get();
+            if (expired != null) throw expired;
+            throw new InterviewException(502, "题目语音生成失败，请稍后重试");
+        }
+        cancellation.throwIfCancelled();
+        InterviewException expired = timeout.get();
+        if (expired != null) throw expired;
+        if (!complete || totalSamples == 0 || carry >= 0) throw new InterviewException(502, "题目语音未完整生成，请重试");
+        return new StreamResult(totalSamples, totalBytes);
+    }
+
+    private static void scheduleIdle(StreamOptions options, AtomicReference<ScheduledFuture<?>> timer,
+            AtomicReference<InterviewException> timeout, Runnable closeActive) {
+        ScheduledFuture<?> next = STREAM_WATCHDOG.schedule(() -> {
+            timeout.compareAndSet(null, new InterviewException(504, "题目语音生成超时，请重试"));
+            closeActive.run();
+        }, options.idleTimeoutSeconds(), TimeUnit.SECONDS);
+        ScheduledFuture<?> previous = timer.getAndSet(next);
+        if (previous != null) previous.cancel(false);
+    }
+
+    private static void cancelTimer(AtomicReference<ScheduledFuture<?>> timer) {
+        ScheduledFuture<?> previous = timer.getAndSet(null);
+        if (previous != null) previous.cancel(false);
+    }
+
+    private static final class BoundedInputStream extends FilterInputStream {
+        private final long limit;
+        private long consumed;
+        BoundedInputStream(InputStream source, long limit) { super(source); this.limit = limit; }
+        @Override public int read() throws IOException {
+            int value = super.read();
+            if (value >= 0 && ++consumed > limit) throw new IOException("TTS JSON response exceeds limit");
+            return value;
+        }
+        @Override public int read(byte[] bytes, int offset, int length) throws IOException {
+            int count = super.read(bytes, offset, (int) Math.min(length, Math.max(1, limit - consumed + 1)));
+            if (count > 0 && (consumed += count) > limit) throw new IOException("TTS JSON response exceeds limit");
+            return count;
+        }
     }
 
     // ------------------------------------------------------------------
@@ -418,12 +603,14 @@ public class VolcengineSpeechClient implements SpeechClient {
         return body;
     }
 
-    private ObjectNode ttsBody(String text) {
+    private ObjectNode ttsBody(String text) { return ttsBody(text, "mp3"); }
+
+    private ObjectNode ttsBody(String text, String format) {
         ObjectNode body = mapper.createObjectNode();
         ObjectNode params = body.putObject("req_params");
         params.put("text", text);
         params.put("speaker", properties.getTtsSpeaker());
-        params.putObject("audio_params").put("format", "mp3").put("sample_rate", 24000);
+        params.putObject("audio_params").put("format", format).put("sample_rate", 24000);
         return body;
     }
 

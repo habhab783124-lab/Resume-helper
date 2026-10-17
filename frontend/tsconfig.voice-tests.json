@@ -1,0 +1,6 @@
+{
+  "extends": "./tsconfig.json",
+  "compilerOptions": { "types": ["node", "vite/client"] },
+  "include": ["src/interview/voice/**/*.ts", "src/api/requestDeadline*.ts"],
+  "exclude": ["src/interview/voice/worklet/**", "src/interview/voice/voiceRuntime.ts"]
+}
