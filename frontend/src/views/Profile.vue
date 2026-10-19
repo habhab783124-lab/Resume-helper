@@ -96,7 +96,7 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { fetchProfile, saveProfile as putProfile } from '../api/materials'
 import { getProfile, saveProfile as cacheProfile } from '../utils/demoProfile'
-import { getDemoSession } from '../utils/demoAuth'
+import { getAuthUser } from '../utils/authSession'
 
 const profile = ref(getProfile())
 const loading = ref(true)
@@ -120,7 +120,7 @@ const form = reactive({
   experiences: ''
 })
 
-const displayName = computed(() => getDemoSession()?.displayName || '求职者')
+const displayName = computed(() => getAuthUser()?.displayName || '求职者')
 const avatarChar = computed(() => (displayName.value || '求').slice(0, 1))
 
 const cityText = computed(() => (profile.value.targetCities || []).join('、'))

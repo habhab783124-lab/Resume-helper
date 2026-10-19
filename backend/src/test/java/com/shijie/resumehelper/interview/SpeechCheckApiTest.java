@@ -42,6 +42,7 @@ class SpeechCheckApiTest {
         registry.add("app.interview.speech.api-key", () -> "");
         registry.add("app.interview.speech.ffmpeg-path", () -> "java");
         registry.add("app.interview.speech.ffprobe-path", () -> "java");
+        registry.add("app.auth.enforce", () -> false);
     }
 
     private static final byte[] AUDIO = {1, 2, 3};

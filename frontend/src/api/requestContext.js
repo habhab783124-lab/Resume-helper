@@ -1,3 +1,5 @@
+import { getAuthToken as readAuthToken, getAuthUser } from '../utils/authSession.js'
+
 // Text-model settings stay in this tab. Never put credentials in route queries.
 const storageKeys = {
   apiKey: 'resume-helper-ai-key',
@@ -74,5 +76,8 @@ export function setLocalApiBaseUrl(url = '') {
   try { globalThis.dispatchEvent?.(new Event('request-context-change')) } catch { /* Non-browser runtimes have no event target. */ }
 }
 
-// Match the existing demo identity used by materials and resume requests.
-export function getUserId() { return 'demo-user' }
+/** 当前登录用户 id。未登录时保留 demo-user，兼容旧的原型页面与脚本。 */
+export function getUserId() { return getAuthUser()?.id || 'demo-user' }
+
+/** 当前登录令牌；未登录时为空字符串。 */
+export function getAuthToken() { return readAuthToken() }

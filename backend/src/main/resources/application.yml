@@ -48,6 +48,23 @@ spring:
 
 app:
   # ---------------------------------------------------------------------------
+  # 账号认证（真实注册 / 邮箱密码登录）
+  #
+  # 账号保存在本机 data/auth/users.json，密码用 PBKDF2-HMAC-SHA256 加盐哈希，
+  # 登录成功后返回 HS256 签名的令牌，前端放在 Authorization: Bearer 里。
+  # 正式部署请设置 AUTH_TOKEN_SECRET；否则每次重启都会换临时密钥，用户需重新登录。
+  # ---------------------------------------------------------------------------
+  auth:
+    storage-dir: ${AUTH_STORAGE_DIR:./data/auth}
+    token-secret: ${AUTH_TOKEN_SECRET:}
+    token-ttl-days: ${AUTH_TOKEN_TTL_DAYS:7}
+    # true：所有 /api 业务接口都必须带有效令牌。
+    # 只有本机课程演示才建议改成 false（保留可伪造的 X-User-Id 请求头）。
+    enforce: ${AUTH_ENFORCE:true}
+    password-min-length: 8
+    password-max-length: 128
+
+  # ---------------------------------------------------------------------------
   # 大模型配置
   #
   # 放在顶层而不是某个模块下，因为它是**被多个模块共用的基础设施**：

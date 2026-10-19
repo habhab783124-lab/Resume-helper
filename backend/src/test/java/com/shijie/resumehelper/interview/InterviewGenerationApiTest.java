@@ -28,7 +28,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 
 @SpringBootTest(properties = {
         "app.material.storage-dir=./target/test-generation-materials",
-        "app.interview.storage-dir=./target/test-generation-sessions"
+        "app.interview.storage-dir=./target/test-generation-sessions",
+        "app.auth.enforce=false"
 })
 @AutoConfigureMockMvc
 class InterviewGenerationApiTest {

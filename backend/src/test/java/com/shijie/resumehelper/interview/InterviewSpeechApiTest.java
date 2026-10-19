@@ -99,6 +99,7 @@ class InterviewSpeechApiTest {
         registry.add("app.interview.speech.max-concurrent-requests", () -> 2);
         registry.add("app.interview.voice.enabled", () -> true);
         registry.add("app.interview.storage-dir", INTERVIEW_STORAGE::toString);
+        registry.add("app.auth.enforce", () -> false);
     }
 
     /** 当前 JVM 的可执行文件路径，各平台都存在且可执行。 */
