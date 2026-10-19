@@ -1,6 +1,7 @@
 package com.shijie.resumehelper.common;
 
 import com.shijie.resumehelper.common.ai.AiClient;
+import com.shijie.resumehelper.auth.AuthException;
 import com.shijie.resumehelper.job.source.JobSource;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -29,6 +30,12 @@ import java.util.stream.Collectors;
 public class GlobalExceptionHandler {
 
     private static final Logger log = LoggerFactory.getLogger(GlobalExceptionHandler.class);
+
+    /** 注册 / 登录相关的业务错误（401、409 等）。 */
+    @ExceptionHandler(AuthException.class)
+    public ResponseEntity<ApiResponse<Void>> handleAuth(AuthException e) {
+        return ResponseEntity.status(e.status()).body(ApiResponse.fail(e.getMessage()));
+    }
 
     /** 参数校验失败（@Valid）。 */
     @ExceptionHandler(MethodArgumentNotValidException.class)

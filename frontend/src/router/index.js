@@ -10,7 +10,7 @@ import Profile from '../views/Profile.vue'
 import Report from '../views/Report.vue'
 import Resume from '../views/Resume.vue'
 import Settings from '../views/Settings.vue'
-import { getDemoSession } from '../utils/demoAuth'
+import { getAuthSession } from '../utils/authSession'
 
 const routes = [
   { path: '/', redirect: '/login' },
@@ -40,7 +40,7 @@ const router = createRouter({
 })
 
 router.beforeEach((to) => {
-  const isAuthenticated = Boolean(getDemoSession())
+  const isAuthenticated = Boolean(getAuthSession())
 
   if (to.meta.requiresAuth && !isAuthenticated) {
     return { name: 'Login', query: { redirect: to.fullPath } }

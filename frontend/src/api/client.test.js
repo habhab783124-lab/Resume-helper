@@ -2,12 +2,12 @@ import test from 'node:test'
 import assert from 'node:assert/strict'
 import { readFileSync } from 'node:fs'
 import axios from 'axios'
-import { getAiSettings, setAiSettings, getLocalApiBaseUrl, setLocalApiBaseUrl, setSpeechSettings, getUserId } from './requestContext.js'
+import { getAiSettings, setAiSettings, getLocalApiBaseUrl, setLocalApiBaseUrl, setSpeechSettings, getUserId, getAuthToken } from './requestContext.js'
 
 const source = readFileSync(new URL('./client.js', import.meta.url), 'utf8')
   .replace(/^import .*$/gm, '').replace(/import\.meta\.env/g, '({})')
   .replace(/export default http/, '').replace(/export /g, '')
-const client = new Function('axios', 'getAiSettings', 'setAiSettings', 'getLocalApiBaseUrl', 'getUserId', 'window', `${source}\nreturn { http, getAiKey, setAiKey, hasAiKey }`)(axios, getAiSettings, setAiSettings, getLocalApiBaseUrl, getUserId, { sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} } })
+const client = new Function('axios', 'getAiSettings', 'setAiSettings', 'getLocalApiBaseUrl', 'getUserId', 'getAuthToken', 'window', `${source}\nreturn { http, getAiKey, setAiKey, hasAiKey }`)(axios, getAiSettings, setAiSettings, getLocalApiBaseUrl, getUserId, getAuthToken, { sessionStorage: { getItem: () => null, setItem() {}, removeItem() {} } })
 
 test('axios uses shared current identity and settings while key helpers preserve model', async () => {
   setAiSettings({ apiKey: 'first', model: 'model', baseUrl: 'https://models.test/v1' })

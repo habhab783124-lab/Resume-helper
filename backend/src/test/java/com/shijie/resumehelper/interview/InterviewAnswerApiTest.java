@@ -30,7 +30,8 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
         webEnvironment = SpringBootTest.WebEnvironment.RANDOM_PORT,
         properties = {
                 "app.material.storage-dir=./target/test-materials",
-                "app.interview.storage-dir=${java.io.tmpdir}/resume-helper-answer-api-${random.uuid}"
+                "app.interview.storage-dir=${java.io.tmpdir}/resume-helper-answer-api-${random.uuid}",
+                "app.auth.enforce=false"
         })
 @AutoConfigureMockMvc
 class InterviewAnswerApiTest {

@@ -522,8 +522,13 @@ Spring 只出现在 `config` / `service` / `api` / `ai` 的实现类里。
 | DELETE | `/api/materials/{id}` | 删除材料（原文件、原文、抽取结果一并删除） |
 | GET / PUT / DELETE | `/api/profile` | 读取 / 保存 / 清空求职画像 |
 
-身份来自 `X-User-Id` 请求头，缺省 `demo-user`。接入真实认证后只需改 `UserContext`，
-所有调用方不用动。**注意请求头是客户端可伪造的，现在只能用于数据分区，不能当权限控制。**
+身份由 `AuthTokenFilter` 从 `Authorization: Bearer <token>` 解析，令牌里的用户 id 会覆盖
+客户端传来的 `X-User-Id`，各业务模块仍然通过 `UserContext` 读取身份，不用改。
+未登录请求默认返回 401；只有设置 `AUTH_ENFORCE=false` 的本机演示才会退回 `X-User-Id`
+（缺省 `demo-user`，可伪造，不能当权限控制）。
+
+注册 / 登录接口见 `/api/auth/register`、`/api/auth/login`、`/api/auth/me`，账号保存在
+`data/auth/users.json`，密码使用 PBKDF2-HMAC-SHA256 加盐哈希。
 
 ### 10.4 怎么验证
 
