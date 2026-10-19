@@ -7,6 +7,7 @@ import { isNewInterviewRoute } from '../interview/interviewNavigation.js'
 import { useInterviewConversation } from '../interview/useInterviewConversation.js'
 import { useInterviewPolling } from '../interview/useInterviewPolling.js'
 import { useInterviewFinish } from '../interview/useInterviewFinish.js'
+import { useInterviewReadiness } from '../interview/useInterviewReadiness.js'
 
 // 直接执行 Interview.vue 的 <script setup> 源码，注入最小 Vue 替身与 API stub。
 // 不依赖真实浏览器，就能断言提交恢复这条链路上的边界行为。
@@ -19,18 +20,18 @@ const setupBody = /<script setup>([\s\S]*?)<\/script>/.exec(viewSource)[1]
   .replace(/^import\s.*$/gm, '')
   .replace(/import\.meta\.env/g, '({})')
   .trimEnd()
-  + '\nreturn { applySession, submitAnswer, finish, continueFinish, chooseFinish, viewReport, reset, upload, start, syncVoiceSession, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, finishMessage, finishAlternativeLabel, finishFlow, material };'
+  + '\nreturn { applySession, submitAnswer, finish, continueFinish, chooseFinish, viewReport, reset, upload, start, startRealtimeVoice, syncVoiceSession, skipQuestion, replaceQuestion, resolveReplacementDraft, session, answer, error, busy, uncertainAnswer, pending, current, voice, finishChoice, skipChoice, replacementReason, replacementDraftChoice, finishMessage, finishAlternativeLabel, finishFlow, material };'
 
 function mount(apiStub) {
   const mounted = [], unmounted = [], pushes = [], events = [], storeCalls = []
   const fakeVoice = { busy: ref(false), preview: ref(null),
-    syncContext() { events.push('sync') }, dispose() { events.push('dispose') }, loadCapabilities() { events.push('capabilities') },
+    syncContext() { events.push('sync') }, dispose() { events.push('dispose') }, loadCapabilities() { events.push('capabilities') }, stopQuestion() { events.push('stop-question') },
     acceptPreview() { return false }, restorePreview() { return false }, cancelRecording() { events.push('cancel-recording') } }
   let continuousActive = false
   const continuousVoice = { isActive: () => continuousActive,
     pause(reason) { events.push(`continuous-pause:${reason}`); continuousActive = false },
     resume() { events.push('continuous-resume'); continuousActive = true },
-    start() {}, stop() {}, stopPlayback() {}, submitNow() {}, retrySegment() {}, discardSegment() {}, onDraftEdited() {}, syncContext() {}, dispose() {} }
+    start() { events.push('continuous-start'); continuousActive = true }, stop() {}, stopPlayback() {}, submitNow() {}, retrySegment() {}, discardSegment() {}, onDraftEdited() {}, syncContext() {}, dispose() {} }
   // 草稿存储用记录型替身：不碰真实 localStorage，又能断言「提交成功才清理」。
   const drafts = () => ({
     save: (sessionId, questionId, payload) => { storeCalls.push(['save', sessionId, questionId, payload]); return { saved: true } },
@@ -48,18 +49,19 @@ function mount(apiStub) {
     generate: apiStub.generate || (async () => lastSaveResult),
   }
   const setupState = { source: ref(null), resumePreview: ref(null), targetRole: ref(''), jobDescription: ref(''), preferences: ref({}),
+    planError: ref(''), starting: ref(false), preparingPlan: ref(false), confirmingPlan: ref(false), allowAlgorithmRepeat: ref(false), repeatConsentRequired: ref(false),
     loadSource: async () => null, loadJob: async () => null, savePreparation() {}, restorePreparation() { return false },
-    clearPreparation() {}, switchScope() { return false } }
+    startInterview: async () => null, clearPreparation() {}, switchScope() { return false } }
   const createInterviewVoiceAdapter = bridge => ({ api: bridge, conversation: bridge })
   const useInterviewVoiceConversation = () => ({ state: { phase: 'OFF' }, ...continuousVoice })
   const view = new Function(
-    'ref', 'computed', 'reactive', 'watch', 'nextTick', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'materialsApi', 'resumeApi', 'jobsApi', 'createInterviewVoiceAdapter', 'useInterviewVoiceConversation', 'useVoiceCapture', 'createVoiceSocket', 'createPcmPlayer', 'voiceWorkletUrl', setupBody)(
+    'ref', 'computed', 'reactive', 'watch', 'nextTick', 'onMounted', 'onUnmounted', 'createInterviewApi', 'createDraftStore', 'getLocalApiBaseUrl', 'getUserId', 'useRoute', 'useRouter', 'isNewInterviewRoute', 'useInterviewVoice', 'useInterviewPolling', 'useInterviewConversation', 'useInterviewFinish', 'useInterviewSetup', 'useInterviewReadiness', 'createVoiceConsent', 'materialsApi', 'resumeApi', 'jobsApi', 'createInterviewVoiceAdapter', 'useInterviewVoiceConversation', 'useVoiceCapture', 'createVoiceSocket', 'createPcmPlayer', 'voiceWorkletUrl', setupBody)(
     ref, computed, reactive, watch, nextTick, callback => mounted.push(callback), callback => unmounted.push(callback), () => api,
     drafts, () => '', () => 'demo-user',
     () => ({ query: {} }),
     () => ({ push: route => { events.push('route'); pushes.push(route) } }),
     isNewInterviewRoute, () => fakeVoice, useInterviewPolling, useInterviewConversation, useInterviewFinish,
-    () => setupState, {}, {}, {}, createInterviewVoiceAdapter, useInterviewVoiceConversation, () => {}, () => {}, () => {}, '/test-worklet.js')
+    () => setupState, options => useInterviewReadiness({ ...options, api: { checkAi: async () => ({}), getSpeechCapabilities: async () => ({ available: true }), ...options.api }, minDurationMs: 0 }), () => ({ accepted: () => true, accept() {} }), {}, {}, {}, createInterviewVoiceAdapter, useInterviewVoiceConversation, () => {}, () => {}, () => {}, '/test-worklet.js')
   Object.assign(view, { pushes, events, mounted, unmounted, storeCalls, continuousVoice, setContinuousActive: value => { continuousActive = value } })
   return view
 }
@@ -214,6 +216,44 @@ test('same-question recovery preserves text; voice conflict sync cannot apply to
   await view.syncVoiceSession({ sessionId: 's1', questionId: 'q1' }); assert.equal(view.answer.value, '编辑草稿')
   view.applySession(session([], { questionId: 'q2', question: '新题' })); await view.syncVoiceSession({ sessionId: 's1', questionId: 'q1' }); assert.equal(view.current.value.questionId, 'q2')
 })
+
+test('skipping a question saves its draft and only removes it when the user discards it', async () => {
+  const skipped = { ...firstQuestion, plan: { mode: 'QUICK' }, revision: 1 }
+  const next = { ...session([], { questionId: 'q2', question: '下一题' }), plan: { mode: 'QUICK' }, revision: 2 }
+  let quickGenerations = 0
+  const kept = mount({ skip: async () => next, generate: async () => { quickGenerations += 1; return next } })
+  kept.applySession(skipped); kept.answer.value = '稍后继续的回答'
+  await kept.skipQuestion(true)
+  assert.ok(kept.storeCalls.some(([op, id, question, payload]) => op === 'save' && id === 's1' && question === 'q1' && payload.text === '稍后继续的回答'))
+  assert.equal(kept.storeCalls.some(([op, , question]) => op === 'remove' && question === 'q1'), false)
+  assert.equal(kept.session.value.currentQuestion.questionId, 'q2')
+  assert.equal(quickGenerations, 0, 'QUICK 跳题后等待用户选择，不自动生成下一题')
+
+  const discarded = mount({ skip: async () => next })
+  discarded.applySession(skipped); discarded.answer.value = '不保留的回答'
+  await discarded.skipQuestion(false)
+  assert.ok(discarded.storeCalls.some(([op, , question]) => op === 'remove' && question === 'q1'))
+  kept.unmounted.forEach(callback => callback()); discarded.unmounted.forEach(callback => callback())
+})
+
+test('replacing a question preserves its draft until the user resolves the replacement choice', async () => {
+  const original = { ...firstQuestion, revision: 1 }
+  const replacement = { ...session([], { questionId: 'q2', question: '替换后的题目' }), revision: 2 }
+  const kept = mount({ replace: async () => replacement })
+  kept.applySession(original); kept.answer.value = '原题草稿'; kept.replacementReason.value = '希望换一道项目题'
+  await kept.replaceQuestion()
+  assert.equal(kept.replacementDraftChoice.value, 'q1')
+  assert.ok(kept.storeCalls.some(([op, , question, payload]) => op === 'save' && question === 'q1' && payload.text === '原题草稿'))
+  kept.resolveReplacementDraft(true)
+  assert.equal(kept.storeCalls.some(([op, , question]) => op === 'remove' && question === 'q1'), false)
+
+  const discarded = mount({ replace: async () => replacement })
+  discarded.applySession(original); discarded.answer.value = '清理掉的草稿'; discarded.replacementReason.value = '希望换一道项目题'
+  await discarded.replaceQuestion(); discarded.resolveReplacementDraft(false)
+  assert.ok(discarded.storeCalls.some(([op, , question]) => op === 'remove' && question === 'q1'))
+  kept.unmounted.forEach(callback => callback()); discarded.unmounted.forEach(callback => callback())
+})
+
 test('voice recovery forwards cancellation and ignores a late snapshot even if its fetch ignores abort', async () => {
   let resolve, options
   const response = new Promise(ok => { resolve = ok })
@@ -234,27 +274,37 @@ test('material accepts 10 MiB boundary and rejects empty extraction without losi
   const other = mount({ upload: async () => { throw Object.assign(new Error('材料不存在'), { status: 404 }) } }); other.applySession(firstQuestion)
   await other.upload({ name: 'resume.pdf', size: 1 }); assert.equal(other.session.value.sessionId, 's1')
 })
-test('mount/unmount manage voice lifecycle and model settings no longer live on this page', () => {
+test('mount/unmount manage voice lifecycle and model settings no longer live on this page', async () => {
   const view = mount({})
   // 凭据移到了设置页：这里既不该有本地状态，也不该写入共享存储。
   assert.equal(view.apiKey, undefined)
-  view.mounted.forEach(callback => callback()); assert.ok(view.events.includes('capabilities'))
+  view.mounted.forEach(callback => callback()); await new Promise(resolve => setTimeout(resolve, 0)); assert.ok(view.events.includes('capabilities'))
   view.unmounted.forEach(callback => callback()); assert.ok(view.events.includes('dispose'))
 })
 
 test('voice controls remain visible with explicit disabled reasons, inline finishing controls and finished report entry', () => {
-  for (const id of ['question-play', 'recording-start', 'recording-stop', 'recording-cancel', 'transcription-start', 'transcription-cancel', 'transcript-replace', 'transcript-append', 'transcript-keep', 'view-report']) {
+  for (const id of ['question-play', 'recording-start', 'recording-stop', 'recording-cancel', 'transcription-start', 'transcript-replace', 'transcript-append', 'transcript-keep', 'view-report']) {
     assert.ok(`${viewSource}\n${composerSource}`.includes(`data-testid="${id}"`), `missing control ${id}`)
   }
   for (const id of ['finish-submit', 'finish-discard', 'finish-preserve']) assert.ok(finishDialogSource.includes(`data-testid="${id}"`), `missing dialog control ${id}`)
   assert.ok(headerSource.includes('data-testid="finish-interview"'), 'missing header finish control')
   assert.match(composerSource, /<audio[^>]+controls/)
-  assert.match(composerSource, /火山引擎/)
-  assert.match(composerSource, /5000.*精简/)
-  assert.match(composerSource, /停止录音后自动上传至火山引擎并转写/)
+  assert.match(composerSource, /voice.acceptPreview\('replace'\)/)
   assert.match(voiceControlsSource, /停顿后展示转写.*倒计时结束自动提交/)
   assert.match(voiceControlsSource, /回答仍保留/)
   assert.doesNotMatch(viewSource, /文字面试 · 不会录音/)
+})
+
+test('manual recording blocks continuous mode and continuous mode stops question playback first', () => {
+  const view = mount({}); view.voice.busy = true
+  view.startRealtimeVoice()
+  assert.equal(view.events.includes('continuous-start'), false)
+  assert.equal(view.events.includes('stop-question'), false)
+  view.voice.busy = false
+  view.startRealtimeVoice()
+  assert.deepEqual(view.events.slice(-2), ['stop-question', 'continuous-start'])
+  assert.match(composerSource, /:disabled="locked \|\| continuousActive \|\| pending != null \|\| !voice\.asrEnabled"/)
+  assert.match(composerSource, /:disabled="locked \|\| \(continuousActive && realtimeState\?\.phase !== 'REVIEW'\) \|\| !\(pending \?\? modelValue\.trim\(\)\)/)
 })
 
 test('ordinary last answer completion keeps a usable report entry without calling finish', async () => {
@@ -289,4 +339,23 @@ test('unknown submission outcome warns finishing can retain an answer; local dra
   const local = mount({}); local.applySession(firstQuestion); local.answer.value = '未发送'
   assert.equal(local.finishAlternativeLabel.value, '放弃未提交内容并结束')
   assert.match(finishDialogSource, /data-testid="finish-preserve"/)
+})
+
+test('interview entry checks services before setup while the active chat keeps only its composer controls', () => {
+  assert.match(viewSource, /useInterviewReadiness\(\{ api: \{ \.\.\.api, getSpeechCapabilities: options => voice\.loadCapabilities\(options\) \} \}\)/)
+  assert.match(viewSource, /<InterviewEntryGate v-if="!session && readiness\.status\.value !== 'ready'"/)
+  assert.match(viewSource, /:speech-available="readiness\.speechAvailable\.value"/)
+  assert.doesNotMatch(viewSource, /currentQuestion:\s*null/)
+  assert.doesNotMatch(viewSource, /<InterviewVoiceControls/)
+  assert.doesNotMatch(viewSource, /<h3>\{\{ current\.question \}\}<\/h3>/)
+  assert.match(viewSource, /role="status">✓ 简历解析成功/)
+  assert.match(viewSource, /role="status">服务可用/)
+  assert.match(composerSource, /<textarea/)
+  assert.match(composerSource, /@click="activateVoice"/)
+  assert.match(composerSource, /type="submit" class="composer-send-button"/)
+  assert.match(composerSource, /emit\('voice-submit-now'\)/)
+  assert.match(composerSource, /realtimeState\?\.phase === 'REVIEW'\) emit\('voice-submit-now'\)/)
+  assert.match(composerSource, /emit\('voice-retry'/)
+  assert.match(viewSource, /<div v-if="voiceConsentPrompt"/)
+  assert.match(viewSource, /voiceConsent\.accept\(\)/)
 })

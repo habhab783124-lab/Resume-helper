@@ -117,7 +117,7 @@ class InterviewStoreTest {
 
     @Test
     void deletionTombstoneSurvivesRestartAndPreventsLateSaveFromResurrectingSession() {
-        var snapshot = sample("alice", "s-delete", "start-delete", NOW.plusSeconds(86400));
+        var snapshot = sample("alice", "s-delete", "start-delete", Instant.now().plusSeconds(86400));
         var store = store();
         store.save(snapshot);
         store.delete("alice", "s-delete");

@@ -22,7 +22,9 @@ import { useInterviewSetup } from '../interview/useInterviewSetup.js'
 import * as materialsApi from '../api/materials.js'
 import * as resumeApi from '../api/resume.js'
 import * as jobsApi from '../api/jobs.js'
-import InterviewVoiceControls from '../components/interview/InterviewVoiceControls.vue'
+import InterviewEntryGate from '../components/interview/InterviewEntryGate.vue'
+import { useInterviewReadiness } from '../interview/useInterviewReadiness.js'
+import { createVoiceConsent } from '../interview/voice/voiceConsent.js'
 import { createInterviewVoiceAdapter } from '../interview/voice/interviewVoiceAdapter.ts'
 import { useInterviewVoiceConversation } from '../interview/voice/useInterviewVoiceConversation.ts'
 import { useVoiceCapture } from '../interview/voice/useVoiceCapture.ts'
@@ -36,9 +38,31 @@ const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || (
 let activeScope = { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() }
 const setup = useInterviewSetup({ materialsApi, resumeApi, jobsApi, interviewApi: api,
   scope: () => activeScope })
+const serviceReadyToast = ref(false)
+let serviceReadyTimer
+async function checkInterviewReadiness() {
+  const result = await readiness.check()
+  if (result.status === 'ready' && !session.value) {
+    serviceReadyToast.value = true
+    globalThis.clearTimeout(serviceReadyTimer)
+    serviceReadyTimer = globalThis.setTimeout(() => { serviceReadyToast.value = false }, 1800)
+  }
+  return result
+}
+const voiceConsent = createVoiceConsent()
+const voiceConsentAccepted = ref(voiceConsent.accepted())
+const voiceConsentPrompt = ref(false)
 let storageKey = `career-studio-interview-id-v2|${activeScope.apiBaseUrl}|${activeScope.userId}`
 const legacyStorageKey = 'career-studio-interview-id'
 const material = ref(null)
+const uploadSuccess = ref(false)
+let uploadSuccessTimer
+function showUploadSuccess() {
+  uploadSuccess.value = true
+  serviceReadyToast.value = false
+  globalThis.clearTimeout(uploadSuccessTimer)
+  uploadSuccessTimer = globalThis.setTimeout(() => { uploadSuccess.value = false }, 1800)
+}
 const infoOpen = ref(false)
 const infoButton = ref(null)
 function openInfo(event) { infoButton.value = event?.currentTarget || null; infoOpen.value = true }
@@ -84,7 +108,7 @@ const recordingAudio = ref(null)
 const completed = computed(() => session.value?.turns.filter(turn => turn.answer != null) || [])
 const completedRoots = computed(() => completed.value.filter(turn => session.value?.questionMetadata?.[turn.questionId]?.kind !== 'FOLLOW_UP'))
 const conversationMessages = computed(() => session.value
-  ? toConversationMessages({ ...session.value, currentQuestion: null }, conversation.submission.value, phase.value) : [])
+  ? toConversationMessages(session.value, conversation.submission.value, phase.value) : [])
 const current = computed(() => session.value?.currentQuestion)
 const currentMetadata = computed(() => session.value?.questionMetadata?.[current.value?.questionId] || {})
 const currentClarification = computed(() => {
@@ -122,6 +146,7 @@ function pauseRecordingReplay() {
 const voice = reactive(useInterviewVoice({ api, getContext: voiceContext,
   getDraft: () => answer.value, setDraft: text => { answer.value = text },
   syncSession: syncVoiceSession, pauseReplay: pauseRecordingReplay }))
+const readiness = useInterviewReadiness({ api: { ...api, getSpeechCapabilities: options => voice.loadCapabilities(options) } })
 const realtimeVoiceState = ref(null)
 let realtimeVoice
 const realtimePorts = createInterviewVoiceAdapter({
@@ -232,6 +257,7 @@ function onDraftStorage(event) {
   draftConflict.value = other
 }
 function onRequestContextChange() {
+  void checkInterviewReadiness()
   const nextScope = { apiBaseUrl: getLocalApiBaseUrl(), userId: getUserId() }
   if (nextScope.apiBaseUrl === activeScope.apiBaseUrl && nextScope.userId === activeScope.userId) return
   saveDraft()
@@ -314,12 +340,12 @@ async function upload(file) {
   if (!/\.(pdf|docx|txt)$/i.test(file.name)) { error.value = '请选择 PDF、DOCX 或 TXT 文件。'; return }
   if (!file.size || file.size > 10 * 1024 * 1024) { error.value = '文件不能为空，且不能超过 10 MiB。'; return }
   await run('正在解析简历…', async () => {
-    material.value = null
     const value = await api.upload(file)
     if (!value?.materialId || typeof value.text !== 'string') throw new Error('简历解析结果异常，请重试上传。')
     if (!value.text.trim()) throw new Error('简历未提取到文字，请粘贴简历文本后开始。')
     const preview = await setup.loadSource({ kind: 'MATERIAL', id: value.materialId })
     material.value = { ...value, fileName: preview.sourceLabel, text: preview.resumeText }
+    showUploadSuccess()
   })
 }
 function uploadPaste() {
@@ -331,13 +357,7 @@ function uploadPaste() {
     if (!id || typeof detail.text !== 'string' || !detail.text.trim()) throw new Error('粘贴内容未提取到可用简历文字。')
     const preview = await setup.loadSource({ kind: 'MATERIAL', id })
     material.value = { materialId: id, fileName: preview.sourceLabel, text: preview.resumeText }
-  })
-}
-async function preparePlan() {
-  if (locked.value) return
-  await run('正在生成计划预览…', async () => {
-    const value = await setup.preparePlan()
-    if (!value && setup.planError.value) throw new Error(setup.planError.value)
+    showUploadSuccess()
   })
 }
 function start() {
@@ -345,10 +365,9 @@ function start() {
     ? { kind: 'MATERIAL', id: material.value.materialId } : null)
   const confirmedText = setup.resumePreview.value?.resumeText || material.value?.text
   if (!selectedSource || !confirmedText?.trim()) { error.value = '请先选择并确认一份有效简历。'; return }
-  if (!setup.planCurrent.value) { error.value = '计划已失效，请重新生成预览。'; return }
-  return run('正在确认计划并生成第一题…', async () => {
-    const value = await setup.confirmPlan()
-    if (!value) throw new Error(setup.planError.value || '计划已失效，请重新预览。')
+  return run('正在准备面试…', async () => {
+    const value = await setup.startInterview()
+    if (!value) throw new Error(setup.planError.value || '暂时无法开始面试，请重试。')
     applySession(value)
     if (value.generation) polling.start(value.sessionId)
     if (route.query.intent === 'new') router.replace({ name: 'Interview' })
@@ -494,8 +513,9 @@ function reset() {
   voice.syncContext()
 }
 watch([answer, () => voice.preview?.text], scheduleDraftSave)
+watch(() => route.fullPath, () => { if (!session.value) void checkInterviewReadiness() })
 onMounted(() => {
-  voice.loadCapabilities()
+  void checkInterviewReadiness()
   // 离开页面（刷新、关标签）和切到别的后端都会触发，兜住防抖窗口里的最后几笔。
   globalThis.window?.addEventListener('pagehide', saveDraft)
   globalThis.window?.addEventListener('storage', onDraftStorage)
@@ -540,6 +560,9 @@ onMounted(() => {
   }).catch(cause => { error.value = cause.message || '无法读取已保存的练习准备。' })
 })
 onUnmounted(() => {
+  readiness.dispose()
+  globalThis.clearTimeout(serviceReadyTimer)
+  globalThis.clearTimeout(uploadSuccessTimer)
   saveDraft()
   realtimeVoice.dispose()
   conversation.dispose()
@@ -554,23 +577,33 @@ function onRealtimeVisibilityChange() {
   if (globalThis.document?.visibilityState === 'hidden' && realtimeVoiceState.value?.phase !== 'OFF') void realtimeVoice.pause('hidden')
 }
 function onSpeechSettingsChange() {
+  void checkInterviewReadiness()
   if (realtimeVoice.isActive()) void realtimeVoice.pause('speech settings changed')
 }
 function updateAnswer(value) { answer.value = value; realtimeVoice.onDraftEdited() }
 function startRealtimeVoice() {
+  if (!voiceConsentAccepted.value) { voiceConsentPrompt.value = true; return }
   if (voice.busy) { error.value = '请先结束或取消当前手动录音，再开启连续语音。'; return }
   voice.stopQuestion()
   void realtimeVoice.start()
+}
+function acceptRealtimeVoiceConsent() {
+  voiceConsent.accept()
+  voiceConsentAccepted.value = true
+  voiceConsentPrompt.value = false
+  startRealtimeVoice()
 }
 </script>
 
 <template>
   <section class="page active text-interview" id="page-interview" data-title="模拟面试">
-    <div class="page-intro interview-intro"><div><div class="eyebrow"><span class="eyebrow-line"></span>INTERVIEW ROOM / 05</div><h1>练习表达，建立从容<span class="greeting-dot">。</span></h1><p>从你的简历出发，展开一场真实的专业对话。</p></div><span class="session-label"><i></i>文字作答 · 可选语音</span></div>
+    <div v-if="!session" class="page-intro interview-intro"><div><h1>模拟面试</h1></div></div>
     <div class="interview-layout">
       <main class="interview-main" :aria-busy="locked">
         <div v-if="error" class="notice error" role="alert">{{ error }}</div>
         <div v-if="busy" class="notice" role="status">{{ busy }}</div>
+        <div v-if="!session && serviceReadyToast" class="parse-success-toast" role="status">服务可用</div>
+        <div v-if="uploadSuccess" class="parse-success-toast" role="status">✓ 简历解析成功</div>
         <div v-if="session?.status === 'ACTIVE' && !current" class="notice" role="status">
           {{ phase === 'RETRY_WAIT' ? '暂时无法连接模型，正在自动重试…' : '正在准备下一题…' }}
         </div>
@@ -586,17 +619,16 @@ function startRealtimeVoice() {
             <button data-testid="draft-keep-local" class="button button-ghost" :disabled="locked" @click="chooseDraft('local')">保留当前版本</button>
           </div>
         </div>
-        <div v-if="restoreId && !session" class="restore-actions"><p>发现上次练习，恢复后可继续回答或结束面试。</p><button class="button button-primary" :disabled="locked" @click="restore">重试恢复</button><button class="text-button" :disabled="locked" @click="reset">开始新的练习</button></div>
+        <InterviewEntryGate v-if="!session && readiness.status.value !== 'ready'" :status="readiness.status.value" :error="readiness.error.value" @retry="checkInterviewReadiness" />
+        <div v-else-if="restoreId && !session" class="restore-actions"><p>发现上次练习</p><button class="button button-primary" :disabled="locked" @click="restore">恢复</button><button class="text-button" :disabled="locked" @click="reset">新练习</button></div>
         <InterviewSetup v-else-if="!session" :material="material" v-model:paste="paste" v-model:target-role="targetRole"
-          v-model:job-description="setup.jobDescription.value" v-model:preferences="setup.preferences.value" :plan="setup.planPreview.value" :plan-current="setup.planCurrent.value" :plan-error="setup.planError.value" :source-session-id="setup.sourceSessionId.value" :allow-algorithm-repeat="setup.allowAlgorithmRepeat.value" :repeat-consent-required="setup.repeatConsentRequired.value" @update:allow-algorithm-repeat="setup.allowAlgorithmRepeat.value = $event" :preparing-plan="setup.preparingPlan.value" :confirming-plan="setup.confirmingPlan.value" :locked="locked" @upload="upload" @use-paste="uploadPaste" @prepare="preparePlan" @start="start" />
+          v-model:job-description="setup.jobDescription.value" v-model:preferences="setup.preferences.value" :plan-error="setup.planError.value" :starting="setup.starting.value || setup.preparingPlan.value || setup.confirmingPlan.value" :allow-algorithm-repeat="setup.allowAlgorithmRepeat.value" :repeat-consent-required="setup.repeatConsentRequired.value" @update:allow-algorithm-repeat="setup.allowAlgorithmRepeat.value = $event" @dismiss-consent="setup.repeatConsentRequired.value = false" :locked="locked" @upload="upload" @use-paste="uploadPaste" @start="start" />
         <template v-if="session">
           <InterviewHeader :role="session.targetRole" :active="active" :progress="session.progress?.answeredRoots ?? completedRoots.length" :total="session.questionCount" :can-finish="!!session && active && !busy && !finishFinishing" @finish="requestFinish" @open-info="openInfo" />
           <InterviewMessages v-if="conversationMessages.length" :messages="conversationMessages" :voice="voice" :session-id="session.sessionId" />
           <template v-if="active && current">
             <div class="question-card">
-              <div class="question-number">{{ questionLabel(current, completedRoots.length) }}</div>
               <p v-if="currentMetadata.kind === 'ALGORITHM'" class="algorithm-source">LeetCode Hot 100 · {{ currentMetadata.algorithm?.title }} · 算法难度 {{ currentMetadata.algorithm?.difficulty }} <a v-if="algorithmUrl(currentMetadata.algorithm)" :href="algorithmUrl(currentMetadata.algorithm)" target="_blank" rel="noopener noreferrer">查看原题 ↗</a></p>
-              <h3>{{ current.question }}</h3>
               <div class="voice-actions">
                 <button data-testid="question-play" class="button button-ghost" :disabled="locked || !voice.ttsEnabled" @click="voice.speechQuestionId === current.questionId && ['loading', 'playing'].includes(voice.speechState) ? voice.stopQuestion() : voice.playQuestion({ sessionId: session.sessionId, questionId: current.questionId })">{{ voice.speechQuestionId === current.questionId && voice.speechState === 'loading' ? '正在生成 · 停止' : voice.speechQuestionId === current.questionId && voice.speechState === 'playing' ? '停止朗读' : '播放题目' }}</button>
                 <button data-testid="skip-question" class="button button-ghost" :disabled="locked" @click="skipChoice = true">跳过这题</button>
@@ -621,11 +653,9 @@ function startRealtimeVoice() {
                   <button class="text-button" :disabled="locked" @click="skipChoice = false">返回作答</button>
                 </div>
               </div>
-              <p v-if="!voice.ttsEnabled" class="voice-note">{{ voice.capabilityState === 'loading' ? '正在确认题目朗读能力，文字作答可直接继续。' : '题目朗读暂不可用，可阅读题目并用文字回答。' }}</p>
               <p v-if="voice.speechError" class="notice error" role="alert">{{ voice.speechError }}</p>
             </div>
-            <InterviewVoiceControls v-if="realtimeVoiceState" :state="realtimeVoiceState" @start="startRealtimeVoice" @pause="realtimeVoice.pause('user')" @stop="realtimeVoice.stop" @stop-playback="realtimeVoice.stopPlayback" @submit-now="realtimeVoice.submitNow" @retry-segment="realtimeVoice.retrySegment" @discard-segment="realtimeVoice.discardSegment" />
-            <InterviewComposer :model-value="answer" :locked="locked" :continuous-active="realtimeActive" :pending="pending" :kind="currentMetadata.kind" :guidance="answerGuidance(currentMetadata.kind)" :voice="voice" @update:model-value="updateAnswer" @send="submitAnswer" @audio="recordingAudio = $event" />
+            <InterviewComposer :model-value="answer" :locked="locked" :continuous-active="realtimeActive" :pending="pending" :kind="currentMetadata.kind" :voice="voice" :realtime-state="realtimeVoiceState" :speech-available="readiness.speechAvailable.value" @update:model-value="updateAnswer" @send="submitAnswer" @audio="recordingAudio = $event" @voice-start="startRealtimeVoice" @voice-pause="realtimeVoice.pause('user')" @voice-stop="realtimeVoice.stop" @voice-submit-now="realtimeVoice.submitNow" @voice-retry="realtimeVoice.retrySegment" @voice-discard="realtimeVoice.discardSegment" />
           </template>
           <div v-if="active && !current && session.plan?.mode === 'QUICK' && phase === 'ANSWERING'" class="session-actions">
             <section v-if="quickPracticeFeedback" class="quick-practice-feedback" data-testid="quick-practice-feedback">
@@ -650,16 +680,22 @@ function startRealtimeVoice() {
               <button data-testid="quick-next-question" class="button button-primary" :disabled="locked" @click="retryGeneration">继续生成下一题</button>
             </div>
           </div>
-          <div class="session-actions">
+          <div v-if="!active" class="session-actions">
             <template v-if="!active"><button data-testid="view-report" class="button button-primary" :disabled="locked" @click="viewReport">查看报告</button><button class="button button-ghost" :disabled="locked" @click="reset">开始新的练习</button></template>
           </div>
-          <p class="interview-footnote">本地录音在刷新后无法恢复，请重新录音；回答文字与转写预览按题保存在本机，保留 7 天。已提交面试记录可在一天内恢复，后端重启后失效。请勿在简历或回答中填写不必要的敏感信息。</p>
         </template>
       </main>
     </div>
+    <div v-if="voiceConsentPrompt" class="voice-consent-backdrop" @click.self="voiceConsentPrompt = false">
+      <section class="voice-consent-dialog" role="dialog" aria-modal="true" aria-labelledby="voice-consent-title">
+        <h2 id="voice-consent-title">开启实时语音？</h2>
+        <p>你的语音会发送至语音服务转写；停顿后会自动提交回答。继续说话可取消倒计时。</p>
+        <div><button class="button button-primary" type="button" @click="acceptRealtimeVoiceConsent">开启语音</button><button class="text-button" type="button" @click="voiceConsentPrompt = false">暂不</button></div>
+      </section>
+    </div>
     <InterviewInfoDrawer :open="infoOpen" :session="session" :material="material" :voice-max-seconds="voice.maxSeconds" :voice-max-bytes="voice.maxBytes" @close="closeInfo" />
     <InterviewFinishDialog :open="finishChoice && active" :message="finishMessage" :alternative-label="finishAlternativeLabel" :pending="pending" :answer="answer" :voice="voice" :locked="voice.busy" :finishing="finishFinishing" @continue="continueFinish" @confirm="chooseFinish" />
-    <footer class="page-footer"><span>拾阶 · CAREER STUDIO</span><span>为认真准备的人，整理下一步。</span><span>文字与语音面试</span></footer>
+    <footer v-if="!session" class="page-footer"><span>拾阶 · CAREER STUDIO</span><span>模拟面试</span></footer>
   </section>
 </template>
 
@@ -670,7 +706,17 @@ function startRealtimeVoice() {
 .algorithm-source a { color: #566e40; margin-left: 8px; }
 .algorithm-answer { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; tab-size: 4; }
 .specialty-plan p { margin: 6px 0 0; font-size: 13px; line-height: 1.8; }
-.text-interview .interview-main { min-width: 0; }
+.text-interview .interview-layout { width: 100%; margin: 0 auto; }
+.text-interview { color: #272d29; }
+.text-interview .interview-main { display: flex; flex-direction: column; min-width: 0; min-height: max(78vh, calc(100dvh - 170px)); box-sizing: border-box; padding: 0 22px 18px; border: 1px solid #e8ede9; border-radius: 20px; background: #fff; box-shadow: 0 12px 36px rgba(34,55,42,.05); }
+.interview-intro { justify-content: center; margin: 0 auto 14px; }.interview-intro h1 { margin: 0; font-size: 22px; letter-spacing: -.02em; }
+.parse-success-toast { position: fixed; top: 24px; left: 50%; z-index: 40; transform: translateX(-50%); padding: 9px 16px; border: 1px solid #d9e8dc; border-radius: 24px; background: #f0f7f1; color: #315e49; box-shadow: 0 8px 26px rgba(31,51,40,.11); font-size: 13px; }
+.voice-consent-backdrop { position: fixed; inset: 0; z-index: 50; display: grid; place-items: center; padding: 18px; background: rgba(20,31,25,.38); }
+.voice-consent-dialog { width: min(100%, 420px); padding: 24px; border: 1px solid #e4eae5; border-radius: 18px; background: white; box-shadow: 0 18px 60px rgba(0,0,0,.18); }
+.voice-consent-dialog h2 { margin: 0 0 10px; font-size: 17px; }.voice-consent-dialog p { color: #64736a; line-height: 1.7; font-size: 13px; }.voice-consent-dialog > div { display: flex; gap: 12px; align-items: center; }
+.text-interview .question-card { margin: 8px auto; padding: 8px 0; border: 0; background: transparent; }
+.text-interview .question-card > .voice-actions { justify-content: flex-end; }
+.text-interview .question-card > .voice-actions button { padding: 6px 9px; border: 0; border-radius: 9px; background: #f5f7f5; color: #627167; font-size: 12px; }
 .field { display: flex; flex-direction: column; gap: 9px; font-size: 13px; margin: 18px 0; }
 .field span, .resume-preview p, .consent { color: #79766e; font-size: 12px; line-height: 1.8; }
 input, textarea { width: 100%; box-sizing: border-box; font: inherit; color: #353831; background: #fafaf7; border: 1px solid #e2e4dc; border-radius: 7px; padding: 12px; }
@@ -711,5 +757,5 @@ summary { cursor: pointer; font-size: 13px; }
 .transcription-preview h4 { font-size: 13px; }
 .transcription-preview pre { max-height: 280px; overflow-y: auto; white-space: pre-wrap; overflow-wrap: anywhere; font: inherit; line-height: 1.8; font-size: 13px; }
 .finish-choice p { margin: 0 0 12px; }
-@media (max-width: 640px) { .setup-grid { grid-template-columns: 1fr; gap: 0; } .answer-tools { flex-wrap: wrap; gap: 14px; } }
+@media (max-width: 640px) { .setup-grid { grid-template-columns: 1fr; gap: 0; } .answer-tools { flex-wrap: wrap; gap: 14px; } .text-interview .interview-layout { width: 100%; padding: 0; box-sizing: border-box; } .text-interview .interview-main { min-height: max(78vh, calc(100dvh - 138px)); padding: 0 16px 14px; border-radius: 14px; } }
 </style>

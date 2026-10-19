@@ -161,6 +161,37 @@ test('loads a focused practice preview from its plan ID, preserves targets and c
   assert.equal(requests[1][1].planId, 'focused-plan')
 })
 
+test('startInterview prepares and starts once without exposing a separate plan step', async () => {
+  const calls = []
+  let release
+  const setup = useInterviewSetup({ storage: memoryStorage(), scope: { userId: 'alice' },
+    materialsApi: { fetchMaterial: async id => ({ material: { id }, text: '简历' }) },
+    interviewApi: { previewSource: async source => ({ source, resumeText: '简历' }),
+      preparePlan: async () => { calls.push('prepare'); return { planId: 'p1', planVersion: 1, status: 'READY', plan: {} } },
+      startPlanned: async () => { calls.push('start'); await new Promise(resolve => { release = resolve }); return { sessionId: 's1' } } } })
+  await setup.loadSource({ kind: 'MATERIAL', id: 'm1' })
+  const first = setup.startInterview()
+  while (!release) await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(await setup.startInterview(), null)
+  release()
+  assert.equal((await first).sessionId, 's1')
+  assert.deepEqual(calls, ['prepare', 'start'])
+  assert.equal(setup.starting.value, false)
+})
+
+test('startInterview does not start when automatic plan preparation fails and keeps the chosen source', async () => {
+  let starts = 0
+  const setup = useInterviewSetup({ storage: memoryStorage(), scope: { userId: 'alice' },
+    materialsApi: { fetchMaterial: async id => ({ material: { id }, text: '简历' }) },
+    interviewApi: { previewSource: async source => ({ source, resumeText: '简历' }),
+      preparePlan: async () => { throw new Error('服务暂不可用') }, startPlanned: async () => { starts++ } } })
+  await setup.loadSource({ kind: 'MATERIAL', id: 'm1' })
+  assert.equal(await setup.startInterview(), null)
+  assert.equal(starts, 0)
+  assert.equal(setup.source.value.id, 'm1')
+  assert.equal(setup.planError.value, '服务暂不可用')
+})
+
 
 test('an exhausted algorithm pool asks for consent before retrying planned start', async () => {
   const requests = []

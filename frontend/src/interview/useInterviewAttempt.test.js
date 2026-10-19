@@ -71,3 +71,20 @@ test('dispose fences a late response after the user changes question or scope', 
   assert.equal(await pending, false)
   assert.equal(attempt.result.value, null)
 })
+
+test('a list refresh during submit discards the stale response and releases the busy state', async () => {
+  let resolveSubmit
+  const saved = { attemptId: 'a1', version: 1, questionId: 'q1', answer: '旧请求', status: 'PENDING' }
+  const attempt = useInterviewAttempt({ api: {
+    submitAttempt: async () => new Promise(done => { resolveSubmit = done }),
+    listAttempts: async () => [],
+  }, sessionId: 's1', questionId: 'q1', storage: storage(), ids: () => 'r1' })
+  attempt.answer.value = '旧请求'
+  const pending = attempt.submit()
+  assert.equal(attempt.busy.value, true)
+  await attempt.load()
+  resolveSubmit(saved)
+  assert.equal(await pending, false)
+  assert.equal(attempt.busy.value, false)
+  assert.equal(attempt.result.value, null)
+})

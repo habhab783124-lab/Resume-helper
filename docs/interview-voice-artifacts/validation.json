@@ -1,5 +1,5 @@
 {
-  "date": "2026-10-17T17:18:18.411Z",
+  "date": "2026-10-18T10:10:02.626Z",
   "checks": [
     {
       "check": "development AudioWorklet module, fake capture and seal barrier",
@@ -7,6 +7,23 @@
       "totalSamples": 4352,
       "sealed": true,
       "micTracksStopped": true
+    },
+    {
+      "check": "browser controller with ticket HTTP + real WebSocket stub (hello, TTS, interrupt, pause, ticket close)",
+      "phaseAfterPause": "PAUSED",
+      "interruptedLocally": true,
+      "playerStops": 3,
+      "captureStops": 1,
+      "httpCalls": {
+        "ticketsCreated": 1,
+        "ticketsClosed": 1
+      },
+      "socketMessages": [
+        "session.hello",
+        "speech.start",
+        "speech.cancel",
+        "session.close"
+      ]
     },
     {
       "check": "production-preview AudioWorklet module, fake capture and seal barrier",

@@ -76,7 +76,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
   }
 
   return {
-    checkAi: ai => request('/ai/check', { method: 'POST', ai, textModel: true }),
+    checkAi: (ai, options = {}) => request('/ai/check', { method: 'POST', ai, textModel: true, ...options }),
     checkSpeech: () => request('/interview-speech/check', { method: 'POST', speech: true }),
     upload(file, fileName = file.name, ai) {
       const body = new FormData()
@@ -124,7 +124,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
     retryReview: (id, body) => request(`${sessionPath(id)}/report/review/retry`, {
       method: 'POST', body, textModel: true, timeoutMs: requestTimeouts.write,
     }),
-    getSpeechCapabilities: () => request('/interview-speech/capabilities', { speech: true }),
+    getSpeechCapabilities: options => request('/interview-speech/capabilities', { speech: true, ...options }),
     createVoiceSession: id => request(`${sessionPath(id)}/voice-sessions`, { method: 'POST', speech: true }),
     closeVoiceSession: (id, voiceSessionId) => request(`${sessionPath(id)}/voice-sessions/${encodeURIComponent(voiceSessionId)}`, { method: 'DELETE', speech: true }),
     voiceSocketUrl(locationImpl = globalThis.location) {

@@ -48,6 +48,8 @@ class InterviewVoiceSessionTest {
         Thread a = new Thread(consume), b = new Thread(consume); a.start(); b.start(); ready.await(); go.countDown(); a.join(); b.join();
         assertEquals(1, successes.get());
         assertThrows(InterviewException.class, () -> registry.close("owner-b", "interview-a", ticket.voiceSessionId()));
+        assertThrows(InterviewException.class, () -> registry.close("owner-a", "interview-b", ticket.voiceSessionId()));
+        assertEquals(1, registry.size(), "failed cross-session close must not remove the ticket");
         assertTrue(registry.close("owner-a", "interview-a", ticket.voiceSessionId()));
         assertFalse(registry.close("owner-a", "interview-a", ticket.voiceSessionId()));
         assertEquals(0, registry.size());
@@ -60,5 +62,17 @@ class InterviewVoiceSessionTest {
         assertEquals(429, assertThrows(InterviewException.class, () -> registry.issue("owner-a", "i3", client())).status());
         registry.issue("owner-b", "i3", client());
         assertEquals(429, assertThrows(InterviewException.class, () -> registry.issue("owner-c", "i4", client())).status());
+    }
+
+    @Test void defaultsAllowThirtyTwoSessionsAndFourPerOwner() {
+        var registry = new InterviewVoiceSessionRegistry(properties(), new MutableClock());
+        for (int i = 0; i < 4; i++) registry.issue("owner-0", "session-0-" + i, client());
+        assertEquals(429, assertThrows(InterviewException.class,
+                () -> registry.issue("owner-0", "session-over-owner-limit", client())).status());
+        for (int owner = 1; owner < 8; owner++)
+            for (int i = 0; i < 4; i++) registry.issue("owner-" + owner, "session-" + owner + "-" + i, client());
+        assertEquals(32, registry.size());
+        assertEquals(429, assertThrows(InterviewException.class,
+                () -> registry.issue("owner-over-global-limit", "session-33", client())).status());
     }
 }

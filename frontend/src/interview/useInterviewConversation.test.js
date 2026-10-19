@@ -29,7 +29,7 @@ function setup({ api = {}, draftStore = {}, polling = null } = {}) {
 
 test('saved answer followed by generation failure clears draft and retries generation only', async () => {
   const { controller, calls } = setup({ api: { generate: async (...args) => { calls.push(['generate', ...args]); throw new Error('generation failed') } } })
-  await controller.send()
+  assert.equal(await controller.send(), false)
   assert.equal(controller.phase.value, 'GENERATION_FAILED')
   assert.equal(controller.session.value.turns[0].answer, '回答')
   assert.equal(calls.filter(call => call[0] === 'removeDraft').length, 1)
@@ -43,7 +43,7 @@ test('saved answer followed by generation failure clears draft and retries gener
 test('final answer that finishes the session does not request another question', async () => {
   const finishedSession = { ...savedSession(), status: 'FINISHED', currentQuestion: null, generation: null }
   const { controller, calls } = setup({ api: { saveAnswer: async (...args) => { calls.push(['saveAnswer', ...args]); return finishedSession } } })
-  await controller.send()
+  assert.equal(await controller.send(), true)
   assert.equal(controller.session.value.status, 'FINISHED')
   assert.equal(controller.phase.value, 'FINISHED')
   assert.equal(calls.filter(call => call[0] === 'generate').length, 0)

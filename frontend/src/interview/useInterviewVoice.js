@@ -62,13 +62,18 @@ export function useInterviewVoice({
     recorder.value = createRecorder(limits)
     recorderLimits = key
   }
-  async function loadCapabilities() {
-    if (disposed || capabilityState.value === 'loading' || busy.value) return
+  async function loadCapabilities(options) {
+    if (disposed || busy.value) return
+    if (capabilityState.value === 'loading') {
+      if (!options?.signal) return
+      capabilityGeneration++
+      capabilityState.value = 'idle'
+    }
     const my = ++capabilityGeneration
     capabilityState.value = 'loading'
     capabilityError.value = ''
     try {
-      const value = await api.getSpeechCapabilities()
+      const value = await api.getSpeechCapabilities(options)
       if (disposed || my !== capabilityGeneration) return
       if (typeof value?.asrEnabled !== 'boolean' || typeof value?.ttsEnabled !== 'boolean') throw new Error('语音能力返回格式异常。')
       capabilities.value = { ...value,
@@ -78,10 +83,12 @@ export function useInterviewVoice({
       // New limits validate retained audio below and configure the next recording.
       if (!blob.value) configureRecorder()
       capabilityState.value = 'ready'
+      return capabilities.value
     } catch {
       if (disposed || my !== capabilityGeneration) return
       capabilityState.value = 'unavailable'
       capabilityError.value = '暂时无法确认语音能力，可以继续文字作答或重试。'
+      return null
     }
   }
   function cancelTranscription() {

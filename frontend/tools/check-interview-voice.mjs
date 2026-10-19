@@ -4,6 +4,7 @@
  * and always tears down Chrome/Vite/temp state. Run: node tools/check-interview-voice.mjs
  */
 import assert from 'node:assert/strict'
+import { createHash } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { createServer } from 'node:http'
 import { mkdtemp, mkdir, readdir, rm, writeFile } from 'node:fs/promises'
@@ -135,6 +136,144 @@ async function checkWorklet(base, moduleUrl, label, wavBase64) {
   checks.push({ check: `${label} AudioWorklet module, fake capture and seal barrier`, ...result })
 }
 
+async function checkRealtimeTransport(pageOrigin) {
+  const calls = { ticketsCreated: [], ticketsClosed: [], socketMessages: [], socketClosed: 0 }
+  const sockets = new Set()
+  const server = createServer(async (req, res) => {
+    const origin = req.headers.origin || '*'
+    res.setHeader('Access-Control-Allow-Origin', origin)
+    res.setHeader('Access-Control-Allow-Credentials', 'true')
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-User-Id, X-Speech-Api-Key')
+    res.setHeader('Access-Control-Allow-Methods', 'POST, DELETE, OPTIONS')
+    if (req.method === 'OPTIONS') { res.writeHead(204); res.end(); return }
+    const path = new URL(req.url, 'http://localhost').pathname
+    if (req.method === 'POST' && path === '/api/interviews/s1/voice-sessions') {
+      calls.ticketsCreated.push({ path, origin })
+      res.writeHead(200, { 'Content-Type': 'application/json' })
+      res.end(JSON.stringify({ data: { voiceSessionId: 'browser-voice-1', ticket: 'one-use-smoke-ticket',
+        protocolVersion: 1, websocketPath: '/api/interview-voice/ws', expiresAt: new Date(Date.now() + 60_000).toISOString() } }))
+      return
+    }
+    if (req.method === 'DELETE' && path === '/api/interviews/s1/voice-sessions/browser-voice-1') {
+      calls.ticketsClosed.push({ path, origin })
+      res.writeHead(200, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ data: { closed: true } }))
+      return
+    }
+    res.writeHead(404, { 'Content-Type': 'application/json' }); res.end(JSON.stringify({ error: 'not found' }))
+  })
+  server.on('upgrade', (req, socket) => {
+    if (req.url !== '/api/interview-voice/ws' || !req.headers['sec-websocket-key']) { socket.destroy(); return }
+    const accept = createHash('sha1').update(`${req.headers['sec-websocket-key']}258EAFA5-E914-47DA-95CA-C5AB0DC85B11`).digest('base64')
+    socket.write(`HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\nSec-WebSocket-Accept: ${accept}\r\n\r\n`)
+    sockets.add(socket)
+    socket.on('close', () => { sockets.delete(socket); calls.socketClosed++ })
+    let buffered = Buffer.alloc(0)
+    const send = value => {
+      const payload = Buffer.from(JSON.stringify(value))
+      const header = payload.length < 126 ? Buffer.from([0x81, payload.length])
+        : Buffer.from([0x81, 126, (payload.length >> 8) & 0xff, payload.length & 0xff])
+      socket.write(Buffer.concat([header, payload]))
+    }
+    socket.on('data', chunk => {
+      buffered = Buffer.concat([buffered, chunk])
+      while (buffered.length >= 2) {
+        const first = buffered[0], second = buffered[1]
+        const opcode = first & 0x0f, masked = !!(second & 0x80)
+        let length = second & 0x7f, offset = 2
+        if (length === 126) { if (buffered.length < 4) return; length = buffered.readUInt16BE(2); offset = 4 }
+        else if (length === 127) {
+          if (buffered.length < 10) return
+          const wide = buffered.readBigUInt64BE(2)
+          if (wide > 16_777_216n) { socket.destroy(); return }
+          length = Number(wide); offset = 10
+        }
+        if (!masked) { socket.destroy(); return }
+        if (buffered.length < offset + 4 + length) return
+        const mask = buffered.subarray(offset, offset + 4), payload = Buffer.from(buffered.subarray(offset + 4, offset + 4 + length))
+        buffered = buffered.subarray(offset + 4 + length)
+        for (let i = 0; i < payload.length; i++) payload[i] ^= mask[i & 3]
+        if (opcode === 8) { socket.write(Buffer.from([0x88, 0])); socket.end(); continue }
+        if (opcode !== 1) { socket.destroy(); return }
+        let message
+        try { message = JSON.parse(payload.toString('utf8')) } catch { socket.destroy(); return }
+        calls.socketMessages.push(message)
+        if (message.type === 'session.hello') {
+          if (message.voiceSessionId !== 'browser-voice-1' || message.ticket !== 'one-use-smoke-ticket') { socket.destroy(); return }
+          send({ v: 1, type: 'session.ready', voiceSessionId: 'browser-voice-1', connectionId: 'browser-connection-1',
+            protocolVersion: 1, expiresAt: new Date(Date.now() + 60_000).toISOString(), sampleRate: 24000, channels: 1,
+            maxBufferedSamples: 48000, maxPcmBytes: 4096 })
+        } else if (message.type === 'speech.start') {
+          send({ v: 1, type: 'speech.started', requestId: message.requestId, questionId: message.questionId,
+            streamId: 1, format: 'pcm_s16le', sampleRate: 24000, channels: 1 })
+        } else if (message.type === 'speech.cancel') {
+          send({ v: 1, type: 'speech.cancelled', requestId: message.requestId, streamId: message.streamId || 1 })
+        } else if (message.type === 'session.ping') send({ v: 1, type: 'session.pong', nonce: message.nonce })
+      }
+    })
+  })
+  await new Promise((resolve, reject) => { server.once('error', reject); server.listen(0, '127.0.0.1', resolve) })
+  const httpOrigin = `http://127.0.0.1:${server.address().port}`
+  const wsOrigin = `ws://127.0.0.1:${server.address().port}/api/interview-voice/ws`
+  try {
+    await cdpTools.send('Page.navigate', { url: pageOrigin })
+    await waitFor(() => cdpTools.evaluate('document.readyState === "complete"'), 'realtime transport harness page')
+    const result = await cdpTools.evaluate(`(async () => {
+      const { useInterviewVoiceConversation } = await import('/src/interview/voice/useInterviewVoiceConversation.ts')
+      const { createVoiceSocket } = await import('/src/interview/voice/voiceSocket.ts')
+      const httpOrigin = ${JSON.stringify(httpOrigin)}, wsOrigin = ${JSON.stringify(wsOrigin)}
+      let captureOptions, playerStops = 0, captureStops = 0
+      const snapshot = { sessionId: 's1', status: 'ACTIVE', currentQuestion: { questionId: 'q1' }, pendingAnswer: null,
+        revision: 1, stateVersion: 1, plan: { mode: 'FULL' }, generation: null, turns: [{ questionId: 'q1', question: '项目如何验证效果？', answer: null }] }
+      const api = {
+        async createVoiceSession(id) {
+          const response = await fetch(httpOrigin + '/api/interviews/' + id + '/voice-sessions', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ protocolVersion: 1 }) })
+          const value = await response.json(); if (!response.ok) throw new Error('ticket HTTP ' + response.status); return value.data
+        },
+        async closeVoiceSession(id, voiceSessionId) {
+          const response = await fetch(httpOrigin + '/api/interviews/' + id + '/voice-sessions/' + voiceSessionId, { method: 'DELETE' })
+          if (!response.ok) throw new Error('ticket close HTTP ' + response.status); return response.json()
+        },
+        voiceSocketUrl: () => wsOrigin,
+        async transcribe() { throw new Error('ASR is not part of this transport scenario') },
+      }
+      const voice = useInterviewVoiceConversation({ api,
+        conversation: { readSession: () => snapshot, readDraft: () => '', readPendingSubmission: () => null, writeDraft() {}, async sendVoice() { throw new Error('unexpected submit') } },
+        getScope: () => 'browser-smoke', getQuestionKind: () => 'MAIN', workletUrl: '/src/interview/voice/worklet/voiceCapture.worklet.ts',
+        audioContextFactory: () => ({ resume: async () => {}, close: async () => {} }),
+        captureFactory: options => { captureOptions = options; return { start: async () => {}, seal: async () => {}, resume() {}, setPlayback() {},
+          async stop() { captureStops++; return null }, async dispose() {} } },
+        socketFactory: options => createVoiceSocket(options),
+        playerFactory: () => ({ start() {}, enqueue() {}, end() {}, stop() { playerStops++ }, dispose() {} }),
+        idFactory: () => 'browser-smoke-request-1',
+      })
+      await voice.start()
+      await new Promise((resolve, reject) => {
+        const end = Date.now() + 3000
+        const poll = () => voice.state.phase === 'SPEAKING' ? resolve() : Date.now() > end ? reject(new Error('server TTS start was not applied')) : setTimeout(poll, 20)
+        poll()
+      })
+      captureOptions.onState({ captureActive: true, speechActive: true, captureCandidate: true, retainedBytes: 4096 })
+      await new Promise(resolve => setTimeout(resolve, 40))
+      const interruptedLocally = playerStops > 0 && voice.state.phase === 'LISTENING'
+      await voice.pause('browser-smoke')
+      const phaseAfterPause = voice.state.phase, captureStopsAfterPause = captureStops
+      voice.dispose()
+      return { phaseAfterPause, interruptedLocally, playerStops, captureStops: captureStopsAfterPause }
+    })()`)
+    await waitFor(() => Promise.resolve(calls.ticketsClosed.length === 1), 'voice ticket close request')
+    const sentTypes = calls.socketMessages.map(message => message.type)
+    assert.ok(calls.ticketsCreated.length === 1 && calls.ticketsClosed.length === 1, 'ticket create/close HTTP flow should complete')
+    assert.ok(sentTypes.includes('session.hello') && sentTypes.includes('speech.start') && sentTypes.includes('speech.cancel') && sentTypes.includes('session.close'), `unexpected socket messages: ${sentTypes.join(', ')}`)
+    assert.ok(result.interruptedLocally && result.phaseAfterPause === 'PAUSED' && result.captureStops === 1,
+      `speech interruption should stop local playback and pause capture: ${JSON.stringify(result)}`)
+    checks.push({ check: 'browser controller with ticket HTTP + real WebSocket stub (hello, TTS, interrupt, pause, ticket close)', ...result,
+      httpCalls: { ticketsCreated: calls.ticketsCreated.length, ticketsClosed: calls.ticketsClosed.length }, socketMessages: sentTypes })
+  } finally {
+    for (const socket of sockets) socket.destroy()
+    await new Promise(resolve => server.close(resolve))
+  }
+}
+
 let cdpTools
 try {
   await mkdir(artifacts, { recursive: true })
@@ -156,6 +295,7 @@ try {
     `--remote-debugging-port=${cdpPort}`, `--user-data-dir=${join(temp, 'profile')}`, 'about:blank'])
   cdpTools = await connectCdp(cdpPort)
   await checkWorklet(devStarted.base, devUrl, 'development', encodedWav)
+  await checkRealtimeTransport(devStarted.base)
   await checkWorklet(previewStarted.base, prodUrl, 'production-preview', encodedWav)
   await rm(join(artifacts, 'failure.json'), { force: true })
   await writeFile(join(artifacts, 'validation.json'), JSON.stringify({ date: new Date().toISOString(), checks, limitations: ['真实供应商 TTS/ASR 和真人耳机/扬声器未在此假设备 smoke 中验证'] }, null, 2))

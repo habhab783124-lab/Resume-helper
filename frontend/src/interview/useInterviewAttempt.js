@@ -59,12 +59,13 @@ export function useInterviewAttempt({ api, sessionId, questionId, storage = null
     saveDraft()
     const expected = epoch
     const requestId = ids()
-    controller = new AbortController()
+    const requestController = new AbortController()
+    controller = requestController
     busy.value = true
     error.value = ''
-    inFlight = (async () => {
+    const operation = (async () => {
       try {
-        const value = await api.submitAttempt(sessionId, { questionId, requestId, answer: text }, controller.signal)
+        const value = await api.submitAttempt(sessionId, { questionId, requestId, answer: text }, requestController.signal)
         if (!applyVersion(value, expected)) return false
         answer.value = ''
         try { storage?.removeItem(key) } catch { /* Storage is optional. */ }
@@ -73,12 +74,15 @@ export function useInterviewAttempt({ api, sessionId, questionId, storage = null
         if (expected === epoch) error.value = cause?.message || '重答暂未保存，请保留原文后重试。'
         return false
       } finally {
-        if (expected === epoch) busy.value = false
-        inFlight = null
-        controller = null
+        if (controller === requestController) {
+          busy.value = false
+          controller = null
+        }
+        if (inFlight === operation) inFlight = null
       }
     })()
-    return inFlight
+    inFlight = operation
+    return operation
   }
   async function refresh() {
     const attemptId = result.value?.attemptId

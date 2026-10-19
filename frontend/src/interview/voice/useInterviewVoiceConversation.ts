@@ -31,6 +31,7 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
   let socket: Socket | null = null
   let player: Player | null = null
   let ticket: VoiceSessionTicket | null = null
+  let ticketOwnerSessionId: string | null = null
   let countdownTimer: unknown = null
   let activeTts: { requestId: string; streamId?: number; context: VoiceContext } | null = null
   let submissionBusy = false
@@ -40,6 +41,7 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
   let socketGeneration = 0
   let playerGeneration = 0
   let lastAutoRead = ''
+  let disposed = false
   const emit = () => { state.segments = queue.snapshot(); onChange({ ...state, context: state.context && { ...state.context }, countdown: state.countdown && { ...state.countdown }, segments: [...state.segments], appliedSegmentIds: new Set(state.appliedSegmentIds) }) }
   const queue = createSpeechQueue({ api, getContext: () => state.context, onApplied: segment => applySegment(segment), onFailure: (failure, segment) => { state.failure = failure; state.phase = 'PAUSED'; onFailure(failure); emit() }, clock, idFactory })
 
@@ -172,6 +174,7 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
   }
 
   async function start() {
+    if (disposed) return
     if (state.phase !== 'OFF' && state.phase !== 'PAUSED' && state.phase !== 'ERROR') return
     const session = conversation.readSession()
     const context = session && contextFor(session)
@@ -183,6 +186,7 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
     try {
       audioContext ??= audioContextFactory()
       await audioContext.resume()
+      if (disposed || !sameVoiceContext(state.context, context)) return
       capture = captureFactory({ audioContext, workletUrl, getBufferBudget: captureBudget,
         onCandidate: () => { clearCountdown(); state.phase = 'LISTENING'; emit() }, onSegment: onCaptured, onState: onCaptureState,
         onError: (message: string) => fail('MICROPHONE', message) })
@@ -190,19 +194,40 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
       player = playerFactory({ audioContext, onProgress: progress => { if (thisPlayer === playerGeneration) onPlayerProgress(progress) }, onDrained: id => { if (thisPlayer === playerGeneration) onPlayerDrained(id) } })
       const thisSocket = ++socketGeneration
       socket = socketFactory({ url: api.voiceSocketUrl(), onEvent: event => { if (thisSocket === socketGeneration) handleSocketEvent(event) } })
-      ticket = await api.createVoiceSession(session.sessionId)
-      if (!sameVoiceContext(state.context, context)) { await api.closeVoiceSession(session.sessionId, ticket.voiceSessionId); return }
-      await socket.connect(ticket)
+      const createdTicket = await api.createVoiceSession(session.sessionId)
+      if (disposed || !sameVoiceContext(state.context, context)) {
+        await api.closeVoiceSession(session.sessionId, createdTicket.voiceSessionId)
+        if (ticket?.voiceSessionId === createdTicket.voiceSessionId) ticket = null
+        return
+      }
+      ticket = createdTicket
+      ticketOwnerSessionId = session.sessionId
+      const connectingSocket = socket
+      if (!connectingSocket) {
+        await api.closeVoiceSession(session.sessionId, createdTicket.voiceSessionId)
+        if (ticket?.voiceSessionId === createdTicket.voiceSessionId) { ticket = null; ticketOwnerSessionId = null }
+        return
+      }
+      await connectingSocket.connect(createdTicket)
+      if (disposed || !sameVoiceContext(state.context, context)) {
+        if (ticket?.voiceSessionId === createdTicket.voiceSessionId) {
+          ticket = null
+          ticketOwnerSessionId = null
+          await api.closeVoiceSession(session.sessionId, createdTicket.voiceSessionId)
+        }
+        return
+      }
       await capture.start(context)
+      if (disposed || !sameVoiceContext(state.context, context)) return
       queue.resume(context)
       if (state.phase === 'STARTING') state.phase = 'LISTENING'
       emit()
-    } catch (cause) { fail('VOICE_START_FAILED', cause instanceof Error ? cause.message : '连续语音启动失败。', true); await stopResources(false) }
+    } catch (cause) { if (!disposed) fail('VOICE_START_FAILED', cause instanceof Error ? cause.message : '连续语音启动失败。', true); await stopResources(false) }
   }
   async function stopResources(keepPartial: boolean) {
     socketGeneration++; playerGeneration++
     cancelPlayback(); socket?.close(); socket = null; player?.stop()
-    const oldTicket = ticket; ticket = null
+    const oldTicket = ticket; const ticketSessionId = ticketOwnerSessionId; ticket = null; ticketOwnerSessionId = null
     if (capture) {
       const partial = await capture.stop({ keepPartial })
       if (partial && keepPartial && state.context) {
@@ -210,7 +235,7 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
         try { queue.enqueue(rebound) } catch { /* Existing audio remains in the queue for user action. */ }
       }
     }
-    if (oldTicket && state.context) void api.closeVoiceSession(state.context.sessionId, oldTicket.voiceSessionId).catch(() => {})
+    if (oldTicket && ticketSessionId) void api.closeVoiceSession(ticketSessionId, oldTicket.voiceSessionId).catch(() => {})
   }
   async function pause(_reason = 'user') {
     if (state.phase === 'OFF' || state.phase === 'PAUSED' && !capture && !socket && !ticket) return
@@ -272,7 +297,14 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
     })
     emit()
   }
-  function dispose() { clearCountdown(); queue.dispose(); void stopResources(false); void capture?.dispose(); player?.dispose(); audioContext?.close().catch(() => {}) }
+  function dispose() {
+    if (disposed) return
+    disposed = true; epoch++; clearCountdown(); queue.dispose()
+    const currentCapture = capture
+    void stopResources(false).finally(() => { void currentCapture?.dispose() })
+    player?.dispose(); audioContext?.close().catch(() => {})
+    state.phase = 'OFF'; state.transport = 'CLOSED'; state.context = null; emit()
+  }
 
   return { state, start, pause, resume: start, isActive: () => state.captureActive || state.transport !== 'CLOSED' || state.phase === 'SPEAKING', stop: async () => { await pause('user'); state.phase = 'OFF'; state.context = null; emit() }, stopPlayback: cancelPlayback,
     submitNow: () => submitNow(), onDraftEdited, syncContext, retrySegment: (id: string) => queue.retry(id), discardSegment: (id: string) => queue.discard(id), dispose }

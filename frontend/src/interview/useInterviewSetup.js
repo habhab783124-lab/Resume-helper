@@ -25,6 +25,7 @@ export function useInterviewSetup({ materialsApi = {}, resumeApi = {}, jobsApi =
   const planError = ref('')
   const preparingPlan = ref(false)
   const confirmingPlan = ref(false)
+  const starting = ref(false)
   const allowAlgorithmRepeat = ref(false)
   const repeatConsentRequired = ref(false)
   const sourceSessionId = ref('')
@@ -195,8 +196,16 @@ export function useInterviewSetup({ materialsApi = {}, resumeApi = {}, jobsApi =
     catch (cause) { planError.value = cause.message || '确认计划失败，请重试。'; repeatConsentRequired.value = /已全部练习/.test(planError.value); return null }
     finally { confirmingPlan.value = false }
   }
+  async function startInterview() {
+    if (starting.value || preparingPlan.value || confirmingPlan.value) return null
+    starting.value = true
+    try {
+      if (!planCurrent.value && !await preparePlan()) return null
+      return await confirmPlan()
+    } finally { starting.value = false }
+  }
   watch([source, targetRole, jobDescription, preferences], () => { if (restoring) return; invalidatePlan(); savePreparation() }, { deep: true, flush: 'sync' })
 
-  return { source, sourceSessionId, resumePreview, targetRole, jobDescription, preferences, planPreview, planError, preparingPlan, confirmingPlan, allowAlgorithmRepeat, repeatConsentRequired, planCurrent, preparePlan, loadPreparedPlan, confirmPlan,
+  return { source, sourceSessionId, resumePreview, targetRole, jobDescription, preferences, planPreview, planError, preparingPlan, confirmingPlan, starting, allowAlgorithmRepeat, repeatConsentRequired, planCurrent, preparePlan, loadPreparedPlan, confirmPlan, startInterview,
     loadSource, loadJob, savePreparation, restorePreparation, clearPreparation, switchScope }
 }

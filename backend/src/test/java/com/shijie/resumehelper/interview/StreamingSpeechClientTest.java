@@ -54,7 +54,7 @@ class StreamingSpeechClientTest {
             exchange.getResponseHeaders().add("Content-Type", "application/json");
             exchange.sendResponseHeaders(200, 0);
             try (var out = exchange.getResponseBody()) {
-                writePart(out, 0, new byte[]{1, 2, 3});
+                writeSplitPart(out, 0, new byte[]{1, 2, 3});
                 firstAudioSent.countDown();
                 allowTerminal.await(2, TimeUnit.SECONDS);
                 writePart(out, 0, new byte[]{4, 5});
@@ -104,6 +104,81 @@ class StreamingSpeechClientTest {
                 })));
         assertTrue(requestSeen.await(1, TimeUnit.SECONDS));
         task.get(2, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void cancellationWhileReadingAnOpenUpstreamBodyUnblocksTheReader() throws Exception {
+        CountDownLatch requestSeen = new CountDownLatch(1);
+        CountDownLatch firstAudioDelivered = new CountDownLatch(1);
+        server.createContext("/api/v3/tts/unidirectional", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            requestSeen.countDown();
+            try (var out = exchange.getResponseBody()) {
+                writePart(out, 0, new byte[]{1, 2});
+                Thread.sleep(5000);
+            } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); }
+            catch (IOException ignored) { }
+        });
+        SpeechCancellation cancellation = new SpeechCancellation();
+        var task = worker.submit(() -> assertThrows(java.util.concurrent.CancellationException.class,
+                () -> client.streamQuestion("题目", "req-cancel-blocked-read",
+                        new StreamingSpeechClient.StreamOptions(3, 3, 8, 1024), cancellation,
+                        new StreamingSpeechClient.PcmSink() {
+                            public void onFormat(StreamingSpeechClient.AudioFormat format) { }
+                            public void onAudio(byte[] pcm) { firstAudioDelivered.countDown(); }
+                        })));
+        assertTrue(requestSeen.await(1, TimeUnit.SECONDS));
+        assertTrue(firstAudioDelivered.await(1, TimeUnit.SECONDS));
+        cancellation.cancel();
+        task.get(2, TimeUnit.SECONDS);
+    }
+
+    @Test
+    void emptyAudioWithSuccessfulTerminalIsRejected() throws Exception {
+        server.createContext("/api/v3/tts/unidirectional", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            try (var out = exchange.getResponseBody()) {
+                writePart(out, 0, new byte[0]);
+                writePart(out, 20000000, new byte[0]);
+            }
+        });
+        assertThrows(InterviewException.class, () -> client.streamQuestion("题目", "req-empty-audio",
+                new StreamingSpeechClient.StreamOptions(2, 2, 5, 1024), new SpeechCancellation(), emptySink()));
+    }
+
+    @Test
+    void malformedJsonIsRejected() throws Exception {
+        server.createContext("/api/v3/tts/unidirectional", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            try (var out = exchange.getResponseBody()) {
+                out.write("{broken json}\n".getBytes(StandardCharsets.UTF_8));
+            }
+        });
+        assertThrows(InterviewException.class, () -> client.streamQuestion("题目", "req-bad-json",
+                new StreamingSpeechClient.StreamOptions(2, 2, 5, 1024), new SpeechCancellation(), emptySink()));
+    }
+
+    @Test
+    void providerBusinessFailureIsRejected() throws Exception {
+        server.createContext("/api/v3/tts/unidirectional", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            try (var out = exchange.getResponseBody()) { writePart(out, 45000292, new byte[0]); }
+        });
+        assertThrows(InterviewException.class, () -> client.streamQuestion("题目", "req-business-error",
+                new StreamingSpeechClient.StreamOptions(2, 2, 5, 1024), new SpeechCancellation(), emptySink()));
+    }
+
+    @Test
+    void audioLimitIsEnforcedAcrossProviderParts() throws Exception {
+        server.createContext("/api/v3/tts/unidirectional", exchange -> {
+            exchange.sendResponseHeaders(200, 0);
+            try (var out = exchange.getResponseBody()) {
+                writePart(out, 0, new byte[]{1, 2});
+                writePart(out, 20000000, new byte[]{3, 4});
+            }
+        });
+        assertThrows(InterviewException.class, () -> client.streamQuestion("题目", "req-audio-limit",
+                new StreamingSpeechClient.StreamOptions(2, 2, 5, 2), new SpeechCancellation(), emptySink()));
     }
 
     @Test
@@ -170,5 +245,10 @@ class StreamingSpeechClientTest {
         String data = bytes.length == 0 ? "null" : "\"" + Base64.getEncoder().encodeToString(bytes) + "\"";
         out.write(("{\"code\":" + code + ",\"data\":" + data + "}\n").getBytes(StandardCharsets.UTF_8));
         out.flush();
+    }
+    private static void writeSplitPart(java.io.OutputStream out, int code, byte[] bytes) throws IOException {
+        String data = bytes.length == 0 ? "null" : "\"" + Base64.getEncoder().encodeToString(bytes) + "\"";
+        byte[] json = ("{\"code\":" + code + ",\"message\":\"音频分片\",\"data\":" + data + "}\n").getBytes(StandardCharsets.UTF_8);
+        for (byte value : json) { out.write(value); out.flush(); }
     }
 }
