@@ -120,7 +120,7 @@ import {
   saveResumeVersion,
   suggestResume
 } from '../api/resume'
-import { getDemoSession } from '../utils/demoAuth'
+import { getAuthUser } from '../utils/authSession'
 
 const draft = ref(null)
 const router = useRouter()
@@ -136,7 +136,7 @@ const suggesting = ref(false)
 const error = ref('')
 const notice = ref('')
 
-const personName = computed(() => getDemoSession()?.displayName || '求职者')
+const personName = computed(() => getAuthUser()?.displayName || '求职者')
 const isEmpty = computed(() => !draft.value || loading.value)
 
 /**

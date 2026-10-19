@@ -39,7 +39,8 @@ import static org.mockito.Mockito.*;
         "app.material.storage-dir=./target/test-upload-boundary-materials",
         "app.resume.storage-dir=./target/test-upload-boundary-resumes",
         "app.interview.speech.max-audio-bytes=5242880",
-        "server.tomcat.max-swallow-size=20MB"
+        "server.tomcat.max-swallow-size=20MB",
+        "app.auth.enforce=false"
 })
 class UploadBoundaryApiTest {
     private static final int MIB = 1024 * 1024;

@@ -1,5 +1,5 @@
 import axios from 'axios'
-import { getAiSettings, setAiSettings, getLocalApiBaseUrl, getUserId } from './requestContext.js'
+import { getAiSettings, setAiSettings, getLocalApiBaseUrl, getUserId, getAuthToken } from './requestContext.js'
 
 /**
  * 岗位模块的 HTTP 客户端。
@@ -49,6 +49,9 @@ export function hasAiKey() { return getAiKey().length > 0 }
 http.interceptors.request.use((config) => {
   config.baseURL = getEffectiveBaseURL()
   config.headers['X-User-Id'] = getUserId()
+  const token = getAuthToken()
+  if (token) config.headers.Authorization = `Bearer ${token}`
+  else delete config.headers.Authorization
   const settings = getAiSettings()
   for (const [field, header] of Object.entries({ apiKey: 'X-AI-Api-Key', model: 'X-AI-Model', baseUrl: 'X-AI-Base-Url' })) {
     if (settings[field]) config.headers[header] = settings[field]
@@ -71,6 +74,16 @@ http.interceptors.response.use(
     return payload
   },
   (error) => {
+    const status = error?.response?.status
+    const url = String(error?.config?.url || '')
+    // 只有已登录请求失效才通知全局；登录/注册本身的失败由表单展示。
+    if (status === 401 && !url.startsWith('/api/auth/login') && !url.startsWith('/api/auth/register')) {
+      try {
+        globalThis.dispatchEvent?.(new Event('auth-expired'))
+      } catch {
+        // 非浏览器环境下没有事件目标，忽略即可。
+      }
+    }
     throw toApiError(error)
   }
 )

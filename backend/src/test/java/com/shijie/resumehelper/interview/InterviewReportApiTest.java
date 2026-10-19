@@ -31,7 +31,8 @@ import static com.shijie.resumehelper.interview.InterviewTestFixtures.*;
 
 @SpringBootTest(properties = {
         "app.material.storage-dir=./target/test-report-materials",
-        "app.resume.storage-dir=./target/test-report-resumes"
+        "app.resume.storage-dir=./target/test-report-resumes",
+        "app.auth.enforce=false"
 })
 @AutoConfigureMockMvc
 class InterviewReportApiTest {

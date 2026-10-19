@@ -34,9 +34,9 @@
 ## 运行
 
 ```bash
-# 后端（JDK 17 + Maven）
+# 后端（JDK 17；仓库自带 Maven Wrapper，首次运行会自动下载 Maven）
 cd backend
-mvn spring-boot:run
+.\mvnw.cmd spring-boot:run     # macOS / Linux 用 ./mvnw spring-boot:run
 # 本机 8080 常被其他程序占用，可换端口：$env:SERVER_PORT=8081
 
 # 前端
@@ -46,6 +46,19 @@ npm run dev            # 打开 http://localhost:5173
 ```
 
 Vite 已把 `/api` 代理到后端 8080。后端地址不同时用 `VITE_PROXY_TARGET` 覆盖，不必改代码。
+
+### 注册与登录
+
+打开 http://localhost:5173/login ，在「登录 / 注册」之间切换：
+
+- 注册只需要邮箱 + 密码（至少 8 位）+ 可选昵称，不发送验证邮件，账号直接保存在本机后端。
+- 密码使用 PBKDF2-HMAC-SHA256 加盐哈希保存，账号文件在 `backend/data/auth/users.json`。
+- 登录成功后后端签发 7 天有效的 HS256 令牌，前端放在 `Authorization: Bearer` 里；
+  后端用令牌里的用户 id 覆盖客户端传来的 `X-User-Id`，各业务模块仍按原方式分区数据。
+- 正式部署请通过环境变量 `AUTH_TOKEN_SECRET` 配置固定的令牌密钥；留空时每次重启会生成临时密钥，
+  已登录用户需要重新登录。
+- 只有运行旧版演示脚本时才建议 `$env:AUTH_ENFORCE="false"`，保留可伪造的 `X-User-Id` 兼容模式；
+  默认 `true` 会要求所有 `/api` 业务接口都带有效令牌。
 
 ### 关于 AI token
 
@@ -80,9 +93,9 @@ ASR/TTS 资源和音色按账号实际权限配置。能力接口只检查本机
 
 ## 已知限制
 
-- **正式账号认证尚未接入**。当前登录是纯前端演示登录（写死演示账号、只在浏览器本地校验），
-  后端的用户身份来自 `X-User-Id` 请求头，**客户端可伪造，只能用于数据分区，不能当权限控制**。
-  接入 Spring Security + JWT 时只需改 `common/util/UserContext`，各模块不用动。
+- 账号认证已接入，但仍是**课程项目的单机实现**：用户保存在本机 `data/auth/users.json`，
+  没有邮箱验证、找回密码、登录限流和跨实例共享；正式上线前应换成数据库并补上这些能力。
+  令牌密钥通过 `AUTH_TOKEN_SECRET` 配置，未配置时重启会让已登录用户重新登录。
 - 材料、简历版本与面试快照使用**本机文件系统**。面试快照默认写入 `./data/interviews`，按演示用户分区、原子替换；新会话默认保留 30 天（`app.interview.retention-days` 可配置，`expiresAt` 创建时固定），旧会话期限不会追溯延长。服务重启后可恢复未过期的已提交记录，运行中的模型任务会作为可重试失败状态恢复。
   当前是单机单实例存储，没有跨主机共享、分布式锁或备份能力；部署多副本前需迁移到共享持久化存储并实现协调。
 - 语音面试依赖外部服务；没有密钥时相关能力自动关闭。
@@ -91,7 +104,9 @@ ASR/TTS 资源和音色按账号实际权限配置。能力接口只检查本机
 
 ## 验证方式
 
-2026-10-17 当前回归：后端全套 **378 项**通过，前端 `npm test` **209 项**通过，`npm run build` 通过；Chrome 本地模拟验收 **98 项**通过。岗位、材料、资料与简历验证入口继续保留，见[后端说明](backend/README.md)。
+2026-10-19 登录改造回归：新增 `AuthApiTest` **3 项**通过（注册、登录、令牌身份覆盖伪造请求头、密码哈希落盘）；
+前端 `npm run build` 通过，238 项 JavaScript 测试通过（含 5 项登录会话测试）。旧的浏览器检查脚本种的是不带令牌的演示会话，
+需要用 `AUTH_ENFORCE=false` 启动后端，或按脚本里的说明换成真实登录会话。
 
 新增面试浏览器检查（Node 24+、Chrome、ffmpeg）：
 

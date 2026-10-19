@@ -3,7 +3,7 @@
           <div class="page-intro dashboard-intro">
             <div>
               <div class="eyebrow"><span class="eyebrow-line"></span>MONDAY, OCTOBER 12</div>
-              <h1>早上好，林同学<span class="greeting-dot">。</span></h1>
+              <h1>早上好，{{ displayName }}<span class="greeting-dot">。</span></h1>
               <p>每一次认真准备，都会让下一步更清晰。</p>
             </div>
             <button class="button button-outline" data-page="materials"><svg><use href="#i-upload"/></svg>整理求职材料</button>
@@ -76,10 +76,13 @@
 import { computed, onMounted, ref } from 'vue'
 import { searchJobs } from '../api/jobs'
 import { getProfile } from '../utils/demoProfile'
+import { getAuthUser } from '../utils/authSession'
 
 /** 推荐位只展示 3 个，但指标卡要显示「本周匹配到多少个」，所以多取一些。 */
 const DISPLAY_LIMIT = 3
 const FETCH_LIMIT = 8
+
+const displayName = computed(() => getAuthUser()?.displayName || '求职者')
 
 const recommended = ref([])
 const matchedCount = ref(0)

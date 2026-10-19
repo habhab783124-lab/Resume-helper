@@ -9,24 +9,29 @@
         <kbd>Ctrl K</kbd>
       </label>
       <button class="icon-button notification-button" type="button" aria-label="通知"><svg><use href="#i-bell" /></svg><i></i></button>
-      <RouterLink to="/profile" class="user-chip"><span class="avatar">林</span><span class="user-chip-name">林同学</span><svg><use href="#i-chevron" /></svg></RouterLink>
+      <RouterLink to="/profile" class="user-chip"><span class="avatar">{{ avatarChar }}</span><span class="user-chip-name">{{ displayName }}</span><svg><use href="#i-chevron" /></svg></RouterLink>
       <button class="topbar-logout" type="button" @click="logout">退出</button>
     </div>
   </header>
 </template>
 
 <script setup>
+import { computed } from 'vue'
 import { useRouter } from 'vue-router'
-import { clearDemoSession } from '../utils/demoAuth'
+import { getAuthUser } from '../utils/authSession'
+import { clearAuthState } from '../utils/auth'
 
 const router = useRouter()
+const user = getAuthUser()
+const displayName = computed(() => user?.displayName || user?.email?.split('@')[0] || '求职者')
+const avatarChar = computed(() => displayName.value.slice(0, 1))
 
 defineProps({
   title: { type: String, default: '工作台' }
 })
 
 function logout() {
-  clearDemoSession()
+  clearAuthState()
   router.replace('/login')
 }
 </script>
