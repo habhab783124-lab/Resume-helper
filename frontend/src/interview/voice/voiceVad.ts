@@ -11,13 +11,15 @@ const SPEECH_RATIO = 0.8
 const ENDPOINT_SILENCE_MS = 2000
 const PLAYBACK_GRACE_MS = 500
 const PLAYBACK_TAIL_MS = 250
+const MIN_SPEECH_RMS = 0.0012
+const INITIAL_NOISE_RMS = 0.0005
 
 /** Pure VAD state machine. `rms` is the Float32 audio frame RMS. */
 export function createVoiceVad({ now = () => performance.now(), onCandidate = () => {},
   onSpeechStart = () => {}, onSpeechEnd = () => {} }: VoiceVadOptions = {}) {
   let calibrationMs = 0
   let calibrationTotal = 0
-  let noiseFloor = 0.02
+  let noiseFloor = INITIAL_NOISE_RMS
   let window: Array<{ durationMs: number; above: boolean }> = []
   let windowMs = 0
   let candidate = false
@@ -28,9 +30,9 @@ export function createVoiceVad({ now = () => performance.now(), onCandidate = ()
   let playbackTailUntil = -Infinity
 
   function threshold(at: number) {
-    const ordinary = Math.min(0.37, Math.max(0.075, noiseFloor * 3.5))
+    const ordinary = Math.min(0.04, Math.max(MIN_SPEECH_RMS, noiseFloor * 2.2))
     if (!playback && at >= playbackTailUntil) return ordinary
-    return Math.min(0.37, Math.max(0.14, noiseFloor * 3.5))
+    return Math.min(0.08, Math.max(0.015, noiseFloor * 3.5))
   }
   function addWindow(durationMs: number, above: boolean) {
     window.push({ durationMs, above })
@@ -45,7 +47,7 @@ export function createVoiceVad({ now = () => performance.now(), onCandidate = ()
   function reset() {
     calibrationMs = 0
     calibrationTotal = 0
-    noiseFloor = 0.02
+    noiseFloor = INITIAL_NOISE_RMS
     window = []
     windowMs = 0
     candidate = false
@@ -58,17 +60,16 @@ export function createVoiceVad({ now = () => performance.now(), onCandidate = ()
   function feed(rms: number, durationMs: number) {
     if (!Number.isFinite(rms) || rms < 0 || !Number.isFinite(durationMs) || durationMs <= 0) return
     const at = now()
-    const level = Math.min(1, rms * 128 / 42)
     const activePlaybackThreshold = playback || at < playbackTailUntil
     const playbackGrace = playback && at - playbackStartedAt < PLAYBACK_GRACE_MS
-    const above = !playbackGrace && level >= threshold(at)
+    const above = !playbackGrace && rms >= threshold(at)
 
     if (!speaking && !activePlaybackThreshold) {
       if (calibrationMs < CALIBRATION_MS) {
         // Do not learn speech as the ambient floor during the initial calibration window.
-        if (level < 0.075) { calibrationTotal += level * durationMs; calibrationMs += durationMs }
+        if (rms < MIN_SPEECH_RMS) { calibrationTotal += rms * durationMs; calibrationMs += durationMs }
         if (calibrationMs >= CALIBRATION_MS) noiseFloor = calibrationTotal / calibrationMs
-      } else if (!above) noiseFloor = noiseFloor * 0.98 + level * 0.02
+      } else if (!above) noiseFloor = noiseFloor * 0.98 + rms * 0.02
     }
 
     addWindow(durationMs, above)

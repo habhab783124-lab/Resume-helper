@@ -6,7 +6,32 @@ import type { VoiceContext } from './voiceContracts.ts'
 
 class FakeTrack extends EventTarget {
   stopped = false
+  muted = false
   stop() { this.stopped = true }
+}
+function fakeClock() {
+  let now = 0, nextId = 0
+  const pending = new Map<number, { due: number; callback: () => void }>()
+  return {
+    now: () => now,
+    setTimeout: ((callback: () => void, delay: number) => {
+      const id = ++nextId
+      pending.set(id, { due: now + delay, callback })
+      return id
+    }) as unknown as typeof setTimeout,
+    clearTimeout: ((id: number) => { pending.delete(id) }) as unknown as typeof clearTimeout,
+    advance(ms: number) {
+      const until = now + ms
+      while (true) {
+        const next = [...pending].filter(([, task]) => task.due <= until).sort((a, b) => a[1].due - b[1].due)[0]
+        if (!next) break
+        now = next[1].due
+        pending.delete(next[0])
+        next[1].callback()
+      }
+      now = until
+    },
+  }
 }
 class FakeStream {
   track = new FakeTrack()
@@ -134,6 +159,50 @@ test('long silence never creates an uploadable segment or stops capture', async 
   assert.equal(stream.track.stopped, false)
   await capture.dispose()
   assert.equal(stream.track.stopped, true)
+})
+
+test('silent audio pipeline exits capture instead of claiming to listen forever', async () => {
+  const clock = fakeClock(), errors: string[] = [], states: boolean[] = []
+  const { capture, node, stream } = await startedCapture({ clock, onError: message => errors.push(message),
+    onState: state => states.push(state.captureActive) })
+  clock.advance(3500)
+  deliver(node, 0, 0)
+  clock.advance(3500)
+  assert.equal(errors.length, 0)
+  clock.advance(600)
+  assert.match(errors[0] || '', /音频|麦克风/)
+  assert.equal(states.at(-1), false)
+  assert.equal(stream.track.stopped, true)
+  await capture.dispose()
+})
+
+test('a persistently muted microphone reports failure even while silence frames arrive', async () => {
+  const clock = fakeClock(), errors: string[] = []
+  const { capture, node, stream } = await startedCapture({ clock, onError: message => errors.push(message) })
+  stream.track.muted = true
+  stream.track.dispatchEvent(new Event('mute'))
+  for (let sequence = 0; sequence < 3; sequence++) {
+    clock.advance(1000)
+    deliver(node, sequence, sequence * 20)
+  }
+  assert.match(errors[0] || '', /麦克风/)
+  assert.equal(stream.track.stopped, true)
+  await capture.dispose()
+})
+
+test('brief microphone mute recovers without interrupting capture', async () => {
+  const clock = fakeClock(), errors: string[] = []
+  const { capture, node, stream } = await startedCapture({ clock, onError: message => errors.push(message) })
+  stream.track.muted = true
+  stream.track.dispatchEvent(new Event('mute'))
+  clock.advance(1000)
+  stream.track.muted = false
+  stream.track.dispatchEvent(new Event('unmute'))
+  deliver(node, 0, 0)
+  clock.advance(2000)
+  assert.deepEqual(errors, [])
+  assert.equal(stream.track.stopped, false)
+  await capture.dispose()
 })
 
 test('continuous speech is split at the 30 second WAV limit and capture remains active', async () => {

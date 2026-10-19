@@ -43,7 +43,10 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
   let lastAutoRead = ''
   let disposed = false
   const emit = () => { state.segments = queue.snapshot(); onChange({ ...state, context: state.context && { ...state.context }, countdown: state.countdown && { ...state.countdown }, segments: [...state.segments], appliedSegmentIds: new Set(state.appliedSegmentIds) }) }
-  const queue = createSpeechQueue({ api, getContext: () => state.context, onApplied: segment => applySegment(segment), onFailure: (failure, segment) => { state.failure = failure; state.phase = 'PAUSED'; onFailure(failure); emit() }, clock, idFactory })
+  const queue = createSpeechQueue({ api, getContext: () => state.context, onApplied: segment => applySegment(segment), onFailure: failure => {
+    state.failure = failure; state.phase = 'PAUSED'; onFailure(failure); emit()
+    void pause('transcription')
+  }, clock, idFactory })
 
   function clearCountdown() { if (countdownTimer !== null) clock.clearTimeout(countdownTimer); countdownTimer = null; state.countdown = null }
   function fail(code: string, message: string, retryable = false) { state.failure = { code, message, retryable }; state.phase = 'ERROR'; onFailure(state.failure); emit() }
@@ -173,6 +176,15 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
     if (getQuestionKind() === 'ALGORITHM') { void pause('algorithm') } else maybeReview()
   }
 
+  function onCaptureError(message: string) {
+    if (disposed) return
+    const previousEpoch = epoch
+    const report = () => {
+      if (!disposed && epoch === previousEpoch + 1) fail('MICROPHONE', message)
+    }
+    void pause('microphone').then(report, report)
+  }
+
   async function start() {
     if (disposed) return
     if (state.phase !== 'OFF' && state.phase !== 'PAUSED' && state.phase !== 'ERROR') return
@@ -189,7 +201,7 @@ export function useInterviewVoiceConversation({ api, conversation, getScope, get
       if (disposed || !sameVoiceContext(state.context, context)) return
       capture = captureFactory({ audioContext, workletUrl, getBufferBudget: captureBudget,
         onCandidate: () => { clearCountdown(); state.phase = 'LISTENING'; emit() }, onSegment: onCaptured, onState: onCaptureState,
-        onError: (message: string) => fail('MICROPHONE', message) })
+        onError: onCaptureError })
       const thisPlayer = ++playerGeneration
       player = playerFactory({ audioContext, onProgress: progress => { if (thisPlayer === playerGeneration) onPlayerProgress(progress) }, onDrained: id => { if (thisPlayer === playerGeneration) onPlayerDrained(id) } })
       const thisSocket = ++socketGeneration

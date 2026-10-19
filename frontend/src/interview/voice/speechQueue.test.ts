@@ -62,6 +62,43 @@ test('retains failed audio, explicit retry changes request identity, and pause a
   queue.dispose()
 })
 
+test('a temporary 502 is retried once with a new request ID before applying the transcript', async () => {
+  const requests: string[] = []; const applied: string[] = []; const errors: string[] = []
+  const queue = createSpeechQueue({
+    api: { transcribe: async (_id, request) => {
+      requests.push(request.requestId)
+      if (requests.length === 1) throw Object.assign(new Error('语音服务暂时不可用，请重试'), { status: 502 })
+      return { sessionId: 's1', questionId: 'q1', requestId: request.requestId, text: '回答', durationMs: 1000 }
+    } },
+    getContext: () => context, onApplied: segment => applied.push(segment.text),
+    onFailure: failure => errors.push(failure.message),
+    idFactory: (() => { let id = 0; return () => `id-${++id}` })(),
+  })
+  queue.enqueue(captured())
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(requests.length, 2)
+  assert.notEqual(requests[0], requests[1])
+  assert.deepEqual(applied, ['回答'])
+  assert.deepEqual(errors, [])
+  queue.dispose()
+})
+
+test('repeated 502 keeps the audio for explicit retry and reports the backend message', async () => {
+  let calls = 0
+  const queue = createSpeechQueue({
+    api: { transcribe: async () => { calls++; throw Object.assign(new Error('语音服务暂时不可用，请重试'), { status: 502 }) } },
+    getContext: () => context, onApplied: () => {},
+  })
+  const id = queue.enqueue(captured())
+  await new Promise(resolve => setTimeout(resolve, 0))
+  const segment = queue.snapshot().find(item => item.segmentId === id)!
+  assert.equal(calls, 2)
+  assert.equal(segment.state, 'FAILED')
+  assert.equal(segment.failure?.message, '语音服务暂时不可用，请重试')
+  assert.ok(segment.audio)
+  queue.dispose()
+})
+
 test('rejects response identity mismatch and limits queued audio to three segments', async () => {
   const gate = deferred<any>()
   const queue = createSpeechQueue({ api: { transcribe: () => gate.promise }, getContext: () => context,

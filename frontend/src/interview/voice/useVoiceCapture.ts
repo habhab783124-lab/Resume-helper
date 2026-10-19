@@ -4,6 +4,11 @@ import { createVoiceVad } from './voiceVad.ts'
 import { encodeMonoWav, MAX_WAV_BYTES, MAX_WAV_SECONDS, WAV_HEADER_BYTES } from './wavAudio.ts'
 
 type Clock = { now(): number; setTimeout: typeof setTimeout; clearTimeout: typeof clearTimeout }
+const defaultClock: Clock = {
+  now: () => performance.now(),
+  setTimeout: globalThis.setTimeout.bind(globalThis),
+  clearTimeout: globalThis.clearTimeout.bind(globalThis),
+}
 type CaptureState = { captureActive: boolean; speechActive: boolean; captureCandidate: boolean; retainedBytes: number }
 type BufferBudget = { remainingBytes: number; freeSegmentSlots: number; remainingAnswerMs: number }
 export type CaptureOptions = {
@@ -25,10 +30,12 @@ type ActiveSegment = { context: VoiceContext; sampleRate: number; firstSample: n
 const PRE_ROLL_MS = 1000
 const MAX_ANSWER_MS = 120_000
 const FRAME_BUDGET_BYTES = 4096
+const FRAME_TIMEOUT_MS = 4000
+const MUTE_TIMEOUT_MS = 2500
 
 /** One microphone and one worklet own all capture, VAD, pre-roll, and segment boundaries. */
 export function useVoiceCapture({ audioContext, mediaDevices = globalThis.navigator?.mediaDevices,
-  workletUrl, clock = { now: () => performance.now(), setTimeout, clearTimeout },
+  workletUrl, clock = defaultClock,
   getBufferBudget = () => ({ remainingBytes: MAX_WAV_BYTES, freeSegmentSlots: 3, remainingAnswerMs: MAX_ANSWER_MS }),
   onCandidate = () => {}, onSegment = () => {}, onState = () => {}, onError = () => {},
   WorkletNode = globalThis.AudioWorkletNode }: CaptureOptions) {
@@ -55,6 +62,8 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
   let stopPartial: CapturedSegment | null = null
   let keepPartialDuringStop = false
   let candidateTimer: ReturnType<typeof setTimeout> | null = null
+  let frameTimer: ReturnType<typeof setTimeout> | null = null
+  let muteTimer: ReturnType<typeof setTimeout> | null = null
   const vad = createVoiceVad({ now: clock.now,
     onCandidate: () => {
       captureCandidate = true
@@ -79,11 +88,32 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
   function closeTracks(target: MediaStream | null) {
     target?.getTracks().forEach(track => { try { track.stop() } catch { /* Device may already be closed. */ } })
   }
+  function clearFrameTimer() {
+    if (frameTimer !== null) clock.clearTimeout(frameTimer)
+    frameTimer = null
+  }
+  function clearMuteTimer() {
+    if (muteTimer !== null) clock.clearTimeout(muteTimer)
+    muteTimer = null
+  }
+  function armMuteTimer() {
+    clearMuteTimer()
+    if (!active) return
+    muteTimer = clock.setTimeout(() => {
+      muteTimer = null
+      if (active) failCapture('麦克风暂时无法提供声音，已暂停语音。请检查输入设备后重新开启。')
+    }, MUTE_TIMEOUT_MS)
+  }
+  function armFrameTimer() {
+    clearFrameTimer()
+    if (!active) return
+    frameTimer = clock.setTimeout(() => {
+      frameTimer = null
+      if (active) failCapture('麦克风没有持续传来音频，已暂停语音。请检查输入设备后重新开启。')
+    }, FRAME_TIMEOUT_MS)
+  }
   function failCapture(message = '') {
-    active = false
-    worklet?.port.postMessage({ type: 'stop' })
-    closeTracks(stream)
-    stream = null
+    detach(false)
     if (message) onError(message)
     publish()
   }
@@ -156,6 +186,7 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
     }
   }
   function handleFrame(frame: CaptureFrame) {
+    if (!active) return
     if (frame.generation !== workletGeneration) return
     if (frame.sequence !== expectedSequence || frame.firstSample !== expectedFirstSample
         || frame.sampleRate !== audioContext.sampleRate || frame.sampleCount * 2 !== frame.pcm.byteLength) {
@@ -171,6 +202,7 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
     if (priorSegment || speechActive) appendToSegment(samples, frame.firstSample, frame.sampleRate)
     vad.feed(frame.rms, frame.sampleCount * 1000 / frame.sampleRate)
     worklet?.port.postMessage({ type: 'frame.ack', sequence: frame.sequence })
+    armFrameTimer()
     publish()
   }
   function handleEvent(event: CaptureEvent) {
@@ -193,15 +225,17 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
       worklet!.port.postMessage({ type: 'seal', barrierId: id })
     })
   }
-  function detach() {
+  function detach(emitState = true) {
     active = false
+    clearFrameTimer()
+    clearMuteTimer()
     worklet?.port.postMessage({ type: 'stop' })
     if (worklet) { worklet.port.onmessage = null; try { worklet.disconnect() } catch { } }
     try { source?.disconnect() } catch { }
     try { silentGain?.disconnect() } catch { }
     source = null; worklet = null; silentGain = null
     closeTracks(stream); stream = null
-    publish()
+    if (emitState) publish()
   }
   async function start(nextContext: VoiceContext) {
     if (disposed) return
@@ -222,7 +256,10 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
     if (my !== generation || disposed) { closeTracks(requested); return }
     stream = requested
     try { await audioContext.audioWorklet.addModule(workletUrl) }
-    catch { if (my === generation) { onError('连续语音模块加载失败，请改用文字回答。'); detach() }
+    catch (cause) { if (my === generation) {
+      console.error('[interview voice] AudioWorklet module load failed', cause)
+      detach(); onError('连续语音模块加载失败，请改用文字回答。')
+    }
       else closeTracks(requested); return }
     if (my !== generation || disposed) { closeTracks(requested); return }
     try {
@@ -235,15 +272,25 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
       source.connect(node); node.connect(silentGain); silentGain.connect(audioContext.destination)
       worklet = node
       active = true
-      requested.getAudioTracks().forEach(track => track.addEventListener('ended', () => {
-        onError('麦克风已断开，请重新连接或改用文字回答。')
-        failCapture()
-      }, { once: true }))
+      armFrameTimer()
+      requested.getAudioTracks().forEach(track => {
+        track.addEventListener('ended', () => {
+          if (stream === requested && active) failCapture('麦克风已断开，请重新连接或改用文字回答。')
+        }, { once: true })
+        track.addEventListener('mute', () => { if (stream === requested && active) armMuteTimer() })
+        track.addEventListener('unmute', () => { if (stream === requested) clearMuteTimer() })
+        if (track.muted) armMuteTimer()
+      })
       publish()
-    } catch { if (my === generation) { onError('录音启动失败，请改用文字回答。'); detach() } }
+    } catch (cause) { if (my === generation) {
+      console.error('[interview voice] microphone capture start failed', cause)
+      detach(); onError('录音启动失败，请改用文字回答。')
+    } }
   }
   async function seal() {
     if (!active) return
+    clearFrameTimer()
+    clearMuteTimer()
     await sealWorklet()
     finishCurrent(true)
     if (candidateTimer !== null) clock.clearTimeout(candidateTimer)
@@ -262,11 +309,15 @@ export function useVoiceCapture({ audioContext, mediaDevices = globalThis.naviga
     workletGeneration += 1
     worklet.port.postMessage({ type: 'resume' })
     active = true
+    armFrameTimer()
+    if (stream?.getAudioTracks().some(track => track.muted)) armMuteTimer()
     publish()
   }
   function setPlayback(value: boolean) { vad.setPlayback(value) }
   async function stop(options: { keepPartial: boolean }): Promise<CapturedSegment | null> {
     const my = ++generation
+    clearFrameTimer()
+    clearMuteTimer()
     keepPartialDuringStop = options.keepPartial
     if (candidateTimer !== null) clock.clearTimeout(candidateTimer)
     candidateTimer = null

@@ -18,6 +18,7 @@ const statusText = () => {
   const state = props.realtimeState
   if (!state || state.phase === 'OFF') return ''
   if (state.phase === 'REVIEW' && state.countdown) return `${Math.max(0, Math.ceil((state.countdown.deadlineAt - now.value) / 1000))} 秒后发送 · 继续说话可取消`
+  if (state.phase === 'LISTENING' && state.speechActive) return '已检测到讲话，停顿后转写'
   return ({ STARTING: '正在连接', SPEAKING: '正在朗读题目', LISTENING: '正在聆听', TRANSCRIBING: '正在转写', REVIEW: '回答已就绪', SUBMITTING: '正在发送', WAITING_QUESTION: '正在准备下一题', PAUSED: '语音已暂停', ERROR: state.failure?.message || '语音遇到问题' })[state.phase] || ''
 }
 function onInput(event) { emit('update:modelValue', event.target.value) }
@@ -63,6 +64,10 @@ function onAudio(element) { audio.value = element; emit('audio', element) }
         <span v-if="realtimeState?.segments?.some(segment => segment.state === 'FAILED')">有语音片段未能转写</span><button v-if="realtimeState?.segments?.some(segment => segment.state === 'FAILED')" type="button" @click="failureOpen = true">处理</button>
       </div>
     </form>
+    <div v-if="!continuousActive" class="composer-voice-choice">
+      <span>麦克风按钮：{{ !speechAvailable ? '手动录音转写' : kind === 'ALGORITHM' ? '连续语音，算法题需手动发送' : '连续语音，停顿后自动转写并发送' }}</span>
+      <button v-if="speechAvailable" type="button" :disabled="locked || pending != null || !voice.asrEnabled" @click="manualOpen = true">改用手动录音</button>
+    </div>
     <div v-if="failureOpen" class="manual-voice-backdrop" @click.self="failureOpen = false">
       <section class="manual-voice-dialog" role="dialog" aria-modal="true" aria-label="处理未转写语音">
         <button class="manual-close" type="button" aria-label="关闭" @click="failureOpen = false">×</button>
@@ -118,6 +123,9 @@ function onAudio(element) { audio.value = element; emit('audio', element) }
 .composer-inline-status { order: 4; flex: 0 0 100%; display: flex; align-items: center; justify-content: center; flex-wrap: wrap; gap: 3px 10px; padding: 0 0 2px; color: #718078; font-size: 11px; line-height: 1.4; }
 .composer-inline-status.has-failed-segment { color: #995444; }
 .composer-inline-status button { padding: 0; border: 0; background: transparent; color: #315e49; font: inherit; cursor: pointer; }
+.composer-voice-choice { display: flex; justify-content: flex-end; gap: 8px; padding: 4px 12px 0; color: #718078; font-size: 11px; }
+.composer-voice-choice button { padding: 0; border: 0; background: transparent; color: #315e49; font: inherit; text-decoration: underline; cursor: pointer; }
+.composer-voice-choice button:disabled { opacity: .45; cursor: default; }
 .interview-composer textarea:focus { outline: 0; }
 .composer-icon-button, .composer-send-button, .composer-expand { display: grid; place-items: center; flex: none; width: 40px; height: 40px; padding: 0; border: 0; border-radius: 50%; cursor: pointer; }
 .composer-icon-button { color: #315e49; background: #edf3ee; }

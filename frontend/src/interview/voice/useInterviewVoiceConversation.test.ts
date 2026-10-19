@@ -12,7 +12,7 @@ class FakeClock {
 }
 
 function harness({ transcribe = async (_id: string, request: { questionId: string; requestId: string; file: Blob }, _signal?: AbortSignal) => ({ sessionId: 's1', questionId: request.questionId, requestId: request.requestId, text: '识别内容', durationMs: 1 }), apiOverrides = {} as Record<string, unknown> } = {}) {
-  const clock = new FakeClock(); const state = { draft: '', sent: [] as any[], context: null as VoiceContext | null, captureStarts: 0, captureDisposals: 0, playedFrames: 0 }
+  const clock = new FakeClock(); const state = { draft: '', sent: [] as any[], context: null as VoiceContext | null, captureStarts: 0, captureStops: 0, captureDisposals: 0, playedFrames: 0 }
   let captureOptions: any; let socketOptions: any; let sealCapture: () => Promise<void> = async () => {}; let connectSocket: () => Promise<void> = async () => {}
   const session = { sessionId: 's1', status: 'ACTIVE' as const, currentQuestion: { questionId: 'q1' } as { questionId: string } | null, pendingAnswer: null,
     revision: 1, stateVersion: 1, plan: { mode: 'FULL' as const }, generation: null, turns: [{ questionId: 'q1', question: '题目', answer: null }] }
@@ -26,7 +26,7 @@ function harness({ transcribe = async (_id: string, request: { questionId: strin
     conversation: { readSession: () => session, readDraft: () => state.draft, readPendingSubmission: () => null,
       writeDraft: text => { state.draft = text }, sendVoice: async payload => { state.sent.push(payload); return { outcome: 'SAVED', questionId: 'q1', submissionId: payload.submissionId, generation: 'NONE' } } },
     getScope: () => 'scope', getQuestionKind: () => 'MAIN', audioContextFactory: () => ({ resume: async () => {}, close: async () => {} } as unknown as AudioContext), workletUrl: '/voice.worklet.js', clock,
-    captureFactory: options => { captureOptions = options; return { start: async context => { state.captureStarts++; state.context = context }, seal: () => sealCapture(), resume: () => {}, setPlayback: () => {}, stop: async () => null, dispose: async () => { state.captureDisposals++ } } },
+    captureFactory: options => { captureOptions = options; return { start: async context => { state.captureStarts++; state.context = context }, seal: () => sealCapture(), resume: () => {}, setPlayback: () => {}, stop: async () => { state.captureStops++; return null }, dispose: async () => { state.captureDisposals++ } } },
     socketFactory: options => { socketOptions = options; return { connect: () => connectSocket(), start: () => {}, cancel: () => {}, ack: () => {}, isReady: () => true, close: () => {} } },
     playerFactory: () => ({ start: () => {}, enqueue: () => { state.playedFrames++ }, end: () => {}, stop: () => {}, dispose: () => {} }),
     idFactory: (() => { let id = 0; return () => `id-${++id}` })(),
@@ -38,6 +38,36 @@ function harness({ transcribe = async (_id: string, request: { questionId: strin
     setSealCapture: (fn: () => Promise<void>) => { sealCapture = fn } }
 }
 const segment = (context: VoiceContext): CapturedSegment => ({ context: { ...context }, sourceSampleRate: 48000, sampleCount: 100, audio: new Blob(['audio'], { type: 'audio/wav' }) })
+
+test('microphone capture failure closes the voice ticket and reports a recoverable error', async () => {
+  const closed: string[] = []
+  const h = harness({ apiOverrides: {
+    closeVoiceSession: async (_id: string, voiceSessionId: string) => { closed.push(voiceSessionId); return {} },
+  } })
+  await h.controller.start()
+  h.captureOptions.onError('麦克风没有持续传来音频，已暂停语音。')
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(h.controller.state.phase, 'ERROR')
+  assert.equal(h.controller.state.transport, 'CLOSED')
+  assert.match(h.controller.state.failure?.message || '', /麦克风没有持续传来音频/)
+  assert.deepEqual(closed, ['v1'])
+})
+
+test('transcription failure pauses microphone capture and retains the failed segment', async () => {
+  const closed: string[] = []
+  const h = harness({
+    transcribe: async () => { throw Object.assign(new Error('语音服务暂时不可用，请重试'), { status: 502 }) },
+    apiOverrides: { closeVoiceSession: async (_id: string, voiceSessionId: string) => { closed.push(voiceSessionId); return {} } },
+  })
+  await h.controller.start()
+  h.captureOptions.onSegment(segment(h.state.context!))
+  await new Promise(resolve => setTimeout(resolve, 0))
+  assert.equal(h.controller.state.phase, 'PAUSED')
+  assert.equal(h.state.captureStops, 1)
+  assert.deepEqual(closed, ['v1'])
+  assert.equal(h.controller.state.segments[0]?.state, 'FAILED')
+  assert.ok(h.controller.state.segments[0]?.audio)
+})
 
 test('a transcript starts a three second preview; candidate speech cancels it and a later preview submits once', async () => {
   const h = harness(); await h.controller.start()

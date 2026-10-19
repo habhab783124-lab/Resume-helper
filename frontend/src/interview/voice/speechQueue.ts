@@ -14,6 +14,10 @@ const TRANSCRIPTION_DEADLINE_MS = 90_000
 function failure(message = '语音转写失败，请重试。'): VoiceFailure {
   return { code: 'TRANSCRIPTION_FAILED', message, retryable: true }
 }
+function temporaryServiceFailure(cause: unknown): boolean {
+  const status = (cause as { status?: unknown } | null)?.status
+  return status === 502 || status === 503 || status === 504
+}
 
 export function createSpeechQueue({
   api,
@@ -64,7 +68,7 @@ export function createSpeechQueue({
     const context = { ...segment.context }
     const attempt = ++segment.attempt
     const operation = ++activeAttempt
-    const requestId = idFactory()
+    let requestId = idFactory()
     segment.requestId = requestId
     segment.state = 'TRANSCRIBING'
     segment.failure = null
@@ -79,10 +83,19 @@ export function createSpeechQueue({
     })
     try {
       const audio = segment.audio
-      const response = await Promise.race([
+      const send = () => Promise.race([
         api.transcribe(context.sessionId, { questionId: context.questionId, requestId, file: audio }, controller.signal),
         deadline,
       ])
+      let response: TranscriptionResult
+      try { response = await send() }
+      catch (cause) {
+        if (!temporaryServiceFailure(cause) || disposed || paused || controller.signal.aborted
+            || operation !== activeAttempt || !sameVoiceContext(getContext(), context)) throw cause
+        requestId = idFactory()
+        segment.requestId = requestId
+        response = await send()
+      }
       if (disposed || paused || operation !== activeAttempt || segment.attempt !== attempt
           || !sameVoiceContext(getContext(), context)) return
       if (!response || response.sessionId !== context.sessionId || response.questionId !== context.questionId
@@ -95,12 +108,13 @@ export function createSpeechQueue({
       segment.audio = null
       segment.failure = null
       onApplied({ ...segment, context: { ...segment.context } })
-    } catch {
+    } catch (cause) {
       if (disposed || operation !== activeAttempt || segment.attempt !== attempt) return
       if (paused || controller.signal.aborted && activeController !== controller) return
       if (controller.signal.aborted && paused) return
       segment.state = 'FAILED'
-      segment.failure = failure()
+      segment.failure = failure(cause instanceof Error && typeof (cause as { status?: unknown }).status === 'number'
+        ? cause.message : undefined)
       onFailure(segment.failure, { ...segment, context: { ...segment.context } })
     } finally {
       if (timeout !== null) clock.clearTimeout(timeout)
