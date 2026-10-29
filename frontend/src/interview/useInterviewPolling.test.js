@@ -77,3 +77,16 @@ test('getMaxDelayMs keeps the existing poll loop at one second during voice and 
   assert.equal(calls, 5)
   poll.stop(); await work
 })
+
+test('expired authentication stops polling rather than waiting for network recovery', async () => {
+  const clock = fakeClock(); const errors = []
+  const poll = useInterviewPolling({ api: { async getSession() { throw Object.assign(new Error('登录已过期'), { status: 401 }) } }, clock, onError: error => errors.push(error) })
+  const work = poll.start('s1')
+  await new Promise(resolve => setImmediate(resolve))
+  const stopped = !poll.running.value
+  const timerCount = clock.timers.size
+  poll.stop(); await work
+  assert.equal(stopped, true)
+  assert.equal(timerCount, 0)
+  assert.equal(errors[0].status, 401)
+})

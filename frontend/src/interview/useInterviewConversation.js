@@ -11,6 +11,7 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
   const error = ref('')
   const submission = ref(null)
   const active = computed(() => session.value?.status === 'ACTIVE')
+  let generationError = ''
   let epoch = 0
   let inFlight = null
   let inFlightPayload = null
@@ -44,6 +45,14 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
     else if (generation === 'RETRY_WAIT') phase.value = 'RETRY_WAIT'
     else if (generationStates.has(generation)) phase.value = 'GENERATING'
     else phase.value = value.status === 'ACTIVE' ? 'ANSWERING' : 'PREPARING'
+    if (generation === 'FAILED') {
+      generationError = typeof value.generation?.failure?.message === 'string'
+        ? value.generation.failure.message : '题目生成失败，可以单独重试生成。'
+      error.value = generationError
+    } else if (generationError) {
+      if (error.value === generationError) error.value = ''
+      generationError = ''
+    }
     voice?.syncContext?.()
     return true
   }
@@ -203,7 +212,7 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
     try {
       const value = await api.skip(session.value.sessionId, { questionId, requestId: ids(), expectedRevision: session.value.revision }, controller.signal)
       if (!applySession(value, expectedEpoch)) return false
-      if (value.plan?.mode === 'QUICK') return true
+      if (value.status === 'FINISHED' || value.plan?.mode === 'QUICK') return true
       return runGeneration(expectedEpoch, controller.signal)
     } catch (cause) {
       if (expectedEpoch === epoch) { phase.value = 'ANSWERING'; error.value = cause?.message || '跳过题目失败，请重试。' }

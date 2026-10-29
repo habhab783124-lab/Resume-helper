@@ -78,6 +78,40 @@ class InterviewSkipTest {
         assertEquals(skipResult.get() == null ? 0 : 1, finalState.progress().skippedRoots());
         assertNull(finalState.currentQuestion());
     }
+    @Test void skippingFinalMainWithoutSpecialtyFinishesAndCanBeReplayed() {
+        var service = service(false); var session = open(service, plan(1), "last-main-start");
+        String id = session.currentQuestion().questionId();
+        var skipped = service.closeRoot("alice", session.sessionId(), id, "last-main-skip", session.revision());
+        assertEquals("FINISHED", skipped.status());
+        assertNull(skipped.currentQuestion());
+        assertEquals(1, skipped.progress().skippedRoots());
+        assertNull(skipped.turns().get(0).answer());
+        assertEquals(skipped.revision(), service.closeRoot("alice", session.sessionId(), id,
+                "last-main-skip", session.revision()).revision());
+    }
+
+    @Test void skippingFinalSpecialtyFinishesWithoutInventingAnAnswer() {
+        for (var mode : InterviewPlan.Mode.values()) {
+            var base = plan(1);
+            var plan = new InterviewPlan("experience-v1", mode, 1, 2, 1, 1, base.level(), base.careerStage(),
+                    base.targetRole(), "", new InterviewPlan.Specialty(InterviewPlan.SpecialtyKind.CASE_STUDY, "案例", "测试"),
+                    base.coverage(), base.source(), "简历", "fp", List.of());
+            var service = service(false); var session = open(service, plan, "specialty-start");
+            session = service.closeRoot("alice", session.sessionId(), session.currentQuestion().questionId(), "main-skip", session.revision());
+            assertEquals("ACTIVE", session.status());
+            session = advance(service, session, "specialty-next");
+            String id = session.currentQuestion().questionId();
+            assertEquals(InterviewService.Kind.CASE_STUDY, session.questionMetadata().get(id).kind());
+            var skipped = service.closeRoot("alice", session.sessionId(), id, "specialty-skip", session.revision());
+            assertEquals("FINISHED", skipped.status());
+            assertNull(skipped.currentQuestion());
+            assertTrue(skipped.closedRootIds().contains(id));
+            assertTrue(skipped.turns().stream().allMatch(turn -> turn.answer() == null));
+            assertEquals(skipped.revision(), service.closeRoot("alice", session.sessionId(), id,
+                    "specialty-skip", session.revision()).revision());
+        }
+    }
+
     private static void await(CountDownLatch gate) {
         try { gate.await(); } catch (InterruptedException interrupted) { Thread.currentThread().interrupt(); throw new RuntimeException(interrupted); }
     }
@@ -96,6 +130,9 @@ class InterviewSkipTest {
     }
     private static InterviewService service(boolean followUp) {
         var agent = new InterviewAgent() {
+            @Override public InterviewQuestion prepareCase(InterviewSpecialty specialty, String role, InterviewPlan.Level level, AiClient ai, int timeout) {
+                return InterviewTestFixtures.contract("CORE", "INTERMEDIATE");
+            }
             @Override public InterviewQuestion preparePlannedOpening(String resume, InterviewPlan plan, AiClient ai, int timeout) { return InterviewTestFixtures.contract("CORE", "INTERMEDIATE"); }
             @Override public Proposal preparePlannedNext(String resume, String role, List<InterviewService.Turn> history, int total, int nextIndex, boolean allowFollowUp, InterviewPlan plan, AiClient ai, int timeout) {
                 return followUp && allowFollowUp ? new Proposal(InterviewTestFixtures.contract("CORE", "INTERMEDIATE"), true, null)

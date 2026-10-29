@@ -3,7 +3,12 @@ package com.shijie.resumehelper.job.config;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.http.converter.HttpMessageConverter;
 import org.springframework.http.converter.json.MappingJackson2HttpMessageConverter;
-import org.springframework.web.servlet.config.annotation.CorsRegistry;
+import org.springframework.boot.web.servlet.FilterRegistrationBean;
+import org.springframework.context.annotation.Bean;
+import org.springframework.core.Ordered;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+import org.springframework.web.filter.CorsFilter;
 import org.springframework.web.servlet.config.annotation.WebMvcConfigurer;
 
 import java.nio.charset.StandardCharsets;
@@ -33,20 +38,26 @@ public class WebMvcConfiguration implements WebMvcConfigurer {
      *
      * <p>允许的请求头包含用户自带 token 用到的三个自定义头，否则浏览器预检会失败。
      */
-    @Override
-    public void addCorsMappings(CorsRegistry registry) {
+    @Bean
+    public FilterRegistrationBean<CorsFilter> apiCorsFilter() {
         List<String> patterns = properties.getCors().getAllowedOriginPatterns();
         if (patterns.isEmpty()) {
             // 配置被清空时退回只放行本机，避免为了图方便写成 "*" 又把凭据一起放开
             patterns = List.of("http://localhost:*", "http://127.0.0.1:*");
         }
-        registry.addMapping("/api/**")
-                .allowedOriginPatterns(patterns.toArray(String[]::new))
-                .allowedMethods("GET", "POST", "PUT", "DELETE", "OPTIONS")
-                .allowedHeaders("*")
-                .exposedHeaders("X-AI-Model")
-                .allowCredentials(true)
-                .maxAge(3600);
+        CorsConfiguration cors = new CorsConfiguration();
+        cors.setAllowedOriginPatterns(patterns);
+        cors.setAllowedMethods(List.of("GET", "POST", "PUT", "DELETE", "OPTIONS"));
+        cors.setAllowedHeaders(List.of("*"));
+        cors.setExposedHeaders(List.of("X-AI-Model"));
+        cors.setAllowCredentials(true);
+        cors.setMaxAge(3600L);
+        var source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/api/**", cors);
+        // Authentication failures must retain CORS headers so the browser can read the 401.
+        var registration = new FilterRegistrationBean<>(new CorsFilter(source));
+        registration.setOrder(Ordered.HIGHEST_PRECEDENCE);
+        return registration;
     }
 
     /**

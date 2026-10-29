@@ -225,7 +225,7 @@ public class InterviewAgent {
                     "mainCount", mainCount, "specialtyPreference", request.specialtyPreference(),
                     "practiceTargets", request.practiceTargets(), "sourceSessionId", request.sourceSessionId(),
                     "resume", source.resumeText()));
-            JsonNode root = readObject(ai.withOutputBudget(2600).chat(system, user, 60), 14_000);
+            JsonNode root = readFencedObject(ai.withOutputBudget(2600).chat(system, user, 60), 14_000);
             JsonNode rawCoverage = root.path("coverage");
             if (!rawCoverage.isArray() || rawCoverage.isEmpty() || rawCoverage.size() > 6)
                 throw new IllegalArgumentException("考察方向无效");
@@ -238,9 +238,10 @@ public class InterviewAgent {
                 coverage.add(new InterviewPlan.Coverage(id, label));
             }
             JsonNode specialtyNode = root.path("specialty");
-            InterviewPlan.Specialty specialty = new InterviewPlan.Specialty(
-                    InterviewPlan.SpecialtyKind.valueOf(text(specialtyNode, "kind", 20)),
-                    text(specialtyNode, "focus", 200), text(specialtyNode, "reason", 500));
+            InterviewPlan.SpecialtyKind kind = InterviewPlan.SpecialtyKind.valueOf(text(specialtyNode, "kind", 20));
+            InterviewPlan.Specialty specialty = new InterviewPlan.Specialty(kind,
+                    planSpecialtyText(specialtyNode, "focus", 200, kind),
+                    planSpecialtyText(specialtyNode, "reason", 500, kind));
             int plannedCount = mainCount + (specialty.kind() == InterviewPlan.SpecialtyKind.NONE ? 0 : 1);
             return new InterviewPlan("experience-v1", request.mode(), mainCount, plannedCount,
                     request.mode() == InterviewPlan.Mode.QUICK ? 2 : 6,
@@ -368,7 +369,8 @@ public class InterviewAgent {
         prompt.append("\n本轮计划共").append(total).append("道主问题；下一主问题序号 ").append(nextMainIndex).append(" / ").append(total)
                 .append(allowFollowUp ? "。只可返回 kind=FOLLOW_UP 追问当前主问题；是否仍有追问额度由服务端校验。" : "。不得返回追问，服务端会推进下一主问题或结束计划。")
                 .append("只输出一道题的结构化契约，不生成专项题；专项题由服务端按冻结计划决定。");
-        if (plan != null) prompt.append("\n已确认的考察方向及不可变 ID（只选其中 ID）: ")
+        if (plan != null) prompt.append("\n必须在顶层 JSON 返回 coverageId 字符串字段，值只能选下列已确认 ID，不能返回中文标签代替 ID。")
+                .append("已确认的考察方向及不可变 ID: ")
                 .append(plan.coverage().stream().map(c -> c.id() + "=" + c.label()).collect(java.util.stream.Collectors.joining("；")));
         if (plan != null && !plan.practiceTargets().isEmpty()) {
             var target = plan.practiceTargets().get((nextMainIndex - 1) % plan.practiceTargets().size());
@@ -378,7 +380,7 @@ public class InterviewAgent {
         }
         try {
             String raw = ai.withOutputBudget(2400).chat(system, prompt.toString(), timeoutSeconds);
-            JsonNode node = readObject(raw, 12_000);
+            JsonNode node = readFencedObject(raw, 12_000);
             String kind = node.has("kind") ? text(node, "kind", 20) : "MAIN";
             if (!Set.of("MAIN", "FOLLOW_UP", "SPECIALTY").contains(kind)
                     || "SPECIALTY".equals(kind) && nextMainIndex != total + 1)
@@ -587,6 +589,25 @@ public class InterviewAgent {
     private static InterviewException invalidOutput(String message) {
         return new InterviewException(502, message,
                 new InterviewFailure(InterviewFailure.Code.INVALID_OUTPUT, true, message, null));
+    }
+
+    private static JsonNode readFencedObject(String raw, int limit) throws IOException {
+        if (raw != null && raw.length() <= limit) {
+            raw = raw.strip();
+            if (raw.startsWith("```json\n") && raw.endsWith("```"))
+                raw = raw.substring(8, raw.length() - 3).strip();
+            else if (raw.startsWith("```\n") && raw.endsWith("```"))
+                raw = raw.substring(4, raw.length() - 3).strip();
+        }
+        return readObject(raw, limit);
+    }
+
+    private static String planSpecialtyText(JsonNode node, String key, int limit, InterviewPlan.SpecialtyKind kind) {
+        if (kind != InterviewPlan.SpecialtyKind.NONE) return text(node, key, limit);
+        JsonNode value = node.path(key);
+        if (!value.isTextual() || value.textValue().strip().length() > limit)
+            throw new IllegalArgumentException("专项说明无效");
+        return value.textValue().strip();
     }
 
     private static JsonNode readObject(String raw, int limit) throws IOException {

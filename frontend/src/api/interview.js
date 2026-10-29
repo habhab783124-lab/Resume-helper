@@ -1,5 +1,5 @@
 import { withRequestDeadline } from './requestDeadline.ts'
-import { getAiSettings, getSpeechSettings, getLocalApiBaseUrl, getUserId as sharedUserId } from './requestContext.js'
+import { getAiSettings, getSpeechSettings, getLocalApiBaseUrl, getUserId as sharedUserId, getAuthToken } from './requestContext.js'
 
 const voiceWebSocketPath = '/api/interview-voice/ws'
 
@@ -13,8 +13,19 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
     return speechKey ? { 'X-Speech-Api-Key': speechKey } : {}
   }
 
+  function authHeaders() {
+    const token = getAuthToken()
+    return token ? { Authorization: `Bearer ${token}` } : {}
+  }
+
+  function notifyAuthExpired(reply) {
+    if (reply.status === 401) {
+      try { globalThis.dispatchEvent?.(new Event('auth-expired')) } catch { /* Non-browser callers may have no event target. */ }
+    }
+  }
+
   async function request(path, { method = 'GET', body, ai, textModel = false, signal, speech = false, timeoutMs } = {}) {
-    const headers = { 'X-User-Id': getUserId(), ...(speech ? speechHeaders() : {}) }
+    const headers = { 'X-User-Id': getUserId(), ...authHeaders(), ...(speech ? speechHeaders() : {}) }
     ai = textModel ? (ai ?? getAiSettings()) : {}
     if (ai.apiKey?.trim()) headers['X-AI-Api-Key'] = ai.apiKey.trim()
     if (ai.model?.trim()) headers['X-AI-Model'] = ai.model.trim()
@@ -28,6 +39,7 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
       const reply = await fetchImpl(`${root()}${path}`, {
         method, headers, body, credentials: 'include', signal: requestSignal,
       })
+      notifyAuthExpired(reply)
       let envelope
       try {
         envelope = await reply.json()
@@ -148,10 +160,11 @@ export function createInterviewApi({ baseUrl = '', fetchImpl = globalThis.fetch,
     async questionSpeech(id, questionId, signal) {
       const reply = await fetchImpl(`${root()}${sessionPath(id)}/questions/${encodeURIComponent(questionId)}/speech`, {
         method: 'POST',
-        headers: { 'X-User-Id': getUserId(), ...speechHeaders() },
+        headers: { 'X-User-Id': getUserId(), ...authHeaders(), ...speechHeaders() },
         credentials: 'include',
         signal,
       })
+      notifyAuthExpired(reply)
       if (!reply.ok) {
         let message
         try { message = (await reply.json()).message } catch { message = null }

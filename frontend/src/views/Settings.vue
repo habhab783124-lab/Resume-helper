@@ -1,7 +1,7 @@
 <script setup>
 import { computed, ref, watch } from 'vue'
 import { createInterviewApi } from '../api/interview.js'
-import { getAiSettings, setAiSettings, getSpeechSettings, setSpeechSettings, getLocalApiBaseUrl, setLocalApiBaseUrl } from '../api/requestContext.js'
+import { getAiSettings, setAiSettings, getSpeechSettings, setSpeechSettings, getLocalApiBaseUrl, setLocalApiBaseUrl, getAuthToken } from '../api/requestContext.js'
 
 const api = createInterviewApi({ baseUrl: import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '') })
 const configuredBaseUrl = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '')
@@ -41,7 +41,17 @@ async function checkConnection() {
   const timeout = window.setTimeout(() => controller.abort(), 5000)
 
   try {
-    const response = await fetch(`${address}/api/jobs/sources`, { signal: controller.signal })
+    const token = getAuthToken()
+    const response = await fetch(`${address}/api/jobs/sources`, {
+      signal: controller.signal,
+      headers: token ? { Authorization: `Bearer ${token}` } : {}
+    })
+    if (response.status === 401) {
+      connectedSources.value = 0
+      status.value = 'connected'
+      resultMessage.value = 'Java 服务已响应，但登录已失效或尚未登录，请重新登录后再检测。'
+      return
+    }
     if (!response.ok) throw new Error(`服务返回 HTTP ${response.status}`)
     const payload = await response.json()
     if (payload?.success !== true || !Array.isArray(payload.data)) throw new Error('服务响应格式不正确')
@@ -52,7 +62,7 @@ async function checkConnection() {
     status.value = 'disconnected'
     resultMessage.value = error?.name === 'AbortError'
       ? '连接超时。请确认 Java 服务已启动，并检查服务地址和端口。'
-      : '连接失败。请先在本机启动 Java 服务；如果服务已启动，请检查地址、端口和后端 CORS 配置。'
+      : '连接失败。请先在本机启动 Java 服务；如果服务已启动，请重新登录后再试，并检查地址、端口和后端 CORS 配置。'
     connectedSources.value = 0
   } finally {
     window.clearTimeout(timeout)

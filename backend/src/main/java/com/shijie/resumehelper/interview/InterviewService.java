@@ -571,16 +571,15 @@ public class InterviewService {
             throw new IllegalArgumentException("请求 ID 不能为空且不能超过 120 字");
         State state = find(owner, sessionId);
         synchronized (state) {
-            if (!"ACTIVE".equals(state.status)) throw new InterviewException(409, "面试已结束，请开始新的面试");
             String skipRequestKey = "skip-request:" + requestId;
             String previousQuestionId = state.submissionIds.get(skipRequestKey);
             if (previousQuestionId != null) {
                 if (!previousQuestionId.equals(questionId)) throw new InterviewException(409, "跳题请求 ID 已用于另一道题");
                 return state.snapshot();
             }
+            if (!"ACTIVE".equals(state.status)) throw new InterviewException(409, "面试已结束，请开始新的面试");
             Context requested = state.contexts.get(questionId);
             if (requested == null) throw new InterviewException(404, "题目不存在");
-            if (requested.kind().isSpecialty()) throw new InterviewException(409, "专项题不能作为主问题组跳过");
             String rootId = requested.kind() == Kind.FOLLOW_UP ? requested.parentQuestionId() : questionId;
             Turn rootTurn = state.turns.stream().filter(turn -> turn.questionId().equals(rootId)).findFirst().orElse(null);
             if (rootTurn == null) throw new InterviewException(404, "题目不存在");
@@ -605,6 +604,15 @@ public class InterviewService {
             if (state.generation != null && isActiveGeneration(state.generation.state()))
                 state.generation = withState(state.generation, InterviewSnapshot.GenerationState.CANCELLED,
                         new InterviewFailure(InterviewFailure.Code.INTERRUPTED, false, "题组已关闭", null));
+            boolean noSpecialtyRemaining = state.plan != null
+                    && state.plan.specialty().kind() == InterviewPlan.SpecialtyKind.NONE
+                    && state.progress().resolvedRoots() >= state.plan.mainCount();
+            if (requested.kind().isSpecialty() || noSpecialtyRemaining) {
+                state.status = "FINISHED";
+                state.finishReason = "COMPLETED";
+                state.currentQuestionId = null;
+                state.pending = null;
+            }
             state.revision++;
             persist(state, backup);
             return state.snapshot();

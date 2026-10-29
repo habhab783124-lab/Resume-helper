@@ -3,6 +3,12 @@ import { computed, ref, watch } from 'vue'
 const DEFAULT_PREFERENCES = Object.freeze({ mode: 'QUICK', mainCount: 5, level: 'STANDARD', careerStage: 'CAMPUS', specialtyPreference: 'AUTO' })
 const STORAGE_PREFIX = 'career-studio-interview-setup-v1'
 
+function planFailureMessage(failure, fallback) {
+  if (typeof failure === 'string' && failure.trim()) return failure
+  if (typeof failure?.message === 'string' && failure.message.trim()) return failure.message
+  return fallback
+}
+
 function validSource(value) {
   return value && ['MATERIAL', 'RESUME_VERSION'].includes(value.kind)
     && typeof value.id === 'string' && value.id.trim()
@@ -142,7 +148,7 @@ export function useInterviewSetup({ materialsApi = {}, resumeApi = {}, jobsApi =
       let value = await interviewApi.preparePlan({ source: source.value, targetRole: targetRole.value.trim(), jobDescription: jobDescription.value, careerStage: p.careerStage, level: p.level, mode: p.mode, mainCount: p.mode === 'QUICK' ? p.mainCount : 12, specialtyPreference: p.specialtyPreference, requestId: globalThis.crypto?.randomUUID?.() || `${Date.now()}-${Math.random()}` })
       while (value?.status === 'GENERATING' && value.planId && request === planRequest) { await new Promise(resolve => setTimeout(resolve, 700)); value = await interviewApi.getPlan(value.planId) }
       if (request !== planRequest) return null
-      if (value?.status !== 'READY') throw new Error(value?.failure || '计划生成失败，请重试。')
+      if (value?.status !== 'READY') throw new Error(planFailureMessage(value?.failure, '计划生成失败，请重试。'))
       planPreview.value = value; planFingerprint = fingerprint(); return value
     } catch (cause) { if (request === planRequest) { planError.value = cause.message || '计划生成失败，请重试。'; planPreview.value = null } return null }
     finally { if (request === planRequest) preparingPlan.value = false }
@@ -162,7 +168,7 @@ export function useInterviewSetup({ materialsApi = {}, resumeApi = {}, jobsApi =
         value = await interviewApi.getPlan(planId)
       }
       if (request !== planRequest) return false
-      if (value?.status !== 'READY' || !value.plan) throw new Error(value?.failure?.message || value?.failure || '练习计划已失效，请回到报告重新选择。')
+      if (value?.status !== 'READY' || !value.plan) throw new Error(planFailureMessage(value?.failure, '练习计划已失效，请回到报告重新选择。'))
       const selectedSource = validSource(value.plan.source)
       if (!selectedSource) throw new Error('计划中的简历来源无效，请回到报告重新选择重点。')
       const preview = await interviewApi.previewSource(selectedSource)

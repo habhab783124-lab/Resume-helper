@@ -8,6 +8,40 @@ import org.junit.jupiter.api.Test;
 
 class InterviewPlanAgentTest {
     @Test
+    void planPromptDefinesACompleteJsonContractWithoutQuestionMode() {
+        String prompt = InterviewSkill.planInstructions();
+        assertTrue(prompt.contains("\"coverage\""));
+        assertTrue(prompt.contains("\"specialty\""));
+        assertFalse(prompt.contains("当前模式：Grill"));
+    }
+
+    @Test
+    void acceptsCodeFencedPlanJsonWithNoSpecialty() {
+        var source = new InterviewPlan.ResumeSource(InterviewPlan.SourceKind.MATERIAL, "m1");
+        var request = new InterviewPlanService.PlanRequest(source, "", "", InterviewPlan.CareerStage.CAMPUS,
+                InterviewPlan.Level.STANDARD, InterviewPlan.Mode.QUICK, 3,
+                InterviewPlanService.SpecialtyPreference.NONE, "req-fence");
+        var resolved = new InterviewSourceResolver.ResolvedSource(source, "简历", "简历正文", "fp");
+        AiClient ai = (system, user) -> """
+                ```json
+                {"coverage":[{"id":"project","label":"项目经历"}],
+                 "specialty":{"kind":"NONE","focus":"","reason":""}}
+                ```
+                """;
+        var plan = new InterviewAgent().preparePlan(request, resolved, ai);
+        assertEquals(3, plan.plannedCount());
+        assertEquals(InterviewPlan.SpecialtyKind.NONE, plan.specialty().kind());
+        for (String invalid : List.of(
+                ai.chat("", "").replace("NONE", "INVENTED"),
+                ai.chat("", "").replace("NONE", "CASE_STUDY"),
+                ai.chat("", "").replace("\"project\"", "\"\""),
+                ai.chat("", "") + "额外说明")) {
+            AiClient malformed = (system, user) -> invalid;
+            assertThrows(InterviewException.class, () -> new InterviewAgent().preparePlan(request, resolved, malformed));
+        }
+    }
+
+    @Test
     void focusedPlanCarriesServerVerifiedTargetsIntoFrozenThreeQuestionPlan() {
         String[] prompts = new String[2];
         AiClient ai = (system, user) -> { prompts[0] = system; prompts[1] = user; return """
@@ -123,6 +157,10 @@ class InterviewPlanAgentTest {
         assertEquals("project-impact", proposal.coverageId());
         assertTrue(prompts[1].contains("project-impact"));
         assertTrue(prompts[1].contains("项目效果"));
+        assertTrue(prompts[1].contains("coverageId"));
+        AiClient fenced = (system, user) -> "```json\n" + ai.chat(system, user) + "\n```";
+        assertEquals("project-impact", new InterviewAgent().preparePlannedNext(
+                "简历正文", "工程师", history, 3, 2, false, plan, fenced, 10).coverageId());
         AiClient invalid = (system, user) -> ai.chat(system, user).replace("project-impact", "invented-id");
         assertThrows(InterviewException.class, () -> new InterviewAgent().preparePlannedNext(
                 "简历正文", "工程师", history, 3, 2, false, plan, invalid, 10));

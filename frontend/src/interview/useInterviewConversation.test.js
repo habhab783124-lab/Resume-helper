@@ -252,3 +252,22 @@ test('QUICK teaching feedback closes the saved root and starts polling its indep
   assert.equal(controller.session.value.practiceFeedbacks.q1.status, 'QUEUED')
   assert.deepEqual(starts, ['s1'])
 })
+
+test('polled generation failure exposes the model error and clears it when generation resumes', () => {
+  const { controller } = setup()
+  const failed = { ...savedSession(), generation: { state: 'FAILED', failure: { code: 'INVALID_OUTPUT', message: '模型未返回有效问题与评分标准，请重试' } } }
+  controller.applySession(failed)
+  assert.equal(controller.phase.value, 'GENERATION_FAILED')
+  assert.equal(controller.error.value, '模型未返回有效问题与评分标准，请重试')
+  controller.applySession({ ...failed, stateVersion: 3, generation: { state: 'RUNNING' } })
+  assert.equal(controller.error.value, '')
+  assert.equal(controller.phase.value, 'GENERATING')
+})
+
+test('skipping the final FULL question accepts the finished session without generating again', async () => {
+  const { controller, calls } = setup({ api: { skip: async () => ({ ...questionSession('s1', 2),
+    status: 'FINISHED', currentQuestion: null, plan: { mode: 'FULL' } }) } })
+  assert.equal(await controller.skip(), true)
+  assert.equal(controller.phase.value, 'FINISHED')
+  assert.equal(calls.filter(call => call[0] === 'generate').length, 0)
+})

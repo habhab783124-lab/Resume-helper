@@ -600,15 +600,15 @@ function acceptRealtimeVoiceConsent() {
     <div v-if="!session" class="page-intro interview-intro"><div><h1>模拟面试</h1></div></div>
     <div class="interview-layout">
       <main class="interview-main" :aria-busy="locked">
-        <div v-if="error" class="notice error" role="alert">{{ error }}</div>
+        <div v-if="error && phase !== 'GENERATION_FAILED'" class="notice error" role="alert">{{ error }}</div>
         <div v-if="busy" class="notice" role="status">{{ busy }}</div>
         <div v-if="!session && serviceReadyToast" class="parse-success-toast" role="status">服务可用</div>
         <div v-if="uploadSuccess" class="parse-success-toast" role="status">✓ 简历解析成功</div>
-        <div v-if="session?.status === 'ACTIVE' && !current" class="notice" role="status">
+        <div v-if="session?.status === 'ACTIVE' && !current && ['GENERATING', 'RETRY_WAIT'].includes(phase)" class="notice" role="status">
           {{ phase === 'RETRY_WAIT' ? '暂时无法连接模型，正在自动重试…' : '正在准备下一题…' }}
         </div>
         <div v-if="phase === 'GENERATION_FAILED' && active" class="notice error" role="alert">
-          {{ error || '后续问题生成失败。你的回答已保存，可以单独重试生成。' }}
+          {{ error || '题目生成失败，可以单独重试生成。' }}
           <button class="button button-ghost" :disabled="locked" @click="retryGeneration">重试生成</button>
         </div>
         <div v-if="draftStatus" class="notice" role="status">{{ draftStatus }}</div>

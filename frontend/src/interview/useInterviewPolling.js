@@ -39,6 +39,7 @@ export function useInterviewPolling({ api, onSession = () => {}, onError = () =>
       } catch (error) {
         if (!running.value || generation !== current || error?.name === 'AbortError') return
         onError(error)
+        if (error?.status === 401) { stop(); return }
       } finally {
         controller = null
       }

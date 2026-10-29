@@ -209,3 +209,20 @@ test('an exhausted algorithm pool asks for consent before retrying planned start
   assert.equal((await setup.confirmPlan()).sessionId, 'repeat-session')
   assert.equal(requests[1].allowAlgorithmRepeat, true)
 })
+
+test('starting an interview displays a structured plan failure message', async () => {
+  let starts = 0
+  const setup = useInterviewSetup({ storage: memoryStorage(),
+    materialsApi: { fetchMaterial: async id => ({ material: { id }, text: '简历' }) },
+    interviewApi: {
+      previewSource: async source => ({ source, resumeText: '简历' }),
+      preparePlan: async () => ({ status: 'FAILED', failure: { code: 'RATE_LIMITED', message: '大模型调用频率受限，请稍后重试', retryable: true } }),
+      startPlanned: async () => { starts++ }
+    }
+  })
+  await setup.loadSource({ kind: 'MATERIAL', id: 'm1' })
+  assert.equal(await setup.startInterview(), null)
+  assert.equal(setup.planError.value, '大模型调用频率受限，请稍后重试')
+  assert.equal(starts, 0)
+  assert.equal(setup.source.value.id, 'm1')
+})
