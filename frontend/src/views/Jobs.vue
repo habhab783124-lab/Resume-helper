@@ -75,6 +75,7 @@ import { addFavorite, fetchSources, importJob, matchJob, removeFavorite, runJobA
 import { newInterviewRoute } from '../interview/interviewNavigation.js'
 import { getAiKey, setAiKey } from '../api/client'
 import { getProfile } from '../utils/demoProfile'
+import { getUserId } from '../api/requestContext'
 
 /** 后端没给 scoreNotice 时的兜底文案。这句话必须展示，避免用户把匹配度当成录取概率。 */
 const SCORE_NOTICE_FALLBACK = '匹配度是资料贴合参考，不代表录取概率'
@@ -292,7 +293,7 @@ async function submitImport() {
 }
 
 async function toggleFavorite(job) {
-  const userId = profile.value.userId || 'demo-user'
+  const userId = getUserId()
   try {
     if (job.saved) {
       await removeFavorite(job.id, userId)

@@ -154,6 +154,7 @@ import {
   uploadMaterial
 } from '../api/materials'
 import { getProfile, saveProfile as cacheProfile } from '../utils/demoProfile'
+import { getUserId } from '../api/requestContext'
 import { hasAiKey } from '../api/client'
 import { newInterviewRoute } from '../interview/interviewNavigation.js'
 
@@ -468,7 +469,7 @@ async function confirmProfile() {
 
   // 与后端 ProfileDto / UserProfileSnapshot 字段一一对应，两侧可以直接互相透传
   const profile = {
-    userId: base.userId || 'demo-user',
+    userId: getUserId(),
     targetTitle: targetTitle.value || base.targetTitle || '',
     targetCities: targetCities.value
       ? targetCities.value.split(/[、,，\s]+/).filter(Boolean)

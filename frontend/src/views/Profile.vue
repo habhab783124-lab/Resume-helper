@@ -95,8 +95,9 @@
 import { computed, onMounted, reactive, ref } from 'vue'
 import { RouterLink } from 'vue-router'
 import { fetchProfile, saveProfile as putProfile } from '../api/materials'
-import { getProfile, saveProfile as cacheProfile } from '../utils/demoProfile'
+import { emptyProfile, getProfile, saveProfile as cacheProfile } from '../utils/demoProfile'
 import { getAuthUser } from '../utils/authSession'
+import { getUserId } from '../api/requestContext'
 
 const profile = ref(getProfile())
 const loading = ref(true)
@@ -140,7 +141,19 @@ const kickerParts = computed(() => {
   return [age, cityText.value, profile.value.education].filter(Boolean)
 })
 
-const sourceLabel = computed(() => (fromServer.value ? '已保存到后端' : '本机演示数据 · 尚未确认'))
+const hasProfileData = computed(() => Boolean(
+  profile.value.targetTitle ||
+  profile.value.summary ||
+  profile.value.education ||
+  profile.value.skills?.length ||
+  profile.value.educations?.length ||
+  profile.value.experiences?.length
+))
+const sourceLabel = computed(() => (
+  hasProfileData.value
+    ? (fromServer.value ? '已保存到后端' : '本机草稿')
+    : '尚未填写'
+))
 
 /**
  * 档案完整度：按画像里**实际有值的字段**算，不写死一个百分比。
@@ -227,7 +240,7 @@ onMounted(async () => {
   try {
     // 后端那一份是「用户确认过的」，优先用它；读不到（404 = 从没保存过）就退回本机
     const server = await fetchProfile()
-    profile.value = { ...getProfile(), ...server }
+    profile.value = { ...emptyProfile(), ...(server || {}) }
     fromServer.value = true
     // 回写本机，保证岗位页和服务端看到的是同一份
     cacheProfile(profile.value)
@@ -251,7 +264,7 @@ function toggleEdit() {
 async function submit() {
   const base = getProfile()
   const payload = {
-    userId: profile.value.userId || base.userId || 'demo-user',
+    userId: getUserId(),
     targetTitle: form.targetTitle,
     targetCities: splitList(form.cities),
     yearsOfExperience: Number(form.yearsOfExperience) || 0,
