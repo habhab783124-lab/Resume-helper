@@ -38,6 +38,20 @@ test('saved answer followed by generation failure clears draft and retries gener
   assert.equal(calls.filter(call => call[0] === 'generate').length, 2)
   const generations = calls.filter(call => call[0] === 'generate')
   assert.notEqual(generations[0][2].requestId, generations[1][2].requestId)
+  assert.equal(generations[1][2].kind, 'NEXT')
+})
+
+test('retrying a failed opening requests the first question without saving an answer', async () => {
+  const { controller, calls } = setup()
+  controller.applySession({
+    ...questionSession(), revision: 0, currentQuestion: null, turns: [],
+    generation: { kind: 'OPENING', state: 'FAILED', failure: { message: '首题生成失败' } },
+  })
+  assert.equal(await controller.retryGeneration(), true)
+  const generations = calls.filter(call => call[0] === 'generate')
+  assert.equal(generations.length, 1)
+  assert.deepEqual(generations[0][2], { requestId: 'id-1', kind: 'OPENING', expectedRevision: 0 })
+  assert.equal(calls.filter(call => call[0] === 'saveAnswer').length, 0)
 })
 
 test('final answer that finishes the session does not request another question', async () => {

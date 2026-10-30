@@ -67,7 +67,8 @@ export function useInterviewConversation({ api, drafts = {}, voice = null, polli
     phase.value = 'GENERATING'
     try {
       const result = await api.generate(session.value.sessionId, {
-        requestId: generationRequestId, kind: 'NEXT', expectedRevision: session.value.revision
+        requestId: generationRequestId, kind: session.value.turns.length === 0 ? 'OPENING' : 'NEXT',
+        expectedRevision: session.value.revision
       }, signal)
       if (applySession(result, expectedEpoch) && generationStates.has(result.generation?.state)) polling?.start?.(result.sessionId)
       return true
