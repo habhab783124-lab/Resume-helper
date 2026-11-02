@@ -161,7 +161,9 @@ public final class JobViews {
 
         public static JobList of(AgentRunResult result, Predicate<String> isSaved) {
             List<JobCard> cards = result.matches().stream()
-                    .map(match -> JobCard.of(match, isSaved != null && isSaved.test(match.job().id())))
+                    .map(match -> result.profile().isUsable()
+                            ? JobCard.of(match, isSaved != null && isSaved.test(match.job().id()))
+                            : JobCard.of(match.job(), isSaved != null && isSaved.test(match.job().id())))
                     .toList();
             return new JobList(cards.size(), cards,
                     result.sourceReports().stream().map(SourceStatus::of).toList(),

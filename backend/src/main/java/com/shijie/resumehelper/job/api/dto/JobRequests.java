@@ -120,6 +120,10 @@ public final class JobRequests {
         private String text;
         /** 原始链接，可为空。保留它是为了满足「岗位要能回溯到来源」的要求。 */
         private String sourceUrl;
+        private ProfileDto profile;
+
+        public ProfileDto getProfile() { return profile; }
+        public void setProfile(ProfileDto profile) { this.profile = profile; }
 
         public String getText() {
             return text;

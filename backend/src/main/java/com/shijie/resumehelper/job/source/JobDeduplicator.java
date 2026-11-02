@@ -43,6 +43,8 @@ public final class JobDeduplicator {
 
         Set<String> skills = new LinkedHashSet<>(base.skills());
         skills.addAll(other.skills());
+        Set<String> searchKeywords = new LinkedHashSet<>(base.searchKeywords());
+        searchKeywords.addAll(other.searchKeywords());
 
         String description = base.description().length() >= other.description().length()
                 ? base.description()
@@ -55,6 +57,7 @@ public final class JobDeduplicator {
 
         return base.toBuilder()
                 .skills(new ArrayList<>(skills))
+                .searchKeywords(new ArrayList<>(searchKeywords))
                 .description(description)
                 .salary(salary)
                 .source(base.sourceName(), sourceUrl)

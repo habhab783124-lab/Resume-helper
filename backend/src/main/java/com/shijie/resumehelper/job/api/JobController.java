@@ -10,6 +10,10 @@ import com.shijie.resumehelper.common.profile.ProfileDto;
 import com.shijie.resumehelper.job.domain.Job;
 import com.shijie.resumehelper.job.service.JobService;
 import com.shijie.resumehelper.common.util.TextKit;
+import com.shijie.resumehelper.common.util.UserContext;
+import com.shijie.resumehelper.job.store.ImportedJobStore;
+import com.shijie.resumehelper.job.source.JobImporter;
+import com.shijie.resumehelper.material.store.ProfileStore;
 import jakarta.servlet.http.HttpServletRequest;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -43,10 +47,14 @@ public class JobController {
 
     private final JobService jobService;
     private final AiClientResolver aiResolver;
+    private final ImportedJobStore imports;
+    private final ProfileStore profiles;
 
-    public JobController(JobService jobService, AiClientResolver aiResolver) {
+    public JobController(JobService jobService, AiClientResolver aiResolver, ImportedJobStore imports, ProfileStore profiles) {
         this.jobService = jobService;
         this.aiResolver = aiResolver;
+        this.imports = imports;
+        this.profiles = profiles;
     }
 
     /**
@@ -90,16 +98,8 @@ public class JobController {
                 education, expectedSalary, userId);
         request.setProfile(profile);
 
-        String resolvedUserId = JobService.normalizeUserId(userId);
-        if (profile == null) {
-            // 没有画像：只列岗位，不算匹配度
-            List<Job> jobs = jobService.list(jobService.toQuery(request));
-            List<JobViews.JobCard> cards = jobs.stream()
-                    .map(job -> JobViews.JobCard.of(job, jobService.isSaved(resolvedUserId, job.id())))
-                    .toList();
-            return ApiResponse.ok(new JobViews.JobList(cards.size(), cards, List.of(), List.of(),
-                    false, "", List.of(), JobViews.SCORE_NOTICE));
-        }
+        String resolvedUserId = UserContext.resolve(http);
+        if (profile != null) profile.setUserId(resolvedUserId);
         return ApiResponse.ok(runSearch(profile, request, http, resolvedUserId));
     }
 
@@ -108,7 +108,8 @@ public class JobController {
     public ApiResponse<JobViews.JobList> searchWithProfile(@RequestBody JobRequests.Search request,
                                                            HttpServletRequest http) {
         ProfileDto profile = request.getProfile();
-        String userId = JobService.normalizeUserId(profile == null ? null : profile.getUserId());
+        String userId = UserContext.resolve(http);
+        if (profile != null) profile.setUserId(userId);
         return ApiResponse.ok(runSearch(profile, request, http, userId));
     }
 
@@ -118,9 +119,31 @@ public class JobController {
      * <p>产品方案的兜底要求：外部来源不可用时，用户粘贴 JD 也能完成匹配。
      */
     @PostMapping("/import")
-    public ApiResponse<JobViews.JobCard> importJob(@RequestBody JobRequests.Import request) {
-        Job job = jobService.importJob(request.getText(), request.getSourceUrl());
-        return ApiResponse.ok(JobViews.JobCard.of(job, false), "岗位已导入，可以开始匹配");
+    public ApiResponse<JobViews.JobCard> importJob(@RequestBody JobRequests.Import request, HttpServletRequest http) {
+        String userId = UserContext.resolve(http);
+        String text = request.getText();
+        if (text != null && text.length() > 100_000) throw new IllegalArgumentException("岗位描述最多 10 万字，请精简后重试");
+        Job parsed = new JobImporter().parse(text, request.getSourceUrl());
+        // 同一账号重复提交相同 JD 会覆盖原记录，不会生成重复卡片。
+        String id;
+        try {
+            byte[] digest = java.security.MessageDigest.getInstance("SHA-256").digest(
+                    (userId + "\n" + text.trim()).getBytes(java.nio.charset.StandardCharsets.UTF_8));
+            id = "imported-" + java.util.HexFormat.of().formatHex(digest);
+        } catch (java.security.NoSuchAlgorithmException e) { throw new IllegalStateException(e); }
+        Job job = parsed.toBuilder().id(id).build();
+        ProfileDto profile = request.getProfile();
+        boolean usable = profile == null ? profiles.find(userId).map(p -> p.isUsable()).orElse(false)
+                : profile.toSnapshot().isUsable();
+        JobViews.JobCard card;
+        if (usable) {
+            // 已保存画像优先通过前端传入；旧客户端未传时也能读取本人的确认资料。
+            var snapshot = profile == null ? profiles.find(userId).orElseThrow() : profile.toSnapshot();
+            card = JobViews.JobCard.of(new com.shijie.resumehelper.job.match.MatchScorer().score(job, snapshot),
+                    jobService.isSaved(userId, id));
+        } else card = JobViews.JobCard.of(job, jobService.isSaved(userId, id));
+        imports.save(userId, job);
+        return ApiResponse.ok(card, usable ? "岗位已导入并完成规则匹配" : "岗位已导入，完善目标职位或技能后即可计算匹配度");
     }
 
     /** 数据源清单与可用性说明。 */
@@ -132,10 +155,10 @@ public class JobController {
     /** 岗位详情（返回完整岗位描述）。 */
     @GetMapping("/{id}")
     public ApiResponse<JobViews.JobCard> detail(@PathVariable String id,
-                                                @RequestParam(required = false) String userId) {
-        return jobService.find(id)
+                                                @RequestParam(required = false) String userId, HttpServletRequest http) {
+        return imports.find(UserContext.resolve(http), id).or(() -> jobService.find(id))
                 .map(job -> ApiResponse.ok(JobViews.JobCard.ofDetailed(job,
-                        jobService.isSaved(JobService.normalizeUserId(userId), job.id()))))
+                        jobService.isSaved(UserContext.resolve(http), job.id()))))
                 .orElseGet(() -> ApiResponse.fail("没有找到该岗位，可能已过期，请重新搜索"));
     }
 
@@ -148,14 +171,15 @@ public class JobController {
     public ApiResponse<JobViews.MatchDetail> match(@PathVariable String id,
                                                    @RequestBody(required = false) JobRequests.Match request,
                                                    HttpServletRequest http) {
-        Job job = jobService.find(id).orElse(null);
+        Job job = imports.find(UserContext.resolve(http), id).or(() -> jobService.find(id)).orElse(null);
         if (job == null) {
             return ApiResponse.fail("没有找到该岗位，可能已过期，请重新搜索");
         }
         ProfileDto profile = request == null ? null : request.getProfile();
         boolean explainAi = request == null || !Boolean.FALSE.equals(request.getExplainAi());
         AiClient ai = explainAi ? aiResolver.resolve(http) : null;
-        String userId = JobService.normalizeUserId(profile == null ? null : profile.getUserId());
+        String userId = UserContext.resolve(http);
+        if (profile != null) profile.setUserId(userId);
 
         JobService.MatchOutcome outcome = jobService.match(job, profile, explainAi, ai);
         return ApiResponse.ok(JobViews.MatchDetail.of(outcome.match(), outcome.report(),
@@ -166,20 +190,22 @@ public class JobController {
 
     @PostMapping("/{id}/favorite")
     public ApiResponse<Boolean> favorite(@PathVariable String id,
-                                         @RequestParam(required = false) String userId) {
-        return ApiResponse.ok(jobService.save(JobService.normalizeUserId(userId), id), "已收藏");
+                                         @RequestParam(required = false) String userId, HttpServletRequest http) {
+        return ApiResponse.ok(jobService.save(UserContext.resolve(http), id), "已收藏");
     }
 
     @DeleteMapping("/{id}/favorite")
     public ApiResponse<Boolean> unfavorite(@PathVariable String id,
-                                           @RequestParam(required = false) String userId) {
-        return ApiResponse.ok(jobService.unsave(JobService.normalizeUserId(userId), id), "已取消收藏");
+                                           @RequestParam(required = false) String userId, HttpServletRequest http) {
+        return ApiResponse.ok(jobService.unsave(UserContext.resolve(http), id), "已取消收藏");
     }
 
     @GetMapping("/favorites")
-    public ApiResponse<JobViews.JobList> favorites(@RequestParam(required = false) String userId) {
-        String resolved = JobService.normalizeUserId(userId);
-        List<JobViews.JobCard> cards = jobService.favorites(resolved).stream()
+    public ApiResponse<JobViews.JobList> favorites(@RequestParam(required = false) String userId, HttpServletRequest http) {
+        String resolved = UserContext.resolve(http);
+        List<Job> favoriteJobs = new java.util.ArrayList<>(jobService.favorites(resolved));
+        favoriteJobs.addAll(imports.list(resolved).stream().filter(job -> jobService.isSaved(resolved, job.id())).toList());
+        List<JobViews.JobCard> cards = favoriteJobs.stream()
                 .map(job -> JobViews.JobCard.of(job, true))
                 .toList();
         return ApiResponse.ok(new JobViews.JobList(cards.size(), cards, List.of(), List.of(),
@@ -190,8 +216,8 @@ public class JobController {
 
     private JobViews.JobList runSearch(ProfileDto profile, JobRequests.Search request,
                                        HttpServletRequest http, String userId) {
-        AiClient ai = aiResolver.resolve(http);
-        AgentRunResult result = jobService.search(profile, request, ai);
+        AiClient ai = request.getExplainTopN() != null && request.getExplainTopN() > 0 ? aiResolver.resolve(http) : null;
+        AgentRunResult result = jobService.search(profile, request, ai, imports.list(userId));
         Predicate<String> savedLookup = jobId -> jobService.isSaved(userId, jobId);
         return JobViews.JobList.of(result, savedLookup);
     }

@@ -25,12 +25,12 @@ public record AgentOptions(
         int explainTopN) {
 
     public static AgentOptions defaults() {
-        return new AgentOptions(3, 12, "", "", null, null, false, false, 5);
+        return new AgentOptions(3, 60, "", "", null, null, false, false, 5);
     }
 
     public AgentOptions {
         maxRounds = maxRounds <= 0 ? 1 : Math.min(maxRounds, 6);
-        limit = limit <= 0 ? 12 : Math.min(limit, 50);
+        limit = limit <= 0 ? 60 : Math.min(limit, 500);
         city = city == null ? "" : city.trim();
         jobType = jobType == null ? "" : jobType.trim();
         explainTopN = Math.max(0, Math.min(explainTopN, limit));

@@ -9,6 +9,10 @@ public class AgentOptionsDto {
 
     /** 智能体最多检索几轮。 */
     private Integer maxRounds;
+    private String keyword;
+
+    public String getKeyword() { return keyword; }
+    public void setKeyword(String keyword) { this.keyword = keyword; }
     /** 返回条数。 */
     private Integer limit;
     /** 指定检索城市；不传则用画像里的期望城市。 */

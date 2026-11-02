@@ -14,11 +14,11 @@ public class JobModuleProperties {
     /** 智能体最多检索几轮。 */
     private int maxRounds = 3;
     /** 默认返回岗位条数。 */
-    private int defaultLimit = 12;
+    private int defaultLimit = 60;
     /** 前 N 个岗位调用大模型生成匹配解释，0 表示不调用。 */
     private int explainTopN = 5;
     /** 单次请求最多返回条数，防止前端传入超大 limit 拖垮服务。 */
-    private int maxLimit = 50;
+    private int maxLimit = 500;
 
     private final Sources sources = new Sources();
     private final Cors cors = new Cors();
