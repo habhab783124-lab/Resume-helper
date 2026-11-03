@@ -4,6 +4,8 @@ title ShiJie Resume Helper - Start All
 
 cd /d "%~dp0"
 set "ROOT=%~dp0"
+set "LOG_DIR=%ROOT%logs"
+if not exist "%LOG_DIR%" mkdir "%LOG_DIR%"
 
 REM Prefer project-local tools when installed; no system PATH changes needed.
 for /d %%D in ("%ROOT%.runtime\ffmpeg-*") do if exist "%%~fD\bin\ffmpeg.exe" (
@@ -96,12 +98,16 @@ echo   Frontend : http://127.0.0.1:!FRONT_PORT!/login
 echo.
 
 REM ---------------------------------------------------------------- start backend
-start "ShiJie Backend" /D "%ROOT%backend" cmd /k "set SERVER_PORT=!BACK_PORT!&& mvnw.cmd spring-boot:run"
+set "SERVER_PORT=!BACK_PORT!"
+if exist "%LOG_DIR%\backend.exit" del /q "%LOG_DIR%\backend.exit"
+start "ShiJie Backend" /D "%ROOT%backend" "%ComSpec%" /d /k call "%ROOT%tools\run-backend.cmd"
+if errorlevel 1 goto back_timeout
 echo   Backend window started.
 echo   Waiting for backend...
 
 set /a WAIT=0
 :wait_back
+if exist "%LOG_DIR%\backend.exit" goto back_timeout
 set /a WAIT+=1
 curl --noproxy "*" -s -o nul --max-time 2 "http://127.0.0.1:!BACK_PORT!/api/jobs/sources" >nul 2>&1
 if not errorlevel 1 goto back_ready
@@ -111,8 +117,9 @@ goto wait_back
 
 :back_timeout
 echo.
-echo [ERROR] Backend did not become ready within 120 seconds.
-echo         Check the "ShiJie Backend" window for the Java/Maven error.
+echo [ERROR] Backend failed to start or did not become ready within 120 seconds.
+echo         Log: "%LOG_DIR%\backend-startup.log"
+if exist "%LOG_DIR%\backend-startup.log" powershell.exe -NoProfile -Command "Get-Content -LiteralPath (Join-Path $env:LOG_DIR 'backend-startup.log') -Tail 35"
 pause
 exit /b 1
 
@@ -120,12 +127,17 @@ exit /b 1
 echo   Backend ready.
 
 REM ---------------------------------------------------------------- start frontend
-start "ShiJie Frontend" /D "%ROOT%frontend" cmd /k "set VITE_PROXY_TARGET=http://127.0.0.1:!BACK_PORT!&& npm.cmd run dev -- --port !FRONT_PORT! --strictPort --host 127.0.0.1"
+set "VITE_PROXY_TARGET=http://127.0.0.1:!BACK_PORT!"
+set "FRONT_PORT=!FRONT_PORT!"
+if exist "%LOG_DIR%\frontend.exit" del /q "%LOG_DIR%\frontend.exit"
+start "ShiJie Frontend" /D "%ROOT%frontend" "%ComSpec%" /d /k call "%ROOT%tools\run-frontend.cmd"
+if errorlevel 1 goto front_timeout
 echo   Frontend window started.
 echo   Waiting for frontend...
 
 set /a WAIT=0
 :wait_front
+if exist "%LOG_DIR%\frontend.exit" goto front_timeout
 set /a WAIT+=1
 curl --noproxy "*" -s -o nul --max-time 2 "http://127.0.0.1:!FRONT_PORT!/" >nul 2>&1
 if not errorlevel 1 goto front_ready
@@ -136,7 +148,8 @@ goto wait_front
 :front_timeout
 echo.
 echo [ERROR] Frontend did not become ready within 120 seconds.
-echo         Check the "ShiJie Frontend" window for the Vite error.
+echo         Log: "%LOG_DIR%\frontend-startup.log"
+if exist "%LOG_DIR%\frontend-startup.log" powershell.exe -NoProfile -Command "Get-Content -LiteralPath (Join-Path $env:LOG_DIR 'frontend-startup.log') -Tail 35"
 pause
 exit /b 1
 
@@ -149,6 +162,6 @@ echo.
 echo   Keep the "ShiJie Backend" and "ShiJie Frontend" windows open.
 echo   Close them to stop the app.
 echo ============================================================
-start "" "http://127.0.0.1:!FRONT_PORT!/login"
+if /i not "%~1"=="--no-browser" start "" "http://127.0.0.1:!FRONT_PORT!/login"
 timeout /t 8 /nobreak >nul
 exit /b 0
