@@ -16,4 +16,13 @@ class JobViewsTest {
         assertEquals(description, JobViews.JobCard.ofDetailed(job, false).description());
         assertEquals(161, JobViews.JobCard.of(job, false).description().length());
     }
+    @Test
+    void cardsExposeNormalizedSalaryWithoutChangingTheOriginalSalaryText() {
+        Job job = Job.builder().title("工程师").salary("300元/天").build();
+        for (var card : java.util.List.of(JobViews.JobCard.of(job, false), JobViews.JobCard.ofDetailed(job, false))) {
+            assertEquals("300元/天", card.salary());
+            assertEquals(7, card.salaryMin());
+            assertEquals(7, card.salaryMax());
+        }
+    }
 }

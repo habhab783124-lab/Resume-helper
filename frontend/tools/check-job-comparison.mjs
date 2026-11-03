@@ -63,10 +63,84 @@ async function main(){
  const selectCard=card=>evaluate('(()=>{const card=[...document.querySelectorAll(".favorites-grid .workflow-card")].find(c=>c.querySelector("h2").textContent.trim()==='+JSON.stringify(card.title)+');const button=[...card.querySelectorAll("button")].find(b=>b.textContent.trim()==="加入对比");if(!button)throw Error("Missing comparison toggle");button.click()})()')
  const choose=async value=>{await evaluate('(()=>{const e=document.querySelector("select[aria-label=对比偏好]");e.value='+JSON.stringify(value)+';e.dispatchEvent(new Event("change",{bubbles:true}))})()')}
  const ready=()=>until(()=>evaluate('!!document.querySelector(".comparison-table")'),'comparison ready')
- const screenshot=async name=>{const r=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(artifacts,name),Buffer.from(r.data,'base64'))}
+ const screenshot=async name=>{await evaluate('document.getAnimations().forEach(a=>a.finish())');const r=await cdp('Page.captureScreenshot',{format:'png',captureBeyondViewport:false});await writeFile(join(artifacts,name),Buffer.from(r.data,'base64'))}
  await navigate('/login');await evaluate('localStorage.setItem("resume-helper-auth-session",'+JSON.stringify(JSON.stringify(owner))+')')
  await navigate('/jobs/compare')
  await check('empty comparison offers selection paths',async()=>{await until(async()=>(await body()).includes('先挑选至少两个岗位'),'empty state');assert.ok((await body()).includes('从收藏中选择'))})
+ // More than a dozen distinct private fixtures exercise the actual matching endpoint and list UI.
+ for(let n=0;n<25;n++)await api('/api/jobs/import',{text:`岗位：Java 搜索回归工程师${n}\n公司：数量测试${n}\n工作地点：上海\n薪资：15-22K\n任职要求：本科，3年以上；Java、Spring Boot。\n描述：自动验收数据，非真实招聘。`})
+ await navigate('/jobs')
+ await until(()=>evaluate('document.querySelectorAll(".job-card").length===24'),'first 24 job cards')
+ await check('matching defaults to sixty without hidden experience or city restrictions',async()=>{
+   const r=await api('/api/jobs/search',{profile:{targetTitle:'Java',skills:['Java']}})
+   assert.equal(r.jobs.length,30);assert.equal(r.candidateCount,30)
+   assert.ok((await body()).includes('返回 30 个岗位'));assert.ok((await body()).includes('经验：经验不限'))
+   assert.ok((await body()).includes('本人导入（返回 30 条）'));assert.ok(!(await body()).includes('演示数据'))
+ })
+ await button('显示更多（已显示 24 / 30）')
+ await check('show more reveals retained results beyond the first page',async()=>assert.equal(await evaluate('document.querySelectorAll(".job-card").length'),30))
+ await screenshot('jobs-desktop.png')
+ await cdp('Emulation.setDeviceMetricsOverride',{width:390,height:844,deviceScaleFactor:1,mobile:true})
+ await check('matching count controls fit the mobile viewport',async()=>assert.equal(await evaluate('document.documentElement.scrollWidth<=innerWidth'),true))
+ await screenshot('jobs-mobile.png');await cdp('Emulation.clearDeviceMetricsOverride')
+ const searchRequests=[]
+ intercept=async paused=>{
+   const payload=JSON.parse(paused.request.postData)
+   searchRequests.push({url:paused.request.url,payload})
+   // Agent transport fixture: reuse the real rules search, never send test AI credentials outside this process.
+   const search=payload.options?{...payload.options,profile:payload.profile}:payload
+   const data=await api('/api/jobs/search',search)
+   await cdp('Fetch.fulfillRequest',{requestId:paused.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify({success:true,data:{...data,trace:[]}})).toString('base64')})
+ }
+ await cdp('Fetch.enable',{patterns:[{urlPattern:'*api/jobs/search',requestStage:'Request'},{urlPattern:'*api/jobs/agent/run',requestStage:'Request'}]})
+ await evaluate('(()=>{const e=document.querySelector(".jobs-search input");e.value="Java";e.dispatchEvent(new Event("input",{bubbles:true}))})()')
+ await until(()=>searchRequests.length>0,'keyword search')
+ await until(()=>evaluate('!document.querySelector(".job-dot.is-loading")'),'search completed')
+ await evaluate('(()=>{const e=document.querySelector(".job-limit select");e.value="100";e.dispatchEvent(new Event("change",{bubbles:true}))})()')
+ await until(()=>searchRequests.some(r=>r.payload.limit===100),'limit change')
+ await until(()=>evaluate('!document.querySelector(".job-dot.is-loading")'),'count completed')
+ await evaluate('[...document.querySelectorAll(".filter-select")].find(b=>b.textContent.includes("城市：")).click()')
+ await until(()=>searchRequests.some(r=>r.payload.strictCity===true),'city filter')
+ await until(()=>evaluate('!document.querySelector(".job-dot.is-loading")'),'city completed')
+ await evaluate('[...document.querySelectorAll(".filter-select")].find(b=>b.textContent.includes("经验：")).click()')
+ await until(()=>searchRequests.some(r=>r.payload.maxYears===1),'experience filter')
+ await until(()=>evaluate('!document.querySelector(".job-dot.is-loading")'),'filters completed')
+ await button('让智能体去找')
+ await until(()=>searchRequests.some(r=>r.url.endsWith('/agent/run')),'agent request')
+ await until(()=>evaluate('!document.querySelector(".job-dot.is-loading")'),'agent response')
+ await check('search and agent preserve the same keyword, count and hard filters',async()=>{
+   const regular=searchRequests.filter(r=>!r.payload.options).at(-1).payload
+   const agent=searchRequests.find(r=>r.payload.options).payload.options
+   for(const field of ['keyword','city','strictCity','maxYears','limit'])assert.equal(agent[field],regular[field],field)
+   assert.equal(agent.keyword,'Java');assert.equal(agent.limit,100);assert.equal(agent.maxYears,1);assert.equal(agent.strictCity,true)
+   assert.equal(await evaluate('document.querySelectorAll(".job-card").length'),1)
+ })
+ await cdp('Fetch.disable');intercept=null
+ // A slow old request must not restore results for conditions the user has already changed.
+ let oldRequest
+ intercept=async paused=>{
+   const payload=JSON.parse(paused.request.postData)
+   if(payload.keyword==='old-condition'){oldRequest=paused;return}
+   await cdp('Fetch.fulfillRequest',{requestId:paused.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify({success:true,data:{jobs:[],candidateCount:0,notes:['latest-condition'],sources:[]}})).toString('base64')})
+ }
+ await cdp('Fetch.enable',{patterns:[{urlPattern:'*api/jobs/search',requestStage:'Request'}]})
+ const keywordInput=value=>evaluate('(()=>{const e=document.querySelector(".jobs-search input");e.value='+JSON.stringify(value)+';e.dispatchEvent(new Event("input",{bubbles:true}))})()')
+ await keywordInput('old-condition');await until(()=>!!oldRequest,'held search');await keywordInput('new-condition')
+ await until(async()=>(await body()).includes('latest-condition'),'new result')
+ try{await cdp('Fetch.fulfillRequest',{requestId:oldRequest.requestId,responseCode:200,body:Buffer.from(JSON.stringify({success:true,data:{jobs:cards,notes:['stale-condition']}})).toString('base64')})}catch{/* An aborted request may already have been discarded by Chromium. */}
+ await pause(100)
+ await check('late matching responses cannot overwrite newer search conditions',async()=>{assert.ok(!(await body()).includes('stale-condition'));assert.equal(await evaluate('document.querySelectorAll(".job-card").length'),0)})
+ await cdp('Fetch.disable');intercept=null
+ await cdp('Network.enable');await cdp('Network.setBlockedURLs',{urls:['*api/jobs/*/match']})
+ await button('＋ 粘贴岗位描述')
+ await evaluate('(()=>{const e=document.querySelector(".job-panel-input");e.value="岗位：导入失败回归测试\\n公司：本地验证\\n描述：Java 开发测试数据";e.dispatchEvent(new Event("input",{bubbles:true}))})()')
+ await button('导入并匹配')
+ await until(async()=>(await body()).includes('本次匹配未完成'),'match failure after import')
+ await check('a successful import remains usable when its follow-up matching fails',async()=>{
+   assert.equal(await evaluate('document.querySelectorAll(".job-card").length'),1)
+   assert.ok((await body()).includes('导入失败回归测试'))
+ })
+ await cdp('Network.setBlockedURLs',{urls:[]})
  await navigate('/applications?tab=favorites');await until(()=>evaluate('document.querySelectorAll(".favorites-grid .workflow-card").length===5'),'favorite cards')
  await selectCard(cards[0]);await selectCard(cards[1])
  await check('favorite cards add two choices and show a global comparison tray',async()=>{assert.equal(await evaluate('document.querySelectorAll(".comparison-tray-items button").length'),2)})

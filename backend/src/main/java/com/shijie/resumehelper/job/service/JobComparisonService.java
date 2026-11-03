@@ -45,7 +45,9 @@ public class JobComparisonService {
             case "skills" -> new MatchScorer.Weights(65,10,10,5,5,5);
             default -> throw new IllegalArgumentException("不支持的对比偏好");
         };
-        var profile=profiles.find(owner).orElse(null);
+        // 只填写城市、学历或薪资也可进行相应维度比较；全空记录不能冒充已确认资料。
+        var profile=profiles.find(owner).filter(p->p.isUsable() || !p.targetCities().isEmpty()
+                || !p.education().isBlank() || !p.expectedSalary().isBlank() || p.yearsOfExperience()>0).orElse(null);
         var items=new ArrayList<Item>();var unavailable=new ArrayList<String>();
         for(String id:ids) {
             // Private imported IDs must never be recovered through the public snapshot store.

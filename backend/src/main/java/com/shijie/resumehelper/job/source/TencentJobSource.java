@@ -91,7 +91,7 @@ public final class TencentJobSource implements JobSource {
     }
 
     static int minYears(String value) {
-        String text = value;
+        String text = value.replace("两", "二");
         String[] numbers = {"一", "二", "三", "四", "五", "六", "七", "八", "九", "十"};
         for (int i = numbers.length - 1; i >= 0; i--) text = text.replace(numbers[i], String.valueOf(i + 1));
         return TextKit.parseMinYears(text);

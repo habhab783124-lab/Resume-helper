@@ -110,7 +110,7 @@ public final class JobSearchAgent {
 
             JobQuery query = buildQuery(profile, opts, action, candidateKeywords, usedKeywords);
             if (!TextKit.isBlank(requestedKeyword)) query.keyword(requestedKeyword);
-            JobSourceRegistry.Result result = registry.search(query);
+            JobSourceRegistry.Result result = registry.search(candidateQuery(query));
 
             pool.addAll(result.jobs());
             reports = result.reports();
@@ -122,6 +122,8 @@ public final class JobSearchAgent {
 
             trace.add(new AgentStep(round, action.thought(), AgentAction.SEARCH_JOBS, argView(query),
                     describe(result, query), lastResultCount, Instant.now()));
+            // 显式关键词固定时重复调用同一批官网接口不会扩检，直接对候选池评分。
+            if (!TextKit.isBlank(requestedKeyword) && !pool.isEmpty()) break;
         }
 
         List<Job> candidates = deduplicator.dedupe(pool);
@@ -129,10 +131,10 @@ public final class JobSearchAgent {
         if (candidates.isEmpty()) {
             // 兜底一：完全按硬条件再搜一次，宁可多给也不要返回空页面
             JobQuery fallback = baseQuery(profile, opts).keyword(requestedKeyword).limit(opts.limit());
-            JobSourceRegistry.Result relaxed = registry.search(fallback);
+            JobSourceRegistry.Result relaxed = registry.search(candidateQuery(fallback));
+            reports = relaxed.reports();
             candidates = deduplicator.dedupe(relaxed.jobs());
             if (!candidates.isEmpty()) {
-                reports = relaxed.reports();
                 notes.add("按关键词没有命中岗位，已放宽条件返回可用结果");
                 trace.add(new AgentStep(trace.size() + 1, "关键词没有命中，放宽条件重查", AgentAction.SEARCH_JOBS,
                         argView(fallback), describe(relaxed, fallback), candidates.size(), Instant.now()));
@@ -166,10 +168,13 @@ public final class JobSearchAgent {
         AiClient ai = aiClient == null ? new FakeAiClient() : aiClient;
         JobQuery effective = query == null ? baseQuery(profile, opts) : query;
 
-        JobSourceRegistry.Result result = registry.search(effective);
+        JobSourceRegistry.Result result = registry.search(candidateQuery(effective));
         List<Job> combined = new ArrayList<>(imported.stream().filter(effective::accepts)
                 .filter(job -> effective.allKeywords().isEmpty() || effective.allKeywords().stream()
                         .anyMatch(keyword -> effective.matchesKeyword(job, keyword))).toList());
+        List<JobSourceRegistry.SourceReport> reports = new ArrayList<>(result.reports());
+        if (!imported.isEmpty()) reports.add(new JobSourceRegistry.SourceReport("本人导入", "import", true,
+                combined.size(), "当前账号已保存且符合筛选条件的 JD"));
         combined.addAll(result.jobs());
         // 私人导入与公开岗位即使同名也保留独立身份，不能把用户的 JD 合并进公共缓存。
         List<Job> candidates = combined;
@@ -180,15 +185,20 @@ public final class JobSearchAgent {
         if (candidates.isEmpty()) {
             notes.add("没有匹配的岗位，可以试试更短的关键词，或用「粘贴岗位描述」导入目标岗位");
         }
-        addSourceNotes(candidates, result.reports(), notes);
+        addSourceNotes(candidates, reports, notes);
 
         JobMatchService matchService = new JobMatchService(scorer, ai, opts.explainTopN());
         List<JobMatchResult> matches = matchService.rankWithExplanation(candidates, profile, effective.limit());
         List<AgentStep> trace = List.of(new AgentStep(1, "按筛选条件直接检索", AgentAction.SEARCH_JOBS,
                 argView(effective), describe(result, effective), candidates.size(), Instant.now()));
 
-        return new AgentRunResult(profile, matches, trace, result.reports(), candidates.size(),
+        return new AgentRunResult(profile, matches, trace, reports, candidates.size(),
                 effective.allKeywords(), notes, ai.name(), !ai.isFallback(), "");
+    }
+
+    /** 先召回再排名，展示上限不能提前截掉高匹配岗位；保留最多 500 个公开候选。 */
+    private JobQuery candidateQuery(JobQuery displayQuery) {
+        return displayQuery.copy().limit(Math.min(500, Math.max(100, displayQuery.limit() * 3)));
     }
 
     /** 问大模型下一步做什么；失败时降级为规则动作。 */
@@ -325,9 +335,11 @@ public final class JobSearchAgent {
     private void addSourceNotes(List<Job> jobs, List<JobSourceRegistry.SourceReport> reports, List<String> notes) {
         if (jobs.stream().anyMatch(registry::isLive)) {
             notes.add("已联网检索公开招聘来源。采集时间不等于发布时间，请打开原始链接核实在招状态。未披露的薪资、学历和经验不作推测。");
-        } else if (!jobs.isEmpty()) {
+        } else if (jobs.stream().anyMatch(job -> !job.id().startsWith("imported-"))) {
             notes.add("本次没有取得符合筛选条件的实时岗位，当前展示的是本地岗位库（内置样例为演示数据）；可调整条件或粘贴真实 JD。");
         }
+        long importedCount = jobs.stream().filter(job -> job.id().startsWith("imported-")).count();
+        if (importedCount > 0) notes.add("候选中包含 " + importedCount + " 个本人导入的 JD，仅当前账号可见；请自行核对原文与在招状态。");
         reports.stream().filter(r -> !r.ok() && !"已通过配置关闭".equals(r.message()))
                 .forEach(r -> notes.add(r.name() + "：" + r.message()));
     }

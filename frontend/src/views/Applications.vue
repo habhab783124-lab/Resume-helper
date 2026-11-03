@@ -5,8 +5,8 @@
       <RouterLink class="button button-outline" to="/jobs">继续寻找岗位</RouterLink>
     </div>
     <div class="workflow-toolbar">
-      <button class="button" :class="tab==='applications'?'button-primary':'button-outline'" @click="tab='applications'">投递记录</button>
-      <button class="button" :class="tab==='favorites'?'button-primary':'button-outline'" @click="tab='favorites'">我的收藏</button>
+      <button class="button" :class="tab==='applications'?'button-primary':'button-outline'" @click="setTab('applications')">投递记录</button>
+      <button class="button" :class="tab==='favorites'?'button-primary':'button-outline'" @click="setTab('favorites')">我的收藏</button>
       <template v-if="tab==='applications'">
         <label>进度 <select v-model="status" @change="offset=0;loadList()"><option value="">全部</option><option v-for="s in APPLICATION_STATUSES" :key="s.value" :value="s.value">{{ s.label }}</option></select></label>
         <label class="due-filter"><input type="checkbox" v-model="due" @change="offset=0;loadList()" />仅看到期待办</label>
@@ -14,10 +14,12 @@
       <button class="text-button" :disabled="busy" @click="reload">刷新</button>
     </div>
     <p v-if="error" role="alert" class="workflow-error">{{ error }}</p>
+    <p v-if="activeListError" role="alert" class="workflow-error">{{ activeListError }} <button class="text-button" @click="loadList">重试</button></p>
+    <button v-if="conflicted" class="button button-outline" :disabled="busy" @click="refreshVersion">读取最新版本并保留草稿</button>
     <p v-if="notice" role="status" class="workflow-notice">{{ notice }}</p>
     <p v-if="loading" role="status">正在加载求职记录…</p>
     <template v-else-if="tab==='favorites'">
-      <p v-if="!favorites.length" class="workflow-empty">还没有收藏岗位。到岗位匹配页收藏，重启后也会保留。</p>
+      <p v-if="!favorites.length&&!activeListError" class="workflow-empty">还没有收藏岗位。到岗位匹配页收藏，重启后也会保留。</p>
       <div class="favorites-grid">
         <article v-for="job in favorites" :key="job.id" class="workflow-card">
           <p class="eyebrow">{{ job.company }}</p><h2>{{ job.title }}</h2><p>{{ job.place }} · {{ job.salary }}</p>
@@ -31,7 +33,7 @@
       <p class="workflow-count">共 {{ total }} 条记录<span v-if="due"> · 包含已到行动时间且尚未结束的记录</span></p>
       <div class="workflow-layout">
         <div>
-          <p v-if="!items.length" class="workflow-empty">{{ due ? '当前没有到期待办。' : '暂无符合条件的投递记录。可以从收藏或岗位卡片加入。' }}</p>
+          <p v-if="!items.length&&!activeListError" class="workflow-empty">{{ due ? '当前没有到期待办。' : '暂无符合条件的投递记录。可以从收藏或岗位卡片加入。' }}</p>
           <button v-for="app in items" :key="app.id" class="application-row" :class="{selected:selected?.id===app.id}" :disabled="busy" @click="open(app.id)">
             <span class="row-head"><strong>{{ app.jobSnapshot.title }}</strong><span class="status-pill">{{ statusLabel(app.status) }}</span></span>
             <span>{{ app.jobSnapshot.company }} · {{ app.jobSnapshot.city || '地点未披露' }}</span>
@@ -72,7 +74,7 @@
 </template>
 
 <script setup>
-import {ref,reactive,onMounted,onBeforeUnmount,watch} from 'vue'
+import {ref,reactive,computed,onMounted,onBeforeUnmount,watch} from 'vue'
 import {RouterLink,useRoute,useRouter} from 'vue-router'
 import {listApplications,createApplication,fetchApplication,changeApplication,addApplicationEvent,deleteApplication,listApplicationInterviews} from '../api/applications'
 import {fetchFavorites,removeFavorite} from '../api/jobs'
@@ -85,15 +87,21 @@ const tab=ref(route.query.tab==='favorites'?'favorites':'applications'),status=r
 const items=ref([]),favorites=ref([]),selected=ref(null),versions=ref([]),interviews=ref([])
 const loading=ref(false),busy=ref(false),error=ref(''),notice=ref(''),auxiliaryError=ref(''),interviewId=ref(''),confirmDelete=ref(false)
 const form=reactive({status:'PREPARING',resumeVersionId:'',nextActionAt:'',note:''})
+const listError=ref(''),favoritesError=ref(''),conflicted=ref(false)
+const activeListError=computed(()=>tab.value==='favorites'?favoritesError.value:listError.value)
+const dirty=computed(()=>selected.value&&(form.note!==''||form.status!==selected.value.status||form.resumeVersionId!==(selected.value.resumeVersionId||'')||form.nextActionAt!==localDateTime(selected.value.nextActionAt)))
 let generation=0,detailGeneration=0,optionsGeneration=0,alive=true
 const scope=()=>getUserId()+'|'+getLocalApiBaseUrl()
 const format=value=>value?new Date(value).toLocaleString('zh-CN'):'—'
 async function loadList(){
-  const request=++generation,currentScope=scope();loading.value=true;error.value=''
+  const request=++generation,currentScope=scope();loading.value=true
   try{
-    const [page,saved]=await Promise.all([listApplications({status:status.value||undefined,due:due.value,offset:offset.value,limit}),fetchFavorites()])
+    const [page,saved]=await Promise.allSettled([listApplications({status:status.value||undefined,due:due.value,offset:offset.value,limit}),fetchFavorites()])
     if(!alive||request!==generation||currentScope!==scope())return
-    items.value=page.items||[];total.value=page.total||0;favorites.value=saved.jobs||[]
+    listError.value=page.status==='rejected'?(page.reason.message||'投递记录加载失败，请重试'):''
+    favoritesError.value=saved.status==='rejected'?(saved.reason.message||'收藏加载失败，请重试'):''
+    if(page.status==='fulfilled'){items.value=page.value.items||[];total.value=page.value.total||0}
+    if(saved.status==='fulfilled')favorites.value=saved.value.jobs||[]
   }catch(e){if(alive&&request===generation&&currentScope===scope())error.value=e.message||'加载失败，请重试'}
   finally{if(alive&&request===generation)loading.value=false}
 }
@@ -106,7 +114,7 @@ async function loadOptions(){
   auxiliaryError.value=results.some(r=>r.status==='rejected')?'部分简历或面试选项未载入；已保存快照不受影响。':''
 }
 function select(app){
-  selected.value=app;confirmDelete.value=false;interviewId.value=''
+  selected.value=app;confirmDelete.value=false;interviewId.value='';conflicted.value=false
   Object.assign(form,{status:app.status,resumeVersionId:app.resumeVersionId||'',nextActionAt:localDateTime(app.nextActionAt),note:''})
 }
 async function open(id){
@@ -116,12 +124,12 @@ async function open(id){
   try{const app=await fetchApplication(id);if(alive&&request===detailGeneration&&currentScope===scope())select(app)}
   catch(e){if(alive&&request===detailGeneration&&currentScope===scope())error.value=e.message}
 }
-function closeDetail(){detailGeneration++;selected.value=null;confirmDelete.value=false;router.replace({name:'Applications',query:due.value?{due:'1'}:{}})}
+function closeDetail(){detailGeneration++;selected.value=null;confirmDelete.value=false;conflicted.value=false;const {id,...query}=route.query;router.replace({name:'Applications',query})}
 async function mutate(action){
   if(busy.value)return
   const currentScope=scope();busy.value=true;error.value='';notice.value=''
   try{await action(currentScope)}
-  catch(e){if(alive&&currentScope===scope())error.value=e.status===409?'记录已被更新，请刷新后重新修改。当前表单尚未提交。':e.message||'保存失败，请重试'}
+  catch(e){if(alive&&currentScope===scope()){conflicted.value=e.status===409;error.value=e.status===409?'记录已被其他操作更新。请读取最新版本，核对保留的草稿后再保存。':e.message||'保存失败，请重试'}}
   finally{if(alive&&currentScope===scope())busy.value=false}
 }
 async function save(){const app=selected.value;if(!app)return
@@ -132,13 +140,20 @@ async function linkInterview(){const app=selected.value;if(!app||!interviewId.va
   const payload={version:app.version,note:'关联面试记录',interviewSessionId:interviewId.value}
   await mutate(async owner=>{const value=await addApplicationEvent(app.id,payload);if(!alive||owner!==scope())return;select(value);notice.value='面试已加入时间线';await loadList()})
 }
-async function add(jobId){await mutate(async owner=>{const app=await createApplication({jobId});if(!alive||owner!==scope())return;tab.value='applications';status.value='';due.value=false;offset.value=0;select(app);await loadList()})}
+async function add(jobId){await mutate(async owner=>{const app=await createApplication({jobId});if(!alive||owner!==scope())return;tab.value='applications';status.value='';due.value=false;offset.value=0;select(app);await router.replace({name:'Applications',query:{id:app.id,tab:'applications'}});await loadList()})}
 async function unfavorite(id){await mutate(async owner=>{await removeFavorite(id);if(alive&&owner===scope()){favorites.value=favorites.value.filter(v=>v.id!==id);notice.value='已取消收藏'}})}
 async function remove(){const app=selected.value;if(!app)return
   await mutate(async owner=>{await deleteApplication(app.id,app.version);if(!alive||owner!==scope())return;closeDetail();offset.value=0;notice.value='投递记录已删除';await loadList()})
 }
-async function reload(){await loadList();if(selected.value)await open(selected.value.id)}
-function resetScope(){generation++;detailGeneration++;optionsGeneration++;selected.value=null;items.value=[];favorites.value=[];versions.value=[];interviews.value=[];busy.value=false;offset.value=0;notice.value='';loadList();loadOptions()}
+async function refreshVersion(){const app=selected.value;if(!app)return
+  await mutate(async owner=>{const latest=await fetchApplication(app.id);if(!alive||owner!==scope()||selected.value?.id!==app.id)return;selected.value=latest;conflicted.value=false;confirmDelete.value=false
+    if(!allowedStatuses(latest.status).some(s=>s.value===form.status))form.status=latest.status
+    notice.value='已读取最新版本，备注、简历选择与行动时间草稿已保留；请核对当前进度后保存。'})
+}
+async function reload(){await loadList();if(selected.value){if(dirty.value)notice.value='列表已刷新，未保存的表单草稿已保留。';else await open(selected.value.id)}}
+function setTab(value){tab.value=value;router.replace({query:{...route.query,tab:value}})}
+function resetScope(){generation++;detailGeneration++;optionsGeneration++;selected.value=null;items.value=[];favorites.value=[];versions.value=[];interviews.value=[];busy.value=false;offset.value=0;notice.value='';error.value='';auxiliaryError.value='';listError.value='';favoritesError.value='';interviewId.value='';confirmDelete.value=false;conflicted.value=false;Object.assign(form,{status:'PREPARING',resumeVersionId:'',nextActionAt:'',note:''});loadList();loadOptions()}
+watch(()=>route.query.tab,value=>{tab.value=value==='favorites'?'favorites':'applications'})
 watch(()=>route.query.id,id=>{if(typeof id==='string')open(id)})
 watch(()=>route.query.due,value=>{due.value=value==='1';offset.value=0;loadList()})
 onMounted(()=>{loadList();loadOptions();if(typeof route.query.id==='string')open(route.query.id);globalThis.addEventListener?.('request-context-change',resetScope)})

@@ -44,6 +44,12 @@ class PublicJobSourceTest {
         assertThat(calls.get()).isEqualTo(1);
     }
 
+    @Test void twoYearsOfExperienceInChineseIsNotMisreadAsZero() throws Exception {
+        var jobs = new TencentJobSource().parse(json.readTree("[{\"PostId\":\"2\",\"RecruitPostName\":\"Java\",\"RequireWorkYearsName\":\"两年以上工作经验\"}]"));
+        assertThat(jobs.get(0).minYears()).isEqualTo(2);
+        assertThat(new JobQuery().maxMinYears(1).accepts(jobs.get(0))).isFalse();
+    }
+
     @Test void officialSearchLoadsLaterPagesBeforeApplyingCityAndExperienceFilters() throws Exception {
         var pages = new java.util.ArrayList<Integer>();
         var source = new TencentJobSource(new PublicJobJsonClient() {

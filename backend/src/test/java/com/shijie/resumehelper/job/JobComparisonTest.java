@@ -37,6 +37,14 @@ class JobComparisonTest {
         assertTrue(result.items().stream().allMatch(i->i.dimensions().stream().allMatch(d->d.points()==null)));
         assertTrue(result.items().stream().allMatch(i->i.unrepresentedSkills().isEmpty()));
     }
+    @Test void anEmptyStoredProfileIsNotTreatedAsConfirmedPersonalInformation(){
+        when(profiles.find("alice")).thenReturn(Optional.of(UserProfileSnapshot.builder().build()));
+        var result=compare("balanced");assertFalse(result.profileAvailable());
+        assertTrue(result.items().stream().allMatch(i->i.score()==null&&i.unrepresentedSkills().isEmpty()));
+        when(profiles.find("alice")).thenReturn(Optional.of(UserProfileSnapshot.builder().targetCities(List.of("上海")).build()));
+        assertTrue(compare("city").profileAvailable());
+        assertEquals("a",compare("city").items().get(0).job().id());
+    }
     @Test void changingPreferencesChangesRankingWithExplainableWeights(){
         when(profiles.find("alice")).thenReturn(Optional.of(profile()));
         assertEquals("a",compare("city").items().get(0).job().id());

@@ -53,6 +53,48 @@ class JobSearchRegressionTest {
         assertThat(AgentOptions.builder().limit(10000).build().limit()).isEqualTo(500);
     }
 
+    @Test void ranksTheCandidatePoolBeforeApplyingTheDisplayLimit() {
+        var jobs = new java.util.ArrayList<>(IntStream.range(0, 70)
+                .mapToObj(i -> job("其他工程师 " + i, "北京", 5)).toList());
+        jobs.add(job("Java 后端开发", "上海", 1).toBuilder().skills(List.of("Java", "Spring Boot")).build());
+        var agent = new JobSearchAgent(new JobSourceRegistry(List.of(source(jobs))));
+        var profile = UserProfileSnapshot.builder().targetTitle("Java 后端开发").skills(List.of("Java", "Spring Boot"))
+                .targetCities(List.of("上海")).build();
+        var query = new JobQuery().limit(12);
+        var result = agent.search(profile, query, AgentOptions.builder().limit(12).explainTopN(0).build(), null);
+        assertThat(result.matches()).hasSize(12);
+        assertThat(result.matches().get(0).job().title()).isEqualTo("Java 后端开发");
+        assertThat(result.candidateCount()).isEqualTo(71);
+        assertThat(query.limit()).isEqualTo(12);
+        assertThat(com.shijie.resumehelper.job.api.dto.JobViews.JobList.of(result, id -> false).candidateCount()).isEqualTo(71);
+    }
+
+    @Test void defaultSearchReturnsMoreThanTwelveAndDoesNotExcludeExperiencedJobs() {
+        var jobs = IntStream.range(0, 80).mapToObj(i -> job("Java 工程师 " + i, "上海", 3)).toList();
+        var registry = new JobSourceRegistry(List.of(source(jobs)));
+        var service = new com.shijie.resumehelper.job.service.JobService(registry, new JobSearchAgent(registry),
+                new com.shijie.resumehelper.job.store.InMemoryJobStore(), new JobImporter(),
+                new com.shijie.resumehelper.job.match.MatchScorer(), new com.shijie.resumehelper.job.config.JobModuleProperties());
+        var result = service.search(null, new com.shijie.resumehelper.job.api.dto.JobRequests.Search(), null);
+        assertThat(result.matches()).hasSize(60);
+        assertThat(result.candidateCount()).isEqualTo(80);
+        assertThat(com.shijie.resumehelper.job.api.dto.JobViews.JobList.of(result, id -> false).jobs())
+                .allMatch(card -> card.score() == null);
+    }
+
+    @Test void explicitAgentSearchDoesNotRepeatTheSameNetworkQuery() {
+        var calls = new java.util.concurrent.atomic.AtomicInteger();
+        var registry = new JobSourceRegistry(List.of(new JobSource() {
+            public String name() { return "测试源"; }
+            public List<Job> search(JobQuery query) { calls.incrementAndGet(); return List.of(job("Java", "上海", 3)); }
+        }));
+        var result = new JobSearchAgent(registry).run(UserProfileSnapshot.builder().build(),
+                AgentOptions.builder().explainTopN(0).build(), null, "Java");
+        assertThat(calls.get()).isEqualTo(1);
+        assertThat(result.matches()).hasSize(1);
+        assertThat(com.shijie.resumehelper.job.api.dto.JobViews.AgentRunView.of(result, id -> false).jobs().get(0).score()).isNull();
+    }
+
     @Test void cappedResultsKeepMultipleOfficialSourcesRepresented() {
         var firstJobs = IntStream.range(0, 600).mapToObj(i -> job("Java " + i, "上海", 3)
                 .toBuilder().source("官网一", "https://example.com/a/" + i).build()).toList();
@@ -103,5 +145,15 @@ class JobSearchRegressionTest {
         assertThat(result.matches()).hasSize(2);
         assertThat(store.find(publicJob.id()).orElseThrow().description()).isEqualTo("公开 JD");
         assertThat(store.find(privateJob.id())).isEmpty();
+    }
+
+    @Test void privateImportsAreReportedSeparatelyAndNeverMislabeledAsBuiltInDemonstrations() {
+        var agent = new JobSearchAgent(new JobSourceRegistry(List.of()));
+        var imported = job("Java", "上海", 1).toBuilder().id("imported-" + "c".repeat(64)).build();
+        var result = agent.search(UserProfileSnapshot.builder().build(), new JobQuery(),
+                AgentOptions.builder().explainTopN(0).build(), null, List.of(imported));
+        assertThat(result.sourceReports()).anyMatch(r -> r.kind().equals("import") && r.ok() && r.count() == 1);
+        assertThat(result.notes()).anyMatch(note -> note.contains("本人导入"));
+        assertThat(result.notes()).noneMatch(note -> note.contains("演示数据"));
     }
 }

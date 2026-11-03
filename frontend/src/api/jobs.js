@@ -26,16 +26,16 @@ export function fetchSources() {
  * @param {number} [payload.explainTopN]  前 N 个岗位调用大模型生成解释；0 表示不调用（快）
  * @param {object} payload.profile        用户画像（见 utils/demoProfile.js）
  */
-export function searchJobs(payload) {
-  return http.post('/api/jobs/search', payload)
+export function searchJobs(payload, { signal } = {}) {
+  return http.post('/api/jobs/search', payload, { signal })
 }
 
 /**
  * 让智能体自己决定怎么找（多轮：规划关键词 → 检索 → 观察 → 换词扩检）。
  * 返回体里带 `trace` 执行轨迹，可以渲染成时间线。
  */
-export function runJobAgent({ profile, options } = {}) {
-  return http.post('/api/jobs/agent/run', { profile, options })
+export function runJobAgent({ profile, options } = {}, { signal } = {}) {
+  return http.post('/api/jobs/agent/run', { profile, options }, { signal, timeout: 180000 })
 }
 
 /** 不带画像的岗位列表（不做匹配打分）。 */

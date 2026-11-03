@@ -40,6 +40,9 @@ public final class JobViews {
             /** 公司标记的配色类："" / mark-blue / mark-amber / mark-rose。 */
             String style,
             String salary,
+            /** 统一为千元/月；0 表示未披露，供客户端排序。 */
+            Integer salaryMin,
+            Integer salaryMax,
             /** 展示用地点，例如「上海 · 徐汇」。 */
             String place,
             String city,
@@ -67,7 +70,7 @@ public final class JobViews {
         /** 没有用户画像时的岗位卡片：只展示岗位本身。 */
         public static JobCard of(Job job, boolean saved) {
             return new JobCard(job.id(), job.title(), job.company(), job.companyMark(), styleOf(job.company()),
-                    job.salary(), job.place(), job.city(), job.district(), job.experience(), job.education(),
+                    job.salary(), job.salaryMin(), job.salaryMax(), job.place(), job.city(), job.district(), job.experience(), job.education(),
                     job.jobType(), job.campus(), job.skills(), List.of(), List.of(), null, null,
                     List.of(), Map.of(), job.sourceName(), job.sourceUrl(), job.collectedAt(),
                     brief(job.description()), saved);
@@ -76,7 +79,7 @@ public final class JobViews {
         /** 岗位详情保留完整 JD，供用户确认后带入面试准备表单。 */
         public static JobCard ofDetailed(Job job, boolean saved) {
             return new JobCard(job.id(), job.title(), job.company(), job.companyMark(), styleOf(job.company()),
-                    job.salary(), job.place(), job.city(), job.district(), job.experience(), job.education(),
+                    job.salary(), job.salaryMin(), job.salaryMax(), job.place(), job.city(), job.district(), job.experience(), job.education(),
                     job.jobType(), job.campus(), job.skills(), List.of(), List.of(), null, null,
                     List.of(), Map.of(), job.sourceName(), job.sourceUrl(), job.collectedAt(),
                     job.description() == null ? "" : job.description(), saved);
@@ -85,7 +88,7 @@ public final class JobViews {
         public static JobCard of(JobMatchResult match, boolean saved) {
             Job job = match.job();
             return new JobCard(job.id(), job.title(), job.company(), job.companyMark(), styleOf(job.company()),
-                    job.salary(), job.place(), job.city(), job.district(), job.experience(), job.education(),
+                    job.salary(), job.salaryMin(), job.salaryMax(), job.place(), job.city(), job.district(), job.experience(), job.education(),
                     job.jobType(), job.campus(), match.displayTags(4), match.matchedSkills(), match.missingSkills(),
                     match.score(), match.primaryReason(), match.gaps(), match.dimensions(),
                     job.sourceName(), job.sourceUrl(), job.collectedAt(), brief(job.description()), saved);
@@ -157,7 +160,13 @@ public final class JobViews {
             boolean aiUsed,
             String aiModel,
             List<String> usedKeywords,
-            String scoreNotice) {
+            String scoreNotice,
+            int candidateCount) {
+
+        public JobList(int total, List<JobCard> jobs, List<SourceStatus> sources, List<String> notes,
+                       boolean aiUsed, String aiModel, List<String> usedKeywords, String scoreNotice) {
+            this(total, jobs, sources, notes, aiUsed, aiModel, usedKeywords, scoreNotice, total);
+        }
 
         public static JobList of(AgentRunResult result, Predicate<String> isSaved) {
             List<JobCard> cards = result.matches().stream()
@@ -167,7 +176,8 @@ public final class JobViews {
                     .toList();
             return new JobList(cards.size(), cards,
                     result.sourceReports().stream().map(SourceStatus::of).toList(),
-                    result.notes(), result.aiUsed(), result.aiModel(), result.usedKeywords(), SCORE_NOTICE);
+                    result.notes(), result.aiUsed(), result.aiModel(), result.usedKeywords(), SCORE_NOTICE,
+                    result.candidateCount());
         }
     }
 
@@ -207,7 +217,9 @@ public final class JobViews {
 
         public static AgentRunView of(AgentRunResult result, Predicate<String> isSaved) {
             List<JobCard> cards = result.matches().stream()
-                    .map(match -> JobCard.of(match, isSaved != null && isSaved.test(match.job().id())))
+                    .map(match -> result.profile().isUsable()
+                            ? JobCard.of(match, isSaved != null && isSaved.test(match.job().id()))
+                            : JobCard.of(match.job(), isSaved != null && isSaved.test(match.job().id())))
                     .toList();
             return new AgentRunView(cards.size(), cards,
                     result.trace().stream().map(TraceStep::of).toList(),
