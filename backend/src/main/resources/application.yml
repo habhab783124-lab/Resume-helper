@@ -136,11 +136,13 @@ app:
     # 智能体最多检索几轮（换关键词扩检）。轮数越多越费 token。
     max-rounds: 3
     # 最终返回给前端的岗位数量
-    default-limit: 12
+    default-limit: 60
     # 前 N 个岗位调用大模型生成「为什么匹配 / 差在哪里」，0 表示完全不调用大模型
     explain-top-n: 5
     # 前端的岗位页一次最多取多少条
-    max-limit: 50
+    max-limit: 500
+    # 粘贴导入的岗位存放目录（相对 JVM 工作目录），刷新、重启后仍可检索
+    storage-dir: ${JOB_STORAGE_DIR:./data/jobs}
     cors:
       # 允许跨域的前端来源，支持通配符。
       # 本地开发走 vite 代理时用不到它；前端部署到公网后**必须**把域名加进来，
@@ -153,6 +155,12 @@ app:
         - http://127.0.0.1:*
         - https://resume-helper-two.vercel.app
     sources:
+      # 腾讯官方公开招聘接口：默认启用，免登录、结果带原始岗位链接
+      tencent-enabled: ${TENCENT_JOBS_ENABLED:true}
+      # 网易官方公开招聘接口：默认启用
+      netease-enabled: ${NETEASE_JOBS_ENABLED:true}
+      # 可选跨站公开搜索：配置服务端 TAVILY_API_KEY 后才真正生效
+      tavily-api-key: ${TAVILY_API_KEY:}
       # 内置演示岗位库：外部来源不可用时的兜底，保证岗位页永远有内容
       mock-enabled: true
       # 人工整理的 CSV 岗位库。classpath: 或绝对路径都支持。

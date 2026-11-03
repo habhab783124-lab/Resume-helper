@@ -22,7 +22,7 @@ public final class JobQuery {
     /** 是否把城市当硬筛选条件。默认 false：城市作为匹配维度打分，让用户看到更多岗位和差距。 */
     private boolean strictCity;
     private final List<String> keywords = new ArrayList<>();
-    private int limit = 30;
+    private int limit = 60;
 
     public JobQuery() {
     }
@@ -108,7 +108,7 @@ public final class JobQuery {
     }
 
     public int limit() {
-        return limit <= 0 ? 30 : Math.min(limit, 200);
+        return limit <= 0 ? 60 : Math.min(limit, 500);
     }
 
     public JobQuery limit(int v) {
@@ -135,7 +135,7 @@ public final class JobQuery {
      * 匹配度只用于解释贴合程度，不表示录取概率。
      */
     public boolean accepts(Job job) {
-        if (strictCity && !city.isBlank() && !job.cityMatches(List.of(city))) {
+        if (strictCity && !city.isBlank() && (job.city().isBlank() || !job.cityMatches(List.of(city)))) {
             return false;
         }
         if (jobType != null && !jobType.isBlank() && !job.jobType().contains(jobType) && !jobType.contains(job.jobType())) {
@@ -158,13 +158,21 @@ public final class JobQuery {
         if (TextKit.isBlank(kw)) {
             return true;
         }
-        String needle = TextKit.normalize(kw);
+        // 官网还会检索未随摘要返回的任职要求，不能仅凭摘要再次排除官方命中。
+        if (job.searchKeywords().stream().anyMatch(value -> searchText(value).equals(searchText(kw)))) return true;
+        String needle = searchText(kw);
         if (needle.isEmpty()) {
             return true;
         }
-        String haystack = TextKit.normalize(TextKit.joinNonBlank(" ",
+        String haystack = searchText(TextKit.joinNonBlank(" ",
                 job.title(), job.company(), job.city(), String.join(" ", job.skills()), job.description()));
-        return haystack.contains(needle);
+        // 多个输入词同时满足；保留 C++ / C# 中的符号，避免退化成单字母匹配。
+        return java.util.Arrays.stream(kw.trim().split("[\\s,，、;；]+"))
+                .map(JobQuery::searchText).filter(term -> !term.isEmpty()).allMatch(haystack::contains);
+    }
+
+    private static String searchText(String text) {
+        return TextKit.orEmpty(text).toLowerCase(java.util.Locale.ROOT).replaceAll("[^\\p{L}\\p{N}+#]", "");
     }
 
     public JobQuery copy() {

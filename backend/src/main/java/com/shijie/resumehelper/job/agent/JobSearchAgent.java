@@ -71,6 +71,10 @@ public final class JobSearchAgent {
      * @param aiClient 用户自己的大模型客户端；传 null 表示没有可用 token，会使用离线替身
      */
     public AgentRunResult run(UserProfileSnapshot profile, AgentOptions options, AiClient aiClient) {
+        return run(profile, options, aiClient, "");
+    }
+
+    public AgentRunResult run(UserProfileSnapshot profile, AgentOptions options, AiClient aiClient, String requestedKeyword) {
         AgentOptions opts = options == null ? AgentOptions.defaults() : options;
         AiClient ai = aiClient == null ? new FakeAiClient() : aiClient;
 
@@ -105,6 +109,7 @@ public final class JobSearchAgent {
             }
 
             JobQuery query = buildQuery(profile, opts, action, candidateKeywords, usedKeywords);
+            if (!TextKit.isBlank(requestedKeyword)) query.keyword(requestedKeyword);
             JobSourceRegistry.Result result = registry.search(query);
 
             pool.addAll(result.jobs());
@@ -123,7 +128,7 @@ public final class JobSearchAgent {
 
         if (candidates.isEmpty()) {
             // 兜底一：完全按硬条件再搜一次，宁可多给也不要返回空页面
-            JobQuery fallback = baseQuery(profile, opts).limit(opts.limit());
+            JobQuery fallback = baseQuery(profile, opts).keyword(requestedKeyword).limit(opts.limit());
             JobSourceRegistry.Result relaxed = registry.search(fallback);
             candidates = deduplicator.dedupe(relaxed.jobs());
             if (!candidates.isEmpty()) {
@@ -137,6 +142,9 @@ public final class JobSearchAgent {
             notes.add("当前没有可用的岗位来源，请检查网络，或使用「粘贴岗位描述」入口手动导入岗位");
         }
 
+        List<Job> liveCandidates = candidates.stream().filter(registry::isLive).toList();
+        if (!liveCandidates.isEmpty()) candidates = liveCandidates;
+        addSourceNotes(candidates, reports, notes);
         JobMatchService matchService = new JobMatchService(scorer, ai, opts.explainTopN());
         List<JobMatchResult> matches = matchService.rankWithExplanation(candidates, profile, opts.limit());
 
@@ -149,12 +157,22 @@ public final class JobSearchAgent {
      * 用于岗位页的搜索/筛选（要快、要确定），对应 {@code GET /api/jobs}。
      */
     public AgentRunResult search(UserProfileSnapshot profile, JobQuery query, AgentOptions options, AiClient aiClient) {
+        return search(profile, query, options, aiClient, List.of());
+    }
+
+    public AgentRunResult search(UserProfileSnapshot profile, JobQuery query, AgentOptions options, AiClient aiClient,
+                                 List<Job> imported) {
         AgentOptions opts = options == null ? AgentOptions.defaults() : options;
         AiClient ai = aiClient == null ? new FakeAiClient() : aiClient;
         JobQuery effective = query == null ? baseQuery(profile, opts) : query;
 
         JobSourceRegistry.Result result = registry.search(effective);
-        List<Job> candidates = deduplicator.dedupe(result.jobs());
+        List<Job> combined = new ArrayList<>(imported.stream().filter(effective::accepts)
+                .filter(job -> effective.allKeywords().isEmpty() || effective.allKeywords().stream()
+                        .anyMatch(keyword -> effective.matchesKeyword(job, keyword))).toList());
+        combined.addAll(result.jobs());
+        // 私人导入与公开岗位即使同名也保留独立身份，不能把用户的 JD 合并进公共缓存。
+        List<Job> candidates = combined;
         List<String> notes = new ArrayList<>();
         if (result.relaxed() && !candidates.isEmpty()) {
             notes.add("关键词过窄，已放宽为按城市/经验条件返回");
@@ -162,6 +180,7 @@ public final class JobSearchAgent {
         if (candidates.isEmpty()) {
             notes.add("没有匹配的岗位，可以试试更短的关键词，或用「粘贴岗位描述」导入目标岗位");
         }
+        addSourceNotes(candidates, result.reports(), notes);
 
         JobMatchService matchService = new JobMatchService(scorer, ai, opts.explainTopN());
         List<JobMatchResult> matches = matchService.rankWithExplanation(candidates, profile, effective.limit());
@@ -226,7 +245,7 @@ public final class JobSearchAgent {
         if (TextKit.isBlank(city)) {
             city = profile.primaryCity();
         }
-        query.city(city);
+        query.city(options.strictCity() ? options.city() : city);
 
         // 注意：不要写成 `cond ? action.intArg(..) : options.maxMinYears()`。
         // 三元表达式里 int 和 Integer 会做数值提升，为 null 的 Integer 会被自动拆箱成 NPE。
@@ -234,12 +253,14 @@ public final class JobSearchAgent {
         if (action.args().containsKey("maxYears")) {
             maxYears = action.intArg("maxYears", 0);
         }
+        if (options.maxMinYears() != null && maxYears != null) maxYears = Math.min(options.maxMinYears(), maxYears);
         query.maxMinYears(maxYears);
 
         Integer salaryMin = options.salaryMin();
         if (action.args().containsKey("salaryMin")) {
             salaryMin = action.intArg("salaryMin", 0);
         }
+        if (options.salaryMin() != null && salaryMin != null) salaryMin = Math.max(options.salaryMin(), salaryMin);
         query.salaryMin(salaryMin);
 
         if (action.args().containsKey("campusOnly")) {
@@ -248,6 +269,8 @@ public final class JobSearchAgent {
         if (action.args().containsKey("jobType")) {
             query.jobType(action.arg("jobType"));
         }
+        if (!options.jobType().isBlank()) query.jobType(options.jobType());
+        if (options.campusOnly()) query.campusOnly(true);
 
         return query.limit(options.limit());
     }
@@ -297,5 +320,15 @@ public final class JobSearchAgent {
             sb.append("，例如 ").append(String.join("、", samples));
         }
         return sb.toString();
+    }
+
+    private void addSourceNotes(List<Job> jobs, List<JobSourceRegistry.SourceReport> reports, List<String> notes) {
+        if (jobs.stream().anyMatch(registry::isLive)) {
+            notes.add("已联网检索公开招聘来源。采集时间不等于发布时间，请打开原始链接核实在招状态。未披露的薪资、学历和经验不作推测。");
+        } else if (!jobs.isEmpty()) {
+            notes.add("本次没有取得符合筛选条件的实时岗位，当前展示的是本地岗位库（内置样例为演示数据）；可调整条件或粘贴真实 JD。");
+        }
+        reports.stream().filter(r -> !r.ok() && !"已通过配置关闭".equals(r.message()))
+                .forEach(r -> notes.add(r.name() + "：" + r.message()));
     }
 }

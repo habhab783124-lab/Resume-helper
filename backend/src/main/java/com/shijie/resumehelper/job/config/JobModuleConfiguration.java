@@ -7,6 +7,10 @@ import com.shijie.resumehelper.job.source.JobImporter;
 import com.shijie.resumehelper.job.source.JobSource;
 import com.shijie.resumehelper.job.source.JobSourceRegistry;
 import com.shijie.resumehelper.job.source.MockJobSource;
+import com.shijie.resumehelper.job.source.TencentJobSource;
+import com.shijie.resumehelper.job.source.NetEaseJobSource;
+import com.shijie.resumehelper.job.source.TavilyJobSource;
+import org.springframework.beans.factory.annotation.Value;
 import com.shijie.resumehelper.job.store.InMemoryJobStore;
 import com.shijie.resumehelper.job.store.JobStore;
 import org.slf4j.Logger;
@@ -46,6 +50,19 @@ public class JobModuleConfiguration {
     @Bean
     public JobImporter jobImporter() {
         return new JobImporter();
+    }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "app.job.sources", name = "tencent-enabled", havingValue = "true", matchIfMissing = true)
+    public JobSource tencentJobSource() { return new TencentJobSource(); }
+
+    @Bean
+    @ConditionalOnProperty(prefix = "app.job.sources", name = "netease-enabled", havingValue = "true", matchIfMissing = true)
+    public JobSource netEaseJobSource() { return new NetEaseJobSource(); }
+
+    @Bean
+    public JobSource webSearchJobSource(@Value("${app.job.sources.tavily-api-key:}") String key) {
+        return new TavilyJobSource(key);
     }
 
     /** 内置演示岗位库：兜底来源，保证岗位页永远有内容。 */

@@ -31,7 +31,9 @@ public record Job(
         String description,
         String sourceName,
         String sourceUrl,
-        Instant collectedAt) {
+        Instant collectedAt,
+        /** 官方搜索命中的查询词，仅用于检索；不作为岗位技能要求或匹配评分证据。 */
+        List<String> searchKeywords) {
 
     public Job {
         if (TextKit.isBlank(title)) {
@@ -54,6 +56,7 @@ public record Job(
         jobType = TextKit.isBlank(jobType) ? "全职" : jobType.trim();
         campus = campus || TextKit.isCampusFriendly(experience, jobType);
         skills = skills == null ? List.of() : List.copyOf(skills);
+        searchKeywords = searchKeywords == null ? List.of() : List.copyOf(searchKeywords);
         description = TextKit.orEmpty(description);
         sourceName = TextKit.isBlank(sourceName) ? "未知来源" : sourceName.trim();
         sourceUrl = TextKit.orEmpty(sourceUrl).trim();
@@ -113,6 +116,7 @@ public record Job(
         b.sourceName = sourceName;
         b.sourceUrl = sourceUrl;
         b.collectedAt = collectedAt;
+        b.searchKeywords = new ArrayList<>(searchKeywords);
         return b;
     }
 
@@ -136,6 +140,12 @@ public record Job(
         private String sourceName;
         private String sourceUrl;
         private Instant collectedAt;
+        private List<String> searchKeywords = List.of();
+
+        public Builder searchKeywords(List<String> values) {
+            this.searchKeywords = values == null ? List.of() : List.copyOf(values);
+            return this;
+        }
 
         public Builder id(String v) {
             this.id = v;
@@ -226,7 +236,7 @@ public record Job(
 
         public Job build() {
             return new Job(id, title, company, city, district, salary, salaryMin, salaryMax, education,
-                    experience, minYears, jobType, campus, skills, description, sourceName, sourceUrl, collectedAt);
+                    experience, minYears, jobType, campus, skills, description, sourceName, sourceUrl, collectedAt, searchKeywords);
         }
     }
 

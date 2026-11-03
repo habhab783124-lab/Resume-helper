@@ -20,7 +20,7 @@
 
 | 能力 | 实现位置 | 说明 |
 |---|---|---|
-| 多来源岗位聚合 | `job/source` | 可插拔 `JobSource` SPI；内置演示岗位库 + CSV 岗位库，新增来源不用改检索逻辑 |
+| 多来源岗位聚合 | `job/source` | 可插拔 `JobSource` SPI；默认腾讯、网易官方公开招聘接口 + 可选 Tavily 搜索，演示岗位库与 CSV 兜底 |
 | 跨来源去重 | `job/source/JobDeduplicator` | 按「公司+岗位+城市」指纹合并，技能取并集，真实来源优先于演示数据 |
 | 粘贴 JD 导入 | `job/source/JobImporter` | 用户没有爬虫数据也能完成匹配（产品方案 3.C 的兜底要求） |
 | 规则匹配打分 | `job/match/MatchScorer` | 技能 / 岗位方向 / 城市 / 经验 / 学历 / 薪资 六维加权，**完全可解释** |
@@ -338,13 +338,15 @@ const res = await fetch(`/api/jobs/${id}/match`, {
 | 演示岗位库 | `MockJobSource` | ✅ 内置 13 条人工编造的演示数据（**非真实在招岗位**），保证演示永不空白 |
 | CSV 岗位库 | `CsvJobSource` | ✅ 读 `classpath:jobs/sample-jobs.csv`，用 Excel 维护即可，可换成绝对路径 |
 | 粘贴 JD | `JobImporter` | ✅ 用户手动复制岗位描述，零合规风险 |
-| 公开 API | 预留 `JobSource` 接口 | ⬜ 建议先确认目标站点的 robots 与使用条款，再实现 |
-| 搜索引擎 API | 预留 | ⬜ 需要 API Key，结果需再用大模型抽成结构化岗位 |
+| 免费公开 API | `TencentJobSource` / `NetEaseJobSource` | ✅ 默认启用，只调官方免登录公开接口，结果带可回访的岗位原文链接；`TENCENT_JOBS_ENABLED` / `NETEASE_JOBS_ENABLED` 可关闭 |
+| 搜索引擎 API | `TavilyJobSource` | ✅ 配置服务端 `TAVILY_API_KEY` 后启用；只发送搜索关键词与城市，摘要不等同于已核实在招 |
 | 国内招聘站爬虫 | **不做** | ❌ 反爬强、易封 IP、有法律风险，不在课程项目范围内 |
 
 **新增一个来源只要三步**：实现 `JobSource` → 加 `@Bean` 注册 → 完成。
 `JobSourceRegistry` 会自动发现它，智能体和检索逻辑都不用改。
 单个来源抛异常会被隔离（记进 `sourceReports`），不会拖垮整次检索。
+联网来源有超时和响应大小上限，结果缓存五分钟；未披露的薪资、学历和年限不会被补造，
+城市、经验上限、薪资这类硬条件也不会因为智能体换关键词而放宽。
 
 CSV 表头（顺序可调）：
 
@@ -475,10 +477,10 @@ Spring 只出现在 `config` / `service` / `api` / `ai` 的实现类里。
 
 | 项 | 说明 |
 |---|---|
-| 没有真实招聘网站来源 | 合规原因，见第 4 节。默认靠演示库 + CSV + 粘贴 JD |
+| 招聘来源覆盖有限 | 默认只调腾讯、网易官方公开接口，其余站点要靠 Tavily 扩展；结果以招聘原文和当前在招状态为准 |
 | 智能体轨迹是同步返回的 | 没用 SSE 流式推送。轨迹在 `trace` 字段里，前端跑完再渲染时间线即可；要边跑边看可加 SSE |
 | 收藏是内存态 | 重启丢失，接 MySQL 即可解决 |
-| 没有做分页 | 单次最多返回 50 条（`app.job.max-limit`），课程演示够用 |
+| 没有做分页 | 单次最多返回 500 条（`app.job.max-limit`），课程演示够用 |
 | 技能词典是静态的 | 120+ 条常见技能，覆盖 Java 后端校招场景；新增技能改 `SkillLexicon` 的 `register` 一行即可 |
 | 没有防刷和限流 | 用户自带 token 消耗的是自己的额度，暂未做服务端限流 |
 

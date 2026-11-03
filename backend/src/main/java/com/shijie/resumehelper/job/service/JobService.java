@@ -87,9 +87,13 @@ public class JobService {
      * 用户画像是一整个结构化对象，塞进 query string 既难看又容易超长。
      */
     public AgentRunResult search(ProfileDto profile, JobRequests.Search request, AiClient ai) {
+        return search(profile, request, ai, List.of());
+    }
+
+    public AgentRunResult search(ProfileDto profile, JobRequests.Search request, AiClient ai, List<Job> imported) {
         JobQuery query = toQuery(request);
         AgentOptions options = toOptions(request);
-        AgentRunResult result = agent.search(snapshotOf(profile), query, options, ai);
+        AgentRunResult result = agent.search(snapshotOf(profile), query, options, ai, imported);
         cacheJobs(result);
         return result;
     }
@@ -103,7 +107,7 @@ public class JobService {
     public AgentRunResult runAgent(ProfileDto profile, AgentOptionsDto optionsDto, AiClient ai) {
         UserProfileSnapshot snapshot = snapshotOf(profile);
         AgentOptions options = optionsOf(optionsDto);
-        AgentRunResult result = agent.run(snapshot, options, ai);
+        AgentRunResult result = agent.run(snapshot, options, ai, optionsDto == null ? "" : optionsDto.getKeyword());
         cacheJobs(result);
         log.info("岗位智能体运行完成：模型={}，真实大模型={}，候选={}，返回={}",
                 result.aiModel(), result.aiUsed(), result.candidateCount(), result.matches().size());
@@ -114,6 +118,7 @@ public class JobService {
 
     /** 按 id 取岗位。store 里没有时回源站扫一遍（例如服务刚重启）。 */
     public Optional<Job> find(String id) {
+        if (id != null && id.startsWith("imported-")) return Optional.empty();
         Optional<Job> cached = store.find(id);
         if (cached.isPresent()) {
             return cached;
@@ -169,7 +174,8 @@ public class JobService {
     // ------------------------------------------------------------ 内部
 
     private void cacheJobs(AgentRunResult result) {
-        store.putAll(result.matches().stream().map(JobMatchResult::job).toList());
+        store.putAll(result.matches().stream().map(JobMatchResult::job)
+                .filter(job -> !job.id().startsWith("imported-")).toList());
     }
 
     public JobQuery toQuery(JobRequests.Search request) {

@@ -9,6 +9,9 @@ import java.util.ArrayList;
 import java.util.Collection;
 import java.util.Comparator;
 import java.util.List;
+import java.util.ArrayDeque;
+import java.util.LinkedHashMap;
+import java.util.Map;
 
 /**
  * 岗位数据源注册中心：并发度不需要很高，但必须做「隔离 + 兜底」。
@@ -26,7 +29,7 @@ public final class JobSourceRegistry {
     public JobSourceRegistry(Collection<JobSource> sources) {
         List<JobSource> list = new ArrayList<>(sources == null ? List.of() : sources);
         // 演示库排最后，真实来源优先，保证合并时真实来源赢
-        list.sort(Comparator.comparingInt(s -> s.kind().equals("mock") ? 1 : 0));
+        list.sort(Comparator.comparingInt(s -> s.kind().equals("mock") ? 2 : s.kind().equals("csv") ? 1 : 0));
         this.sources = List.copyOf(list);
     }
 
@@ -83,7 +86,6 @@ public final class JobSourceRegistry {
 
         int rawCount = collected.size();
         List<Job> hardFiltered = collected.stream().filter(query::accepts).toList();
-
         List<String> keywords = query.allKeywords();
         List<Job> keywordFiltered = hardFiltered;
         boolean relaxed = false;
@@ -91,20 +93,31 @@ public final class JobSourceRegistry {
             List<Job> matched = hardFiltered.stream()
                     .filter(job -> keywords.stream().anyMatch(kw -> query.matchesKeyword(job, kw)))
                     .toList();
-            if (matched.isEmpty() && !hardFiltered.isEmpty()) {
-                // 关键词太窄（例如用户写的是整句目标岗位），降级为按硬条件返回，宁可多给也不要空手
-                relaxed = true;
-                keywordFiltered = hardFiltered;
-            } else {
-                keywordFiltered = matched;
-            }
+            keywordFiltered = matched;
         }
+        List<Job> live = keywordFiltered.stream().filter(this::isLive).toList();
+        if (!live.isEmpty()) keywordFiltered = live;
 
         List<Job> deduped = deduplicator.dedupe(keywordFiltered);
         int dedupedCount = deduped.size();
         if (deduped.size() > query.limit()) {
-            deduped = new ArrayList<>(deduped.subList(0, query.limit()));
+            // A large first source must not consume every slot before other official sources are shown.
+            Map<String, ArrayDeque<Job>> groups = new LinkedHashMap<>();
+            for (Job job : deduped) groups.computeIfAbsent(job.sourceName(), key -> new ArrayDeque<>()).add(job);
+            List<Job> diverse = new ArrayList<>();
+            while (diverse.size() < query.limit()) {
+                for (ArrayDeque<Job> group : groups.values()) {
+                    if (!group.isEmpty()) diverse.add(group.removeFirst());
+                    if (diverse.size() == query.limit()) break;
+                }
+            }
+            deduped = diverse;
         }
         return new Result(deduped, reports, rawCount, dedupedCount, relaxed);
+    }
+
+    public boolean isLive(Job job) {
+        return sources.stream().filter(s -> List.of("public-api", "public-web", "search").contains(s.kind()))
+                .anyMatch(s -> job.sourceName().equals(s.name()) || job.sourceName().startsWith(s.name() + " · "));
     }
 }
