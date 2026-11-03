@@ -146,6 +146,32 @@ async function main(){
  await check('favorite cards add two choices and show a global comparison tray',async()=>{assert.equal(await evaluate('document.querySelectorAll(".comparison-tray-items button").length'),2)})
  await button('查看对比');await ready()
  await check('comparison table uses confirmed profile and unrepresented evidence wording',async()=>{const text=await body();assert.ok(text.includes('偏好参考分'));assert.ok(text.includes('未体现不代表不会'));assert.ok(text.includes('Redis'));assert.equal(await evaluate('document.querySelectorAll("thead th").length'),3)})
+ let rowVariant='empty',deliveredVariant=''
+ intercept=async paused=>{
+   const variant=rowVariant,data=await api('/api/jobs/compare',JSON.parse(paused.request.postData))
+   data.items=data.items.map(item=>({...item,job:{...item.job,place:'',salary:'未披露',experience:'',education:'',sourceName:'',sourceUrl:'',collectedAt:null,description:''},
+     score:null,knownWeight:0,salaryMin:null,salaryMax:null,requiredSkills:[],evidencedSkills:[],unrepresentedSkills:[],notes:[],
+     dimensions:item.dimensions.map(d=>({...d,points:null}))}))
+   if(variant==='partial'){data.items[1].job.place='上海';data.items[1].score=0;data.items[1].dimensions[2].points=0;data.items[1].requiredSkills=['Java']}
+   await cdp('Fetch.fulfillRequest',{requestId:paused.requestId,responseCode:200,responseHeaders:[{name:'Content-Type',value:'application/json'}],body:Buffer.from(JSON.stringify({success:true,data})).toString('base64')})
+   deliveredVariant=variant
+ }
+ await cdp('Fetch.enable',{patterns:[{urlPattern:'*api/jobs/compare',requestStage:'Request'}]})
+ await button('刷新确认资料与岗位快照');await until(()=>deliveredVariant==='empty','empty comparison response');await ready()
+ await check('rows without information in either job are absent from the table',async()=>{
+   assert.deepEqual(await evaluate('Array.from(document.querySelectorAll("tbody tr > th")).map(e=>e.textContent.trim())'),['下一步'])
+ })
+ await screenshot('comparison-empty-rows.png')
+ rowVariant='partial';await button('刷新确认资料与岗位快照');await until(()=>deliveredVariant==='partial','partial comparison response');await ready()
+ await check('one known job keeps its row and zero scores remain visible',async()=>{
+   const labels=await evaluate('Array.from(document.querySelectorAll("tbody tr > th")).map(e=>e.textContent.trim())')
+   assert.ok(labels.includes('工作地点'));assert.ok(!labels.includes('薪资原文'));assert.ok(!labels.includes('学历要求'))
+   assert.ok(labels.some(label=>label.startsWith('偏好参考分')));assert.ok(labels.some(label=>label.startsWith('城市')))
+   assert.equal(await evaluate('document.querySelector(".comparison-score-row td:nth-child(3) .comparison-score").textContent.trim()'),'0 / 100')
+   assert.ok((await body()).includes('上海'));assert.ok((await body()).includes('未披露'))
+ })
+ await screenshot('comparison-partial-rows.png')
+ await cdp('Fetch.disable');intercept=null;await button('刷新确认资料与岗位快照');await ready()
  await choose('city');await ready()
  await check('city preference shows the Shanghai opportunity first',async()=>{await until(()=>evaluate('document.querySelector("thead th:nth-child(2)").innerText.includes("Java开发1")'),'city order')})
  await choose('salary');await ready()

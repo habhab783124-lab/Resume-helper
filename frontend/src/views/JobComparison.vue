@@ -20,14 +20,14 @@
         <table class="comparison-table"><caption class="visually-hidden">{{ COMPARISON_PREFERENCES.find(p=>p.value===result.preference)?.label }} · 岗位比较</caption>
           <thead><tr><th scope="col">比较项目</th><th v-for="(item,index) in result.items" :key="item.job.id" scope="col"><span class="comparison-order">机会 {{ String(index+1).padStart(2,'0') }}</span><h2>{{ item.job.title }}</h2><p>{{ item.job.company }}</p><button class="text-button" @click="remove(item.job.id)">移出对比</button></th></tr></thead>
           <tbody>
-            <tr class="comparison-score-row"><th scope="row">偏好参考分<small>不同偏好不可直接比较</small></th><td v-for="item in result.items" :key="item.job.id"><strong class="comparison-score">{{ item.score ?? '—' }}<small v-if="item.score!=null"> / 100</small></strong><p>信息覆盖权重 {{ item.knownWeight }} / 100</p></td></tr>
-            <tr v-for="field in fields" :key="field.key"><th scope="row">{{ field.label }}</th><td v-for="item in result.items" :key="item.job.id">{{ field.value(item.job) }}<small v-if="field.key==='salary'&&item.salaryMin!=null">统一月薪参考：{{ item.salaryMin }}～{{ item.salaryMax }} 千元/月</small></td></tr>
-            <tr><th scope="row">岗位技能信息</th><td v-for="item in result.items" :key="item.job.id"><span v-for="skill in item.requiredSkills" :key="skill" class="comparison-tag">{{ skill }}</span><span v-if="!item.requiredSkills.length">未识别到明确技能，请核对原文</span></td></tr>
-            <tr><th scope="row">确认资料已体现</th><td v-for="item in result.items" :key="item.job.id"><span v-for="skill in item.evidencedSkills" :key="skill" class="comparison-tag positive">{{ skill }}</span><span v-if="!item.evidencedSkills.length">{{ result.profileAvailable?'尚无对应技能证据':'尚无已确认资料' }}</span></td></tr>
-            <tr><th scope="row">待补充证据<small>未体现不代表不会</small></th><td v-for="item in result.items" :key="item.job.id"><span v-for="skill in item.unrepresentedSkills" :key="skill" class="comparison-tag uncertain">{{ skill }}</span><span v-if="!item.unrepresentedSkills.length">{{ result.profileAvailable?'暂无待补充项；仍需核对原文':'确认个人资料后再比较' }}</span></td></tr>
-            <tr v-for="(label,index) in dimensionLabels" :key="label"><th scope="row">{{ label }}<small>该项权重 {{ result.items[0].dimensions[index].weight }} 分</small></th><td v-for="item in result.items" :key="item.job.id"><strong>{{ item.dimensions[index].points==null?'信息待确认':item.dimensions[index].points+' / '+item.dimensions[index].weight }}</strong><p>{{ item.dimensions[index].note }}</p></td></tr>
-            <tr><th scope="row">来源与采集时间</th><td v-for="item in result.items" :key="item.job.id"><p>{{ item.job.sourceName }}</p><p>{{ formatDate(item.job.collectedAt) }}</p><a v-if="safeSourceUrl(item.job.sourceUrl)" :href="safeSourceUrl(item.job.sourceUrl)" target="_blank" rel="noopener noreferrer">查看招聘原文 ↗</a><span v-else>未提供可访问的招聘链接</span></td></tr>
-            <tr><th scope="row">岗位原文与注意事项</th><td v-for="item in result.items" :key="item.job.id"><details><summary>查看 JD 原文</summary><p class="comparison-jd">{{ item.job.description||'来源未提供完整描述。' }}</p></details><ul><li v-for="note in item.notes" :key="note">{{ note }}</li></ul></td></tr>
+            <tr v-if="rowVisibility.score" class="comparison-score-row"><th scope="row">偏好参考分<small>不同偏好不可直接比较</small></th><td v-for="item in result.items" :key="item.job.id"><strong class="comparison-score">{{ item.score ?? '—' }}<small v-if="item.score!=null"> / 100</small></strong><p>信息覆盖权重 {{ item.knownWeight }} / 100</p></td></tr>
+            <tr v-for="field in visibleFields" :key="field.key"><th scope="row">{{ field.label }}</th><td v-for="item in result.items" :key="item.job.id">{{ field.value(item.job) }}<small v-if="field.key==='salary'&&item.salaryMin!=null">统一月薪参考：{{ item.salaryMin }}～{{ item.salaryMax }} 千元/月</small></td></tr>
+            <tr v-if="rowVisibility.requiredSkills"><th scope="row">岗位技能信息</th><td v-for="item in result.items" :key="item.job.id"><span v-for="skill in item.requiredSkills" :key="skill" class="comparison-tag">{{ skill }}</span><span v-if="!item.requiredSkills.length">未识别到明确技能，请核对原文</span></td></tr>
+            <tr v-if="rowVisibility.evidencedSkills"><th scope="row">确认资料已体现</th><td v-for="item in result.items" :key="item.job.id"><span v-for="skill in item.evidencedSkills" :key="skill" class="comparison-tag positive">{{ skill }}</span><span v-if="!item.evidencedSkills.length">{{ result.profileAvailable?'尚无对应技能证据':'尚无已确认资料' }}</span></td></tr>
+            <tr v-if="rowVisibility.unrepresentedSkills"><th scope="row">待补充证据<small>未体现不代表不会</small></th><td v-for="item in result.items" :key="item.job.id"><span v-for="skill in item.unrepresentedSkills" :key="skill" class="comparison-tag uncertain">{{ skill }}</span><span v-if="!item.unrepresentedSkills.length">{{ result.profileAvailable?'暂无待补充项；仍需核对原文':'确认个人资料后再比较' }}</span></td></tr>
+            <tr v-for="index in rowVisibility.dimensions" :key="result.items[0].dimensions[index].label"><th scope="row">{{ result.items[0].dimensions[index].label }}<small>该项权重 {{ result.items[0].dimensions[index].weight }} 分</small></th><td v-for="item in result.items" :key="item.job.id"><strong>{{ item.dimensions[index].points==null?'信息待确认':item.dimensions[index].points+' / '+item.dimensions[index].weight }}</strong><p>{{ item.dimensions[index].note }}</p></td></tr>
+            <tr v-if="rowVisibility.source"><th scope="row">来源与采集时间</th><td v-for="item in result.items" :key="item.job.id"><p>{{ item.job.sourceName }}</p><p>{{ formatDate(item.job.collectedAt) }}</p><a v-if="safeSourceUrl(item.job.sourceUrl)" :href="safeSourceUrl(item.job.sourceUrl)" target="_blank" rel="noopener noreferrer">查看招聘原文 ↗</a><span v-else>未提供可访问的招聘链接</span></td></tr>
+            <tr v-if="rowVisibility.details"><th scope="row">岗位原文与注意事项</th><td v-for="item in result.items" :key="item.job.id"><details><summary>查看 JD 原文</summary><p class="comparison-jd">{{ item.job.description||'来源未提供完整描述。' }}</p></details><ul><li v-for="note in item.notes" :key="note">{{ note }}</li></ul></td></tr>
             <tr><th scope="row">下一步</th><td v-for="item in result.items" :key="item.job.id"><div class="comparison-next"><button class="button button-primary" :disabled="!!busyId" @click="track(item)">加入投递管理</button><button class="button button-outline" :disabled="!!busyId" @click="favorite(item)">{{ item.job.saved?'取消收藏':'收藏岗位' }}</button><button class="text-button" :disabled="!!busyId" @click="practice(item)">用此岗位练习面试</button></div></td></tr>
           </tbody>
         </table>
@@ -39,7 +39,7 @@
 import {computed,onBeforeUnmount,onMounted,ref,watch} from 'vue'
 import {useRouter} from 'vue-router'
 import {useJobComparison} from '../composables/useJobComparison'
-import {COMPARISON_PREFERENCES} from '../utils/jobComparison'
+import {COMPARISON_PREFERENCES,getComparisonRowVisibility} from '../utils/jobComparison'
 import {compareJobs} from '../api/jobComparison'
 import {addFavorite,removeFavorite} from '../api/jobs'
 import {createApplication} from '../api/applications'
@@ -49,13 +49,14 @@ import {newInterviewRoute} from '../interview/interviewNavigation'
 const router=useRouter(),{selected,remove,clear}=useJobComparison()
 const preference=ref('balanced'),result=ref(null),loading=ref(false),error=ref(''),notice=ref(''),busyId=ref('')
 const ids=computed(()=>JSON.stringify(selected.value.map(v=>v.id)))
-const dimensionLabels=computed(()=>result.value?.items?.[0]?.dimensions.map(d=>d.label)||[])
+const rowVisibility=computed(()=>getComparisonRowVisibility(result.value?.items||[]))
 const scope=()=>getUserId()+'|'+getLocalApiBaseUrl()
 let generation=0,alive=true
 const fields=[{key:'place',label:'工作地点',value:j=>j.place||'未披露'},
   {key:'salary',label:'薪资原文',value:j=>j.salary||'未披露'},
   {key:'experience',label:'经验要求',value:j=>/不限/.test(j.experience||'')?'不限 / 来源未明确，请核对原文':j.experience||'未披露'},
   {key:'education',label:'学历要求',value:j=>j.education==='不限'?'不限 / 来源未明确，请核对原文':j.education||'未披露'}]
+const visibleFields=computed(()=>fields.filter(field=>rowVisibility.value.fields.includes(field.key)))
 const formatDate=value=>value?new Date(value).toLocaleString('zh-CN'):'未记录'
 async function load(){
   const request=++generation,currentScope=scope();result.value=null;error.value='';notice.value=''

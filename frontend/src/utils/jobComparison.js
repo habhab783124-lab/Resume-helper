@@ -4,6 +4,30 @@ export const COMPARISON_PREFERENCES = [
   {value:'salary',label:'薪资优先'}, {value:'skills',label:'技能贴合优先'}
 ]
 
+const emptyComparisonText=new Set(['未披露','未提供','未说明','未知','待确认','暂无','未记录','面议','—','--','-','/','n/a'])
+function hasComparisonValue(value){
+  if(Array.isArray(value))return value.some(hasComparisonValue)
+  if(typeof value==='string')return !!value.trim()&&!emptyComparisonText.has(value.trim().toLowerCase())
+  return value!=null
+}
+
+/** Hide an information row only when every selected job has no meaningful value. */
+export function getComparisonRowVisibility(items=[]){
+  const has=value=>items.some(item=>hasComparisonValue(value(item)))
+  return {
+    fields:['place','salary','experience','education'].filter(key=>has(item=>key==='salary'
+      ?[item.job[key],item.salaryMin,item.salaryMax]:item.job[key])),
+    dimensions:(items[0]?.dimensions||[]).map((_,index)=>index)
+      .filter(index=>has(item=>item.dimensions?.[index]?.points)),
+    score:has(item=>item.score),
+    requiredSkills:has(item=>item.requiredSkills),
+    evidencedSkills:has(item=>item.evidencedSkills),
+    unrepresentedSkills:has(item=>item.unrepresentedSkills),
+    source:has(item=>[item.job.sourceName,item.job.collectedAt,item.job.sourceUrl]),
+    details:has(item=>[item.job.description,item.notes])
+  }
+}
+
 /** Store only selection labels/IDs, scoped to an account and backend. Storage failure keeps this tab usable. */
 export function createComparisonSelection(getScope, getStorage) {
   let scope=null,items=[]
