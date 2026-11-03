@@ -5,30 +5,31 @@ title ShiJie Resume Helper - Start All
 cd /d "%~dp0"
 set "ROOT=%~dp0"
 
+REM Prefer project-local tools when installed; no system PATH changes needed.
+for /d %%D in ("%ROOT%.runtime\ffmpeg-*") do if exist "%%~fD\bin\ffmpeg.exe" (
+    set "FFMPEG_PATH=%%~fD\bin\ffmpeg.exe"
+    set "FFPROBE_PATH=%%~fD\bin\ffprobe.exe"
+)
+if exist "%ROOT%.runtime\maven" set "MAVEN_USER_HOME=%ROOT%.runtime\maven"
+
 echo ============================================================
 echo   ShiJie Resume Helper  -  Start Backend + Frontend
 echo ============================================================
 echo.
 
 REM ---------------------------------------------------------------- environment
-where java >nul 2>&1
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%tools\ensure-java.ps1" -ProjectRoot "%CD%"
 if errorlevel 1 (
-    echo [ERROR] Java not found. Install JDK 17+ and add it to PATH.
     pause
     exit /b 1
 )
-where node >nul 2>&1
+call "%ROOT%.runtime\java-env.cmd"
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%tools\ensure-node.ps1" -ProjectRoot "%CD%"
 if errorlevel 1 (
-    echo [ERROR] Node.js not found. Install Node 18+ and add it to PATH.
     pause
     exit /b 1
 )
-where npm.cmd >nul 2>&1
-if errorlevel 1 (
-    echo [ERROR] npm.cmd not found. Install Node.js 18+.
-    pause
-    exit /b 1
-)
+call "%ROOT%.runtime\node-env.cmd"
 if not exist "%ROOT%backend\mvnw.cmd" (
     echo [ERROR] backend\mvnw.cmd not found. Run this file from the repo root.
     pause
@@ -39,6 +40,14 @@ if not exist "%ROOT%frontend\package.json" (
     pause
     exit /b 1
 )
+
+REM ---------------------------------------------------------------- install speech tools once
+powershell.exe -NoProfile -ExecutionPolicy Bypass -File "%ROOT%tools\ensure-speech-tools.ps1" -ProjectRoot "%CD%"
+if errorlevel 1 (
+    pause
+    exit /b 1
+)
+call "%ROOT%.runtime\speech-tools.cmd"
 
 REM ---------------------------------------------------------------- install frontend deps once
 if not exist "%ROOT%frontend\node_modules\vite" (

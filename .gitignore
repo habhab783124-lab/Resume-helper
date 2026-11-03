@@ -51,3 +51,5 @@ Desktop.ini
 # 本机代码索引产物（可再生，不进仓库）
 .codegraph/
 *.pdf
+# Local portable runtime
+.runtime/

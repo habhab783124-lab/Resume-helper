@@ -33,6 +33,8 @@
 
 ## 运行
 
+Windows 可直接双击根目录的 `启动项目.cmd`（自动准备所需运行环境）。脚本会验证 `JAVA_HOME`、PATH 和 `.runtime` 中是否有可运行的 JDK 17+（只有游戏用的 JRE 不够）；找不到时自动从 Eclipse Adoptium 下载 Temurin JDK 17，校验 SHA-256 后解压到 `.runtime`。脚本还会检查 Node.js 24+ 和 npm，缺少或版本过低时从 Node.js 官网下载便携版并校验 SHA-256。脚本也会检测 FFmpeg 和 FFprobe；缺少任意一个时，从 Gyan 下载 Windows 64 位 essentials 包并解压到 `.runtime`。这些工具自动传给后端，无需修改系统 PATH 或管理员权限。首次下载需要联网，后续启动复用已安装的工具。下载失败会显示错误并停止，解决网络问题后重新运行即可。语音识别仍需在设置页填写具有 ASR 权限的语音密钥。
+
 ```bash
 # 后端（JDK 17；仓库自带 Maven Wrapper，首次运行会自动下载 Maven）
 cd backend
