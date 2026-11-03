@@ -156,7 +156,7 @@ public class JobController {
     @GetMapping("/{id}")
     public ApiResponse<JobViews.JobCard> detail(@PathVariable String id,
                                                 @RequestParam(required = false) String userId, HttpServletRequest http) {
-        return imports.find(UserContext.resolve(http), id).or(() -> jobService.find(id))
+        return ownedJob(UserContext.resolve(http), id)
                 .map(job -> ApiResponse.ok(JobViews.JobCard.ofDetailed(job,
                         jobService.isSaved(UserContext.resolve(http), job.id()))))
                 .orElseGet(() -> ApiResponse.fail("没有找到该岗位，可能已过期，请重新搜索"));
@@ -171,7 +171,7 @@ public class JobController {
     public ApiResponse<JobViews.MatchDetail> match(@PathVariable String id,
                                                    @RequestBody(required = false) JobRequests.Match request,
                                                    HttpServletRequest http) {
-        Job job = imports.find(UserContext.resolve(http), id).or(() -> jobService.find(id)).orElse(null);
+        Job job = ownedJob(UserContext.resolve(http), id).orElse(null);
         if (job == null) {
             return ApiResponse.fail("没有找到该岗位，可能已过期，请重新搜索");
         }
@@ -191,7 +191,9 @@ public class JobController {
     @PostMapping("/{id}/favorite")
     public ApiResponse<Boolean> favorite(@PathVariable String id,
                                          @RequestParam(required = false) String userId, HttpServletRequest http) {
-        return ApiResponse.ok(jobService.save(UserContext.resolve(http), id), "已收藏");
+        String owner = UserContext.resolve(http);
+        if (ownedJob(owner, id).isEmpty()) return ApiResponse.fail("没有找到该岗位，请重新搜索或导入");
+        return ApiResponse.ok(jobService.save(owner, id), "已收藏");
     }
 
     @DeleteMapping("/{id}/favorite")
@@ -213,6 +215,10 @@ public class JobController {
     }
 
     // ------------------------------------------------------------ 内部
+
+    private java.util.Optional<Job> ownedJob(String owner, String id) {
+        return id != null && id.startsWith("imported-") ? imports.find(owner, id) : jobService.find(id);
+    }
 
     private JobViews.JobList runSearch(ProfileDto profile, JobRequests.Search request,
                                        HttpServletRequest http, String userId) {

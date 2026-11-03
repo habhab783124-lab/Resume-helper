@@ -43,6 +43,11 @@ public class ProfileDto {
     private String summary;
     /** 项目 / 实习经历摘要，每条一段。用于抽取技能和生成匹配解释。 */
     private List<String> experiences;
+    /** Confirmed project evidence used by job comparison. */
+    private List<String> projects;
+
+    public List<String> getProjects() { return projects; }
+    public void setProjects(List<String> projects) { this.projects = projects; }
 
     public UserProfileSnapshot toSnapshot() {
         return UserProfileSnapshot.builder()
@@ -57,6 +62,7 @@ public class ProfileDto {
                 .expectedSalary(expectedSalary)
                 .summary(summary)
                 .experiences(experiences)
+                .projects(projects)
                 .build();
     }
 

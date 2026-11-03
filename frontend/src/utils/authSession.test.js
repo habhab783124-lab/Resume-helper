@@ -5,6 +5,7 @@ import {
   getAuthSession,
   getAuthToken,
   getAuthUser,
+  onAuthReset,
   saveAuthSession
 } from './authSession.js'
 
@@ -24,6 +25,28 @@ globalThis.window = { localStorage: local, sessionStorage: session }
 
 const SESSION_KEY = 'resume-helper-auth-session'
 const LEGACY_KEY = 'resume-helper-demo-session'
+
+test('account changes and logout notify scoped UI state, same-account renewal retains it', () => {
+  clearAuthSession()
+  let resets = 0
+  const unsubscribe = onAuthReset(() => { resets++ })
+  try {
+    saveAuthSession(payload())
+    assert.equal(resets, 1)
+    saveAuthSession(payload())
+    assert.equal(resets, 1)
+    saveAuthSession(payload({ user: { id: 'other-user' } }))
+    assert.equal(resets, 2)
+    clearAuthSession()
+    assert.equal(resets, 3)
+    unsubscribe()
+    clearAuthSession()
+    assert.equal(resets, 3)
+  } finally {
+    unsubscribe()
+    clearAuthSession()
+  }
+})
 
 test.beforeEach(() => {
   local.clear()

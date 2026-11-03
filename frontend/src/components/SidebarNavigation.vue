@@ -52,6 +52,8 @@ const workspaceItems = [
 const toolItems = [
   { path: '/resume', label: '简历工作台', icon: 'i-file' },
   { path: '/jobs', label: '岗位匹配', icon: 'i-briefcase' },
+  { path: '/jobs/compare', label: '岗位对比', icon: 'i-chart' },
+  { path: '/applications', label: '收藏与投递管理', icon: 'i-clock' },
   { path: '/interview', label: '模拟面试', icon: 'i-mic' },
   { path: '/interview/history', label: '面试历史', icon: 'i-clock' },
   { path: '/report', label: '面试报告', icon: 'i-chart' }

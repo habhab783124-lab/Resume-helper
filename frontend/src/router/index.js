@@ -4,6 +4,8 @@ import Dashboard from '../views/Dashboard.vue'
 import Interview from '../views/Interview.vue'
 import InterviewHistory from '../views/InterviewHistory.vue'
 import Jobs from '../views/Jobs.vue'
+import JobComparison from '../views/JobComparison.vue'
+import Applications from '../views/Applications.vue'
 import Login from '../views/Login.vue'
 import Materials from '../views/Materials.vue'
 import Profile from '../views/Profile.vue'
@@ -25,6 +27,8 @@ const routes = [
       { path: 'materials', name: 'Materials', component: Materials, meta: { title: '材料整理' } },
       { path: 'resume', name: 'Resume', component: Resume, meta: { title: '简历工作台' } },
       { path: 'jobs', name: 'Jobs', component: Jobs, meta: { title: '岗位匹配' } },
+      { path: 'jobs/compare', name: 'JobComparison', component: JobComparison, meta: { title: '岗位对比' } },
+      { path: 'applications', name: 'Applications', component: Applications, meta: { title: '收藏与投递管理' } },
       { path: 'interview', name: 'Interview', component: Interview, meta: { title: '模拟面试' } },
       { path: 'interview/history', name: 'InterviewHistory', component: InterviewHistory, meta: { title: '面试历史' } },
       { path: 'report', name: 'Report', component: Report, meta: { title: '面试报告' } },

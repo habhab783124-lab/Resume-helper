@@ -2,6 +2,7 @@ package com.shijie.resumehelper.job.store;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shijie.resumehelper.common.util.SafePaths;
+import com.shijie.resumehelper.common.util.AtomicJsonFiles;
 import com.shijie.resumehelper.job.domain.Job;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
@@ -10,7 +11,6 @@ import java.io.IOException;
 import java.io.UncheckedIOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.StandardCopyOption;
 import java.util.Comparator;
 import java.util.List;
 import java.util.Optional;
@@ -27,14 +27,12 @@ public class ImportedJobStore {
     }
 
     public synchronized void save(String userId, Job job) {
+        if (job == null || !job.id().matches("imported-[a-f0-9]{64}")) {
+            throw new IllegalArgumentException("导入岗位标识无效");
+        }
         Path directory = directory(userId);
         try {
-            Files.createDirectories(directory);
-            Path temporary = Files.createTempFile(directory, "import-", ".tmp");
-            try {
-                mapper.writeValue(temporary.toFile(), job);
-                Files.move(temporary, directory.resolve(job.id() + ".json"), StandardCopyOption.REPLACE_EXISTING);
-            } finally { Files.deleteIfExists(temporary); }
+            AtomicJsonFiles.write(mapper, directory.resolve(job.id() + ".json"), job);
         } catch (IOException e) { throw new UncheckedIOException("保存导入岗位失败，请重试", e); }
     }
 

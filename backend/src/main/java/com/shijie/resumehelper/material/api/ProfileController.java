@@ -65,7 +65,7 @@ public class ProfileController {
         UserProfileSnapshot profile = new UserProfileSnapshot(
                 resolved, body.targetTitle(), body.targetCities(), body.yearsOfExperience(),
                 body.education(), body.educations(), body.skills(), body.industries(),
-                body.expectedSalary(), body.summary(), body.experiences());
+                body.expectedSalary(), body.summary(), body.experiences(), body.projects());
         service.saveProfile(resolved, profile);
         return ApiResponse.ok(profile, "求职画像已保存");
     }

@@ -11,6 +11,16 @@ const SESSION_KEY = 'resume-helper-auth-session'
 const LEGACY_DEMO_KEY = 'resume-helper-demo-session'
 
 let transientSession = null
+const resetListeners = new Set()
+
+/** Account-scoped UI state (such as job comparison) must be discarded on logout. */
+export function onAuthReset(listener) {
+  resetListeners.add(listener)
+  return () => resetListeners.delete(listener)
+}
+function notifyAuthReset() {
+  for (const listener of resetListeners) listener()
+}
 
 function readSession(storage) {
   try {
@@ -86,6 +96,7 @@ export function isAuthenticated() {
  * @param {boolean} remember true 写 localStorage，false 只写 sessionStorage
  */
 export function saveAuthSession(payload, remember = true) {
+  if (getAuthUser()?.id !== payload.user?.id) notifyAuthReset()
   const session = {
     token: payload.token,
     expiresAt: payload.expiresAt || '',
@@ -111,6 +122,7 @@ export function saveAuthSession(payload, remember = true) {
 }
 
 export function clearAuthSession() {
+  notifyAuthReset()
   transientSession = null
   try {
     window.localStorage.removeItem(SESSION_KEY)

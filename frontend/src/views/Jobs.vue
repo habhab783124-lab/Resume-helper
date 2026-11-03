@@ -53,9 +53,11 @@
               <div v-if="job.tags && job.tags.length" class="job-tags"><span v-for="tag in job.tags" :key="tag">{{ tag }}</span></div>
               <div v-if="job.reason" class="job-reason"><svg><use href="#i-spark"/></svg><span>{{ job.reason }}</span></div>
               <div v-if="job.gaps && job.gaps.length" class="job-gap">待补强：{{ job.gaps[0] }}</div>
+              <JobComparisonButton :job="job" />
               <div class="job-card-bottom">
                 <span class="job-salary">{{ job.salary }} <small>· 月薪</small></span>
                 <button class="job-card-action" :class="{ 'is-saved': job.saved }" type="button" @click="toggleFavorite(job)">{{ job.saved ? '已收藏' : '收藏岗位' }} <svg><use href="#i-arrow"/></svg></button>
+                <button class="job-card-action" type="button" :disabled="creatingApplication" @click="trackApplication(job)">加入投递管理 <svg><use href="#i-arrow"/></svg></button>
                 <button class="job-card-action" type="button" @click="startInterviewForJob(job)">用这个岗位练习面试 <svg><use href="#i-arrow"/></svg></button>
               </div>
             </article>
@@ -71,6 +73,8 @@
 <script setup>
 import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useRouter } from 'vue-router'
+import JobComparisonButton from '../components/JobComparisonButton.vue'
+import { createApplication } from '../api/applications'
 import { addFavorite, fetchSources, importJob, matchJob, removeFavorite, runJobAgent, searchJobs } from '../api/jobs'
 import { newInterviewRoute } from '../interview/interviewNavigation.js'
 import { getAiKey, setAiKey } from '../api/client'
@@ -82,6 +86,20 @@ const SCORE_NOTICE_FALLBACK = '匹配度是资料贴合参考，不代表录取�
 
 const profile = ref(getProfile())
 const router = useRouter()
+const creatingApplication = ref(false)
+
+async function trackApplication(job) {
+  if (creatingApplication.value) return
+  creatingApplication.value = true
+  try {
+    const value = await createApplication({ jobId: job.id })
+    router.push({ name: 'Applications', query: { id: value.id } })
+  } catch (cause) {
+    error.value = cause.message || '创建投递记录失败'
+  } finally {
+    creatingApplication.value = false
+  }
+}
 
 function startInterviewForJob(job) {
   if (job?.id) router.push(newInterviewRoute({ jobId: String(job.id) }))

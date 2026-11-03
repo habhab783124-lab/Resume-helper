@@ -12,7 +12,8 @@ import java.util.Optional;
  * <p>检索出来的岗位是易失的（每次请求重新拉取），但前端点进详情、
  * 点收藏都需要按 id 再取一次，所以需要一层存储。
  *
- * <p>当前提供 {@link InMemoryJobStore}（进程内，重启即失）。
+ * <p>运行时使用 {@link FileSystemJobStore} 保存公开岗位快照和按账号隔离的收藏。
+ * {@link InMemoryJobStore} 用于缓存和隔离测试。
  * 按产品方案 5，正式实现应换成 MySQL：表结构见 {@code src/main/resources/db/schema.sql}
  * 的 {@code job} 与 {@code job_favorite}，实现本接口即可无缝替换。
  */

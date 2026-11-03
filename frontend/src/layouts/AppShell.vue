@@ -5,6 +5,7 @@
       <TopBar :title="route.meta.title || '工作台'" />
       <div class="content-wrap" @click="navigateFromContent">
         <RouterView />
+        <JobComparisonTray />
       </div>
     </main>
   </div>
@@ -14,6 +15,7 @@
 import { useRoute, useRouter } from 'vue-router'
 import SidebarNavigation from '../components/SidebarNavigation.vue'
 import TopBar from '../components/TopBar.vue'
+import JobComparisonTray from '../components/JobComparisonTray.vue'
 
 const route = useRoute()
 const router = useRouter()

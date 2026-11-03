@@ -123,21 +123,20 @@ public final class TextKit {
         if (text.isBlank() || text.contains("面议") || text.contains("薪资面议")) {
             return new int[]{-1, -1};
         }
-        List<Double> numbers = new ArrayList<>();
-        Matcher m = NUMBER.matcher(text);
-        while (m.find()) {
-            numbers.add(Double.parseDouble(m.group()));
-        }
-        if (numbers.isEmpty()) {
+        // Match the pay range only: “15-22K·13薪” must not include the 13.
+        Matcher m = Pattern.compile("(\\d+(?:\\.\\d+)?)\\s*([Kk千万]?)\\s*(?:[-–—~～至到]\\s*(\\d+(?:\\.\\d+)?)\\s*([Kk千万]?))?\\s*(元)?").matcher(text);
+        if (!m.find()) {
             return new int[]{-1, -1};
         }
-        double factor = 1.0;
-        if (text.contains("万")) {
-            // 月薪 2 万 -> 20 千；年薪 24 万 -> 20 千/月
-            factor = text.contains("年") ? 10.0 / 12.0 : 10.0;
-        }
-        int min = (int) Math.round(numbers.get(0) * factor);
-        int max = numbers.size() > 1 ? (int) Math.round(numbers.get(1) * factor) : min;
+        double lower = Double.parseDouble(m.group(1));
+        double upper = m.group(3) == null ? lower : Double.parseDouble(m.group(3));
+        String unit = m.group(4) == null || m.group(4).isEmpty() ? m.group(2) : m.group(4);
+        double factor = unit.equals("万") ? 10 : !unit.isEmpty() ? 1
+                : m.group(5) != null || lower >= 1000 ? 0.001 : 1;
+        if (text.matches(".*(?:/\\s*年|年薪|每年).*")) factor /= 12;
+        else if (text.matches(".*(?:/\\s*[天日]|日薪|每天|每日).*")) factor *= 21.75;
+        int min = (int) Math.round(lower * factor);
+        int max = (int) Math.round(upper * factor);
         if (min > max) {
             int tmp = min;
             min = max;

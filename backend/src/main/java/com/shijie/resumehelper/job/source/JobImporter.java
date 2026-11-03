@@ -72,8 +72,10 @@ public final class JobImporter {
             }
         }
         String head = lines.isEmpty() ? "" : String.join(" ", lines.subList(0, Math.min(6, lines.size())));
-        String city = detectCity(rawText);
-        if (city.isEmpty()) {
+        String location = firstMatch(Pattern.compile("(?:工作地点|办公地点|工作城市|工作地址)\\s*[:：]\\s*([^\\r\\n]+)"), rawText);
+        String city = detectCity(location);
+        if (city.isEmpty() && location.isEmpty()) city = detectCity(rawText);
+        if (city.isEmpty() && location.isEmpty()) {
             city = detectCity(head);
         }
         String district = detectDistrict(rawText, city);
@@ -97,12 +99,14 @@ public final class JobImporter {
     }
 
     private static String detectCity(String text) {
+        // Preserve multiple explicitly listed locations rather than dictionary precedence.
+        List<String> found = new ArrayList<>();
         for (String city : CITIES) {
             if (text.contains(city)) {
-                return city;
+                found.add(city);
             }
         }
-        return "";
+        return String.join("、", found);
     }
 
     /**

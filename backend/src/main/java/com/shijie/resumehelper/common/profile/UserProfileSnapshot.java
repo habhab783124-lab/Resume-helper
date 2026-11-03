@@ -27,7 +27,16 @@ public record UserProfileSnapshot(
         List<String> industries,
         String expectedSalary,
         String summary,
-        List<String> experiences) {
+        List<String> experiences,
+        List<String> projects) {
+
+    /** Compatibility with existing module constructors and older saved profiles. */
+    public UserProfileSnapshot(String userId, String targetTitle, List<String> targetCities,
+            Integer yearsOfExperience, String education, List<String> educations, List<String> skills,
+            List<String> industries, String expectedSalary, String summary, List<String> experiences) {
+        this(userId, targetTitle, targetCities, yearsOfExperience, education, educations, skills,
+                industries, expectedSalary, summary, experiences, List.of());
+    }
 
     public UserProfileSnapshot {
         userId = TextKit.orEmpty(userId);
@@ -41,11 +50,12 @@ public record UserProfileSnapshot(
         expectedSalary = TextKit.trim(expectedSalary);
         summary = TextKit.orEmpty(summary);
         experiences = experiences == null ? List.of() : List.copyOf(experiences);
+        projects = projects == null ? List.of() : List.copyOf(projects);
     }
 
     /** 画像是否信息量足够，可以跑智能体检索。 */
     public boolean isUsable() {
-        return !targetTitle.isEmpty() || !skills.isEmpty() || !experiences.isEmpty() || !summary.isEmpty();
+        return !targetTitle.isEmpty() || !skills.isEmpty() || !experiences.isEmpty() || !projects.isEmpty() || !summary.isEmpty();
     }
 
     /** 把所有文本拼成一段，供关键词抽取和技能识别使用。 */
@@ -55,7 +65,8 @@ public record UserProfileSnapshot(
                 String.join(" ", skills),
                 String.join(" ", industries),
                 summary,
-                String.join("\n", experiences));
+                String.join("\n", experiences),
+                String.join("\n", projects));
     }
 
     /** 目标城市的第一个，作为默认检索城市。 */
@@ -84,6 +95,7 @@ public record UserProfileSnapshot(
         private String expectedSalary;
         private String summary;
         private List<String> experiences = new ArrayList<>();
+        private List<String> projects = new ArrayList<>();
 
         public Builder userId(String v) {
             this.userId = v;
@@ -162,9 +174,14 @@ public record UserProfileSnapshot(
             return this;
         }
 
+        public Builder projects(List<String> v) {
+            this.projects = v == null ? new ArrayList<>() : new ArrayList<>(v);
+            return this;
+        }
+
         public UserProfileSnapshot build() {
             return new UserProfileSnapshot(userId, targetTitle, targetCities, yearsOfExperience, education,
-                    educations, skills, industries, expectedSalary, summary, experiences);
+                    educations, skills, industries, expectedSalary, summary, experiences, projects);
         }
     }
 }

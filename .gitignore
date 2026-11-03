@@ -2,6 +2,9 @@
 node_modules/
 .pnpm-store/
 
+# Local test evidence (screenshots, synthetic storage and logs)
+verification/
+
 # Build artifacts
 dist/
 dist-ssr/

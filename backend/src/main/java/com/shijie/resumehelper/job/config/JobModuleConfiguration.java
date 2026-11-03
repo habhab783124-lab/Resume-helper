@@ -11,7 +11,8 @@ import com.shijie.resumehelper.job.source.TencentJobSource;
 import com.shijie.resumehelper.job.source.NetEaseJobSource;
 import com.shijie.resumehelper.job.source.TavilyJobSource;
 import org.springframework.beans.factory.annotation.Value;
-import com.shijie.resumehelper.job.store.InMemoryJobStore;
+import com.shijie.resumehelper.job.store.FileSystemJobStore;
+import com.fasterxml.jackson.databind.ObjectMapper;
 import com.shijie.resumehelper.job.store.JobStore;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -38,8 +39,9 @@ public class JobModuleConfiguration {
     private static final Logger log = LoggerFactory.getLogger(JobModuleConfiguration.class);
 
     @Bean
-    public JobStore jobStore() {
-        return new InMemoryJobStore();
+    public JobStore jobStore(@Value("${app.job.storage-dir:./data/jobs}") String directory,
+                             ObjectMapper mapper) {
+        return new FileSystemJobStore(directory, mapper);
     }
 
     @Bean

@@ -9,7 +9,7 @@ import { getAiSettings, setAiSettings, getLocalApiBaseUrl, getUserId, getAuthTok
  *  - **部署到 Vercel**：用户可在「本地服务设置」里配置自己电脑上的 Java 服务；浏览器中的
  *    `localhost` 指向当前访问者的电脑。需要多人共用时，再通过 `VITE_API_BASE_URL` 配公网后端。
  */
-const configuredBaseURL = import.meta.env.VITE_API_BASE_URL || (import.meta.env.PROD ? 'http://localhost:8080' : '')
+const configuredBaseURL = import.meta.env.VITE_API_BASE_URL || ''
 function getEffectiveBaseURL() {
   return getLocalApiBaseUrl() || configuredBaseURL
 }

@@ -8,7 +8,7 @@
         <input type="search" placeholder="搜索岗位、简历…" aria-label="搜索岗位或简历" />
         <kbd>Ctrl K</kbd>
       </label>
-      <button class="icon-button notification-button" type="button" aria-label="通知"><svg><use href="#i-bell" /></svg></button>
+      <RouterLink class="icon-button notification-button" to="/applications?due=1" aria-label="查看投递到期待办" title="投递到期待办"><svg><use href="#i-bell" /></svg></RouterLink>
       <RouterLink to="/profile" class="user-chip"><span class="avatar">{{ avatarChar }}</span><span class="user-chip-name">{{ displayName }}</span><svg><use href="#i-chevron" /></svg></RouterLink>
       <button class="topbar-logout" type="button" @click="logout">退出</button>
     </div>
